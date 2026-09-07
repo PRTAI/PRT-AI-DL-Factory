@@ -14,26 +14,48 @@ scripts/start_backend.sh            # 0.0.0.0:8000，同时提供 API 与前端
 
 ## 2. 训练框架
 
-各框架依赖冲突严重，建议一框架一环境，然后在 `backend/.env` 里指向对应解释器：
+各框架依赖冲突严重（三者的 torch / transformers 版本互不兼容），必须一框架一环境，
+再在 `backend/.env` 里指向对应解释器。本机已按下面的方式装好：
 
 ```bash
-conda create -n lf python=3.11 && conda activate lf
-pip install -e /workspace/LiHanlin_Workspace/github/LlamaFactory[torch,metrics]
+# LLaMA-Factory —— 构建后端不写源码目录，可直接可编辑安装
+conda create -y -n llamafactory python=3.11 && conda activate llamafactory
+pip install -e /workspace/LiHanlin_Workspace/github/LlamaFactory
 
-conda create -n verl python=3.11 && conda activate verl
-pip install -e /workspace/LiHanlin_Workspace/github/verl   # 另需 vllm / ray
+# TRL / verl —— github/ 下的检出是 root 只读，`pip install -e` 会因为写不了
+# egg-info 而失败；平台本来就用 PYTHONPATH 指向检出运行，所以只装依赖即可
+conda create -y -n trl python=3.12 && conda activate trl
+python - <<'EOF' > /tmp/trl_deps.txt
+import tomllib, pathlib
+d = tomllib.loads(pathlib.Path('/workspace/LiHanlin_Workspace/github/trl/pyproject.toml').read_text())
+deps = list(d['project']['dependencies'])
+for extra in ('peft', 'liger', 'vllm'):
+    deps += d['project'].get('optional-dependencies', {}).get(extra, [])
+print("\n".join(dict.fromkeys(deps)))
+EOF
+pip install torch -r /tmp/trl_deps.txt
 
-conda create -n trl python=3.12 && conda activate trl
-pip install -e "/workspace/LiHanlin_Workspace/github/trl[vllm]"
+conda create -y -n verl python=3.12 && conda activate verl
+grep -vE '^\s*(#|$)|^pre-commit' /workspace/LiHanlin_Workspace/github/verl/requirements.txt > /tmp/verl_deps.txt
+printf 'torch\nvllm>=0.18.0\n' >> /tmp/verl_deps.txt
+pip install -r /tmp/verl_deps.txt
 ```
 
 ```ini
-PRT_LLAMAFACTORY_PYTHON=/home/user/.conda/envs/lf/bin/python
+PRT_LLAMAFACTORY_PYTHON=/home/user/.conda/envs/llamafactory/bin/python
 PRT_VERL_PYTHON=/home/user/.conda/envs/verl/bin/python
 PRT_TRL_PYTHON=/home/user/.conda/envs/trl/bin/python
 ```
 
-「平台管理 → 工具链」页面会显示每个解释器与源码目录是否可用。
+验证（平台就是这样启动它们的）：
+
+```bash
+PYTHONPATH=/workspace/LiHanlin_Workspace/github/trl \
+  /home/user/.conda/envs/trl/bin/python -c "import trl, torch; print(trl.__file__, torch.cuda.is_available())"
+```
+
+「平台管理 → 工具链」页面会用配置的解释器真正 import 一次框架与 torch，
+所以那一页显示绿色就等于任务真的能起来。
 
 ## 3. Harbor
 

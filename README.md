@@ -236,27 +236,35 @@ cd frontend && npm run build              # tsc + vite 构建
 
 ## 本机当前状态（2026-09-07 实测）
 
-| 组件 | 状态 |
-|---|---|
-| Harbor 0.22.0 + harbor-rewardkit 0.2.0 | ✅ 已 `pip install` 到独立 conda 环境 `harbor`，`backend/.env` 已指向它 |
-| LLaMA-Factory / verl / TRL | ⚠️ **源码在 `github/` 下，但任何 conda 环境里都没有装依赖**（全机器无 torch 的可用环境） |
-| Docker 守护进程 | ⚠️ 服务在跑，但当前用户不在 `docker` 组，Harbor 评测暂时无法启动容器 |
-| GPU | ✅ 1 × NVIDIA H800 80GB |
+| 组件 | 版本 | conda 环境 | 状态 |
+|---|---|---|---|
+| LLaMA-Factory | 0.9.6.dev0 | `llamafactory` | ✅ torch 2.14.0+cu130 / transformers 5.8.0 / trl 0.24.0 / peft 0.18.1 |
+| TRL | 1.10.0.dev0（检出） | `trl` | ✅ torch 2.11.0+cu130 / transformers 5.16.1 / vllm 0.26.0 / peft 0.20.0 |
+| verl | 0.9.0.dev | `verl` | ✅ torch 2.13.0+cu130 / transformers 5.10.4 / vllm 0.28.0 / ray 2.58.0 |
+| Harbor | 0.22.0 | `harbor` | ✅ 含 harbor-rewardkit 0.2.0 |
+| Docker 守护进程 | 26.0.0 | — | ⚠️ 服务在跑，但当前用户不在 `docker` 组，Harbor 评测无法启动容器 |
+| GPU | — | — | ✅ 1 × NVIDIA H800 80GB |
 
-补齐方式：
+`backend/.env` 已指向以上环境，「平台管理 → 工具链」会实时探测：
+它不只看命令是否存在，而是用配置的解释器真正 `import` 一次框架与 torch，并 ping 一次 docker。
+
+> **注意**：`github/` 下的四个检出目录都是 root 只读，所以 TRL 与 verl 采用
+> 「只装依赖、代码走 PYTHONPATH」的方式安装（平台本来就是这样启动它们的）；
+> LLaMA-Factory 的构建后端不需要写源码目录，装的是可编辑模式，同样指向该检出。
+
+唯一还需要你操作的一步 —— Docker 权限（Agent 评测的硬前提）：
 
 ```bash
-# 1) Docker 权限（评测的硬前提）
-sudo usermod -aG docker $USER && newgrp docker     # 或重新登录
-
-# 2) 三个训练框架各建一个环境，然后把解释器路径写进 backend/.env
-conda create -n llamafactory python=3.11 && conda activate llamafactory
-pip install -e "/workspace/LiHanlin_Workspace/github/LlamaFactory[torch,metrics]"
-# verl / trl 同理，见 docs/deployment.md
+sudo usermod -aG docker $USER && newgrp docker    # 或重新登录
+docker version                                    # 能打印 Server 版本即可
 ```
 
-「平台管理 → 工具链」页会实时探测这些组件：它不只看命令是否存在，
-还会用配置的解释器真正 `import` 一次框架与 torch，并 ping 一次 docker 守护进程。
+### 已实测跑通
+
+- **真实 LoRA SFT**：Qwen3.5-4B + LLaMA-Factory，通过平台提交 → 审核 → 排队 → 训练 → 产出
+  `adapter_model.safetensors` / `checkpoint-3`，loss 曲线与进度实时回填，退出码 0。
+- **Harbor 命令校验**：平台生成的 `harbor run …` 用真实 CLI `--print-config` 解析，
+  pass@k / 并发 / 任务过滤 / agent 与 verifier 环境变量全部落到预期字段上。
 
 ## 已知限制
 

@@ -164,3 +164,51 @@ def test_job_trials_parsing(tmp_path, monkeypatch):
     assert result["trials"][0]["reward"] == 0.0          # worst first
     assert result["trials"][-1]["exception_type"] == "AgentTimeoutError"
     assert result["trials"][0]["duration_seconds"] == 90.0
+
+
+def test_llamafactory_final_progress_record_keeps_last_values(tmp_path):
+    """LLaMA-Factory appends a progress-only record at train end.
+
+    Regression: taking "the last record" made last_loss/lr vanish the moment a
+    real run finished (observed on a live Qwen3.5-4B LoRA run).
+    """
+    (tmp_path / "trainer_log.jsonl").write_text(
+        "\n".join(
+            json.dumps(row)
+            for row in [
+                {"current_steps": 1, "total_steps": 3, "loss": 3.59, "lr": 0.0, "percentage": 33.33},
+                {"current_steps": 2, "total_steps": 3, "loss": 3.05, "lr": 1e-4, "percentage": 66.67},
+                {"current_steps": 3, "total_steps": 3, "loss": 2.85, "lr": 5e-5, "percentage": 100.0},
+                # final record: progress only, no loss / lr
+                {"current_steps": 3, "total_steps": 3, "epoch": 0.375, "percentage": 100.0},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    parsed = metrics_parser.parse_llamafactory(tmp_path)
+    assert parsed.summary.last_loss == 2.85
+    assert parsed.summary.best_loss == 2.85
+    assert parsed.summary.learning_rate == 5e-5
+    assert parsed.progress.percent == 100.0
+
+
+def test_trl_final_runtime_record_keeps_last_values(tmp_path):
+    output = tmp_path / "out"
+    output.mkdir()
+    (output / "trainer_state.json").write_text(
+        json.dumps(
+            {
+                "global_step": 20,
+                "max_steps": 20,
+                "log_history": [
+                    {"step": 10, "loss": 1.0, "learning_rate": 1e-6},
+                    {"step": 20, "loss": 0.6, "learning_rate": 5e-7},
+                    {"train_runtime": 12.5, "train_samples_per_second": 3.2},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    parsed = metrics_parser.parse_trl(output, tmp_path / "missing.log")
+    assert parsed.summary.last_loss == 0.6
+    assert parsed.summary.learning_rate == 5e-7

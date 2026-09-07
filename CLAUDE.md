@@ -43,6 +43,23 @@ python scripts/gen_framework_support.py
   组件里不要写死颜色，用 `bg-card` / `text-fg-muted` 这类语义类名，
   否则浅色主题会失效。
 
+## 本机环境（已装好，勿重复安装）
+
+| conda 环境 | 用途 | 关键版本 |
+|---|---|---|
+| `prt-ai-dl-factory` | 平台自身（FastAPI） | python 3.12，不含 torch |
+| `llamafactory` | SFT/DPO/KTO/ORPO/SimPO | torch 2.14+cu130, transformers 5.8.0（可编辑安装，指向检出） |
+| `trl` | TRL GRPO/GSPO/DPO | torch 2.11+cu130, transformers 5.16.1, vllm 0.26.0（只装依赖） |
+| `verl` | verl GRPO/DAPO/PPO | torch 2.13+cu130, transformers 5.10.4, vllm 0.28.0, ray 2.58.0（只装依赖） |
+| `harbor` | Harbor 评测 CLI | harbor 0.22.0 + harbor-rewardkit 0.2.0 |
+
+`github/` 下四个检出都是 **root 只读**：TRL / verl 不能 `pip install -e`（写不了 egg-info），
+所以只装依赖、代码通过 PYTHONPATH 指向检出——这正是平台启动它们的方式，不要改成从 PyPI 装框架本体，
+否则跑的就不是团队检出的那份代码了。
+
+Docker 守护进程在跑但当前用户不在 `docker` 组，Harbor 评测需要先
+`sudo usermod -aG docker $USER`。
+
 ## 已知的框架适配坑
 
 - Harbor 0.22：`--include-task-name`（不是 `--task-name`）、`--export-sharegpt`
@@ -56,6 +73,9 @@ python scripts/gen_framework_support.py
 - LLaMA-Factory 会在 `get_device_count() > 1` 时自动切 torchrun，
   所以多卡只需要设置 `FORCE_TORCHRUN` / `NPROC_PER_NODE`，不要自己拼 torchrun。
 - verl 只吃 parquet；Harbor 任务树做 RL 走 TRL 的 `trl.experimental.harbor.HarborSpec`。
+- LLaMA-Factory 训练结束时会**补写一条只有进度、没有 loss/lr 的记录**，解析摘要时必须取
+  「最后一个非空值」而不是「最后一条记录」（TRL 的 `train_runtime` 收尾记录同理），
+  已有回归测试 `test_llamafactory_final_progress_record_keeps_last_values`。
 
 ## 不要做的事
 

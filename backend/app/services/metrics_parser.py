@@ -81,6 +81,9 @@ def parse_llamafactory(output_dir: Path) -> ParsedMetrics:
         return parsed
 
     last: dict[str, Any] = {}
+    # LLaMA-Factory appends a final progress-only record (no loss/lr) when the
+    # run ends, so "the last record" is not the last *value* of each metric.
+    latest: dict[str, float] = {}
     losses: list[float] = []
     for line in _read_tail(log_path).splitlines():
         line = line.strip()
@@ -91,12 +94,11 @@ def parse_llamafactory(output_dir: Path) -> ParsedMetrics:
         except json.JSONDecodeError:
             continue
         step = record.get("current_steps", 0)
-        parsed.add("loss", step, record.get("loss"))
-        parsed.add("eval_loss", step, record.get("eval_loss"))
-        parsed.add("lr", step, record.get("lr"))
-        parsed.add("reward", step, record.get("reward"))
-        parsed.add("accuracy", step, record.get("accuracy"))
-        parsed.add("throughput", step, record.get("throughput"))
+        for key in ("loss", "eval_loss", "lr", "reward", "accuracy", "throughput"):
+            value = record.get(key)
+            parsed.add(key, step, value)
+            if isinstance(value, (int, float)):
+                latest[key] = float(value)
         if isinstance(record.get("loss"), (int, float)):
             losses.append(float(record["loss"]))
         last = record
@@ -114,11 +116,11 @@ def parse_llamafactory(output_dir: Path) -> ParsedMetrics:
             message=f"step {current}/{total}" if total else f"step {current}",
         )
         parsed.summary = JobMetricsSummary(
-            last_loss=last.get("loss"),
+            last_loss=latest.get("loss"),
             best_loss=min(losses) if losses else None,
-            last_reward=last.get("reward"),
-            learning_rate=last.get("lr"),
-            accuracy=last.get("accuracy"),
+            last_reward=latest.get("reward"),
+            learning_rate=latest.get("lr"),
+            accuracy=latest.get("accuracy"),
             tokens={"total": int(last["total_tokens"])} if last.get("total_tokens") else {},
             updated_at=utcnow(),
         )
@@ -226,6 +228,9 @@ def parse_trl(output_dir: Path, log_file: Path) -> ParsedMetrics:
     losses: list[float] = []
     rewards: list[float] = []
     last: dict[str, Any] = {}
+    # HF's final log entry only carries train_runtime/samples_per_second, so keep
+    # the last *observed* value of every metric rather than the last record's.
+    latest: dict[str, float] = {}
     for index, record in enumerate(history, start=1):
         step = record.get("step", index)
         for key, name in (
@@ -240,6 +245,8 @@ def parse_trl(output_dir: Path, log_file: Path) -> ParsedMetrics:
         ):
             if key in record:
                 parsed.add(name, step, record[key])
+                if isinstance(record[key], (int, float)):
+                    latest[key] = float(record[key])
         if isinstance(record.get("loss"), (int, float)):
             losses.append(float(record["loss"]))
         for reward_key in ("reward", "rewards/outcome_reward"):
@@ -256,12 +263,12 @@ def parse_trl(output_dir: Path, log_file: Path) -> ParsedMetrics:
             message=f"step {global_step}" + (f"/{max_steps}" if max_steps else ""),
         )
         parsed.summary = JobMetricsSummary(
-            last_loss=last.get("loss"),
+            last_loss=latest.get("loss"),
             best_loss=min(losses) if losses else None,
             last_reward=rewards[-1] if rewards else None,
             best_reward=max(rewards) if rewards else None,
-            learning_rate=last.get("learning_rate"),
-            grad_norm=last.get("grad_norm"),
+            learning_rate=latest.get("learning_rate"),
+            grad_norm=latest.get("grad_norm"),
             updated_at=utcnow(),
         )
     return parsed.finish()
