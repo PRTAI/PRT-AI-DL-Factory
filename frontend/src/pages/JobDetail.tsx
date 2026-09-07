@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft,
@@ -60,7 +60,15 @@ export default function JobDetail() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [tab, setTab] = React.useState('overview')
+  // Tab lives in the URL so links like /jobs/<id>?tab=logs are shareable.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = searchParams.get('tab') ?? 'overview'
+  const setTab = (next: string) => {
+    const params = new URLSearchParams(searchParams)
+    if (next === 'overview') params.delete('tab')
+    else params.set('tab', next)
+    setSearchParams(params, { replace: true })
+  }
   const [rejectOpen, setRejectOpen] = React.useState(false)
   const [rejectComment, setRejectComment] = React.useState('')
 

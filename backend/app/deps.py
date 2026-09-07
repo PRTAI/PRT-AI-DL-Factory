@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Query, Request, WebSocket, status
+from fastapi import Depends, HTTPException, Request, WebSocket, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .models import Role, User
@@ -47,12 +47,14 @@ async def get_current_admin(
     return user
 
 
-async def get_ws_user(
-    websocket: WebSocket,
-    token: Annotated[str | None, Query()] = None,
-) -> User | None:
-    """WebSocket clients cannot set headers, so the token arrives as a query param."""
-    if token is None:
+async def get_ws_user(websocket: WebSocket) -> User | None:
+    """Resolve the user of a WebSocket connection.
+
+    Browsers cannot attach headers to a WebSocket handshake, so the token comes
+    in as a query parameter; the header form is still accepted for CLI clients.
+    """
+    token = websocket.query_params.get("token")
+    if not token:
         auth = websocket.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
             token = auth[7:]

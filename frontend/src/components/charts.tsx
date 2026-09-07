@@ -108,7 +108,7 @@ export function LineSeriesChart({
   return (
     <div className={cn('w-full', className)} style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <LineChart data={data} margin={{ top: 8, right: hasRight ? 8 : 12, bottom: 4, left: -12 }}>
+        <LineChart data={data} margin={{ top: 8, right: hasRight ? 8 : 12, bottom: 4, left: 0 }}>
           <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey={xKey}
@@ -188,7 +188,7 @@ export function UtilizationChart({
   return (
     <div className={cn('w-full', className)} style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: -28 }}>
+        <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
           <defs>
             {series.map((item, index) => {
               const color = item.color ?? CHART_COLORS[index % CHART_COLORS.length]
@@ -202,7 +202,15 @@ export function UtilizationChart({
           </defs>
           <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
           <XAxis dataKey={xKey} tick={axisStyle()} tickLine={false} axisLine={false} minTickGap={40} tickFormatter={xFormatter as never} />
-          <YAxis domain={[0, 100]} ticks={[0, 50, 100]} tick={axisStyle()} tickLine={false} axisLine={false} width={40} />
+          <YAxis
+            domain={[0, 100]}
+            ticks={[0, 50, 100]}
+            tick={axisStyle()}
+            tickLine={false}
+            axisLine={false}
+            width={34}
+            tickFormatter={(value) => `${value}`}
+          />
           <Tooltip
             content={<TooltipContent labelFormatter={xFormatter} valueFormatter={(value) => `${value.toFixed(1)}%`} />}
             cursor={{ stroke: 'var(--border-strong)', strokeWidth: 1 }}
