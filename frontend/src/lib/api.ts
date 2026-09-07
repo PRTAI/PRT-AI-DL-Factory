@@ -86,10 +86,14 @@ function extractDetail(payload: unknown): string | null {
   const detail = (payload as { detail?: unknown }).detail
   if (typeof detail === 'string') return detail
   if (Array.isArray(detail)) {
+    // FastAPI 的校验错误形如 {loc: ['body','email'], msg: 'Value error, 邮箱格式不正确'}
+    // —— 这是给开发看的，用户只需要那句人话。
+    const clean = (msg: string) => String(msg).replace(/^(Value error|Assertion failed),\s*/i, '')
+    if (detail.length === 1) return clean(detail[0]?.msg ?? '')
     return detail
       .map((item) => {
         const location = Array.isArray(item?.loc) ? item.loc.slice(1).join('.') : ''
-        return location ? `${location}: ${item.msg}` : item.msg
+        return location ? `${location}: ${clean(item.msg)}` : clean(item.msg)
       })
       .join('；')
   }

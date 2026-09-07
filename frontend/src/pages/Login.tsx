@@ -97,7 +97,12 @@ export default function Login() {
           <p className="mt-1 text-xs text-fg-muted">账号由管理员统一创建，使用邮箱登录。</p>
 
           <form className="mt-6 space-y-4" onSubmit={submit}>
-            <Field label="邮箱" htmlFor="email" required>
+            <Field
+              label="邮箱"
+              htmlFor="email"
+              required
+              hint="请填写完整邮箱地址（不是用户名），例如 someone@team.com"
+            >
               <div className="relative">
                 <Mail className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle" aria-hidden />
                 <Input
@@ -108,6 +113,7 @@ export default function Login() {
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
                   placeholder="you@team.com"
+                  autoFocus
                   className="pl-8"
                 />
               </div>
