@@ -111,6 +111,13 @@ export default function JobDetail() {
     enabled: Boolean(jobId) && tab === 'artifacts',
   })
 
+  const trials = useQuery({
+    queryKey: ['job-trials', jobId],
+    queryFn: () => api.jobTrials(jobId!),
+    enabled: Boolean(jobId) && tab === 'trials' && job.data?.type === 'verify',
+    refetchInterval: isActive ? 15000 : false,
+  })
+
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['job', jobId] })
     queryClient.invalidateQueries({ queryKey: ['jobs'] })
@@ -325,6 +332,7 @@ export default function JobDetail() {
           <TabsTrigger value="overview">概览</TabsTrigger>
           <TabsTrigger value="logs">实时日志</TabsTrigger>
           <TabsTrigger value="metrics">指标曲线</TabsTrigger>
+          {data.type === 'verify' && <TabsTrigger value="trials">Trial 明细</TabsTrigger>}
           <TabsTrigger value="config">配置与命令</TabsTrigger>
           <TabsTrigger value="artifacts">产物</TabsTrigger>
         </TabsList>
@@ -371,6 +379,76 @@ export default function JobDetail() {
 
         <TabsContent value="metrics" className="mt-3">
           <MetricsPanel jobType={data.type} payload={metrics.data} loading={metrics.isLoading} />
+        </TabsContent>
+
+        <TabsContent value="trials" className="mt-3">
+          <Card>
+            <CardHeader
+              title="Trial 明细"
+              description={
+                trials.data
+                  ? `${trials.data.total} 个 trial · 通过 ${trials.data.resolved} · 异常 ${trials.data.errored}（按 reward 从低到高排序，便于定位失败）`
+                  : '解析 Harbor 的 trial 结果'
+              }
+              actions={trials.data && <CopyButton value={trials.data.job_dir} label="复制结果目录" />}
+            />
+            {trials.isLoading ? (
+              <CardBody>
+                <Skeleton className="h-40 w-full" />
+              </CardBody>
+            ) : trials.data?.trials.length ? (
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>任务</Th>
+                    <Th className="w-24">reward</Th>
+                    <Th className="w-28">耗时</Th>
+                    <Th className="w-40">Agent / 模型</Th>
+                    <Th>异常</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trials.data.trials.map((trial) => (
+                    <Tr key={trial.trial_name}>
+                      <Td>
+                        <div className="num text-xs font-medium">{trial.task_name}</div>
+                        <div className="num truncate text-[11px] text-fg-subtle">{trial.trial_name}</div>
+                      </Td>
+                      <Td>
+                        {trial.reward === null ? (
+                          <Badge tone="neutral">无</Badge>
+                        ) : (
+                          <Badge tone={trial.reward >= 1 ? 'success' : trial.reward > 0 ? 'warning' : 'danger'}>
+                            {trial.reward.toFixed(2)}
+                          </Badge>
+                        )}
+                      </Td>
+                      <Td className="num text-xs text-fg-muted">{formatDuration(trial.duration_seconds)}</Td>
+                      <Td className="text-[11px] text-fg-muted">
+                        <div>{trial.agent}</div>
+                        <div className="truncate text-fg-subtle">{trial.model}</div>
+                      </Td>
+                      <Td className="text-[11px]">
+                        {trial.exception_type ? (
+                          <>
+                            <Badge tone="danger">{trial.exception_type}</Badge>
+                            <div className="mt-0.5 line-clamp-2 text-fg-muted">{trial.exception_message}</div>
+                          </>
+                        ) : (
+                          <span className="text-fg-subtle">—</span>
+                        )}
+                      </Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </Table>
+            ) : (
+              <EmptyState
+                title="还没有 trial 结果"
+                description="Harbor 会在每个 trial 结束后写入 results.json，这里会自动刷新。"
+              />
+            )}
+          </Card>
         </TabsContent>
 
         <TabsContent value="config" className="mt-3">
@@ -467,6 +545,7 @@ export default function JobDetail() {
                     <Th className="w-24">类型</Th>
                     <Th className="w-28">大小</Th>
                     <Th className="w-44">修改时间</Th>
+                    <Th className="w-28">操作</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -478,6 +557,26 @@ export default function JobDetail() {
                       </Td>
                       <Td className="num text-xs">{item.is_dir ? '—' : formatBytes(item.size_bytes)}</Td>
                       <Td className="text-xs text-fg-muted">{formatDateTime(item.modified_at)}</Td>
+                      <Td>
+                        {item.is_dir ? (
+                          <CopyButton value={item.path} label="复制路径" />
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                await api.downloadArtifact(data.id, item.name)
+                              } catch (exception) {
+                                toast.error(exception instanceof ApiError ? exception.message : '下载失败')
+                              }
+                            }}
+                          >
+                            <Download className="h-3.5 w-3.5" aria-hidden />
+                            下载
+                          </Button>
+                        )}
+                      </Td>
                     </Tr>
                   ))}
                 </tbody>

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Query
+from fastapi.responses import FileResponse
 
 from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
@@ -71,6 +72,17 @@ def get_metrics(job_id: str, user: CurrentUser) -> dict[str, Any]:
 @router.get("/{job_id}/artifacts", summary="产物列表")
 def get_artifacts(job_id: str, user: CurrentUser) -> list[dict[str, Any]]:
     return job_service.job_artifacts(job_id, actor=user)
+
+
+@router.get("/{job_id}/artifacts/download", summary="下载单个产物文件")
+def download_artifact(job_id: str, path: str, user: CurrentUser) -> FileResponse:
+    target = job_service.artifact_file(job_id, path, actor=user)
+    return FileResponse(target, filename=target.name, media_type="application/octet-stream")
+
+
+@router.get("/{job_id}/trials", summary="评测 trial 明细")
+def get_trials(job_id: str, user: CurrentUser, limit: int = Query(default=500, le=2000)) -> dict[str, Any]:
+    return job_service.job_trials(job_id, actor=user, limit=limit)
 
 
 @router.get("/{job_id}/command", summary="预览将要执行的命令")

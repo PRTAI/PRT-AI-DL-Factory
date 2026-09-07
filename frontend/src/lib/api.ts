@@ -187,6 +187,40 @@ export const api = {
       `/api/jobs/${id}/artifacts`,
     ),
   jobCommand: (id: string) => request<CommandPreview>(`/api/jobs/${id}/command`),
+  jobTrials: (id: string) =>
+    request<{
+      trials: {
+        task_name: string
+        trial_name: string
+        reward: number | null
+        rewards: Record<string, number>
+        exception_type: string | null
+        exception_message: string
+        agent: string
+        model: string
+        duration_seconds: number | null
+        path: string
+      }[]
+      job_dir: string
+      total: number
+      resolved: number
+      errored: number
+    }>(`/api/jobs/${id}/trials`),
+  // Downloads go through fetch + blob because the REST API only accepts the
+  // bearer header (a token in the query string would leak into access logs).
+  downloadArtifact: async (id: string, path: string) => {
+    const response = await fetch(`/api/jobs/${id}/artifacts/download?path=${encodeURIComponent(path)}`, {
+      headers: { Authorization: `Bearer ${getToken() ?? ''}` },
+    })
+    if (!response.ok) throw new ApiError(response.status, extractDetail(safeParse(await response.text())) ?? '下载失败')
+    const blob = await response.blob()
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = path.split('/').pop() ?? 'artifact'
+    anchor.click()
+    URL.revokeObjectURL(url)
+  },
   reviewJob: (id: string, approve: boolean, comment = '') =>
     request<Job>(`/api/jobs/${id}/review`, {
       method: 'POST',

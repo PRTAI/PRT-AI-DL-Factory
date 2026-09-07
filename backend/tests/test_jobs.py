@@ -242,3 +242,49 @@ def test_overview_counts(client, admin_headers):
     body = client.get("/api/jobs/overview", headers=admin_headers).json()
     assert body["total"] > 0
     assert "gpu" in body
+
+
+def test_artifact_download_rejects_traversal(client, admin_headers, member_headers, dataset_id, monkeypatch):
+    """Artifacts are served from the job's output dir only."""
+    from pathlib import Path
+
+    from backend.app.builders.base import BuildResult
+    from backend.app.services import runner
+
+    def fake_build(job, work_dir, output_dir):
+        del job
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+        (Path(output_dir) / "adapter.txt").write_text("weights", encoding="utf-8")
+        return BuildResult(command=["bash", "-c", "true"], cwd=str(work_dir), output_dir=str(output_dir))
+
+    monkeypatch.setattr(runner, "build_job", fake_build)
+
+    job = client.post("/api/jobs", headers=member_headers, json=_sft_payload(dataset_id)).json()
+    client.post(f"/api/jobs/{job['id']}/review", headers=admin_headers, json={"approve": True})
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if client.get(f"/api/jobs/{job['id']}", headers=member_headers).json()["status"] in {
+            "succeeded",
+            "failed",
+        }:
+            break
+        time.sleep(0.3)
+
+    ok = client.get(f"/api/jobs/{job['id']}/artifacts/download?path=adapter.txt", headers=member_headers)
+    assert ok.status_code == 200
+    assert ok.content == b"weights"
+
+    escaped = client.get(
+        f"/api/jobs/{job['id']}/artifacts/download?path=../../db/users.json", headers=member_headers
+    )
+    assert escaped.status_code == 400
+
+    missing = client.get(f"/api/jobs/{job['id']}/artifacts/download?path=nope.bin", headers=member_headers)
+    assert missing.status_code == 404
+
+
+def test_trials_endpoint_rejects_training_jobs(client, member_headers, dataset_id):
+    job = client.post("/api/jobs", headers=member_headers, json=_sft_payload(dataset_id)).json()
+    response = client.get(f"/api/jobs/{job['id']}/trials", headers=member_headers)
+    assert response.status_code == 400

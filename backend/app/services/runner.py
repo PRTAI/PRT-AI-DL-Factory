@@ -215,6 +215,14 @@ def _supervise(job_id: str, process: subprocess.Popen, log_handle) -> None:
     if updated is None:
         return
 
+    # One last parse so the final step / trial counts are not left mid-flight.
+    # Imported here because the scheduler imports this module.
+    from .scheduler import refresh_metrics
+
+    refreshed = refresh_metrics(updated)
+    if refreshed.status.is_terminal:
+        updated = refreshed
+
     level = {"succeeded": "success", "failed": "error", "cancelled": "warning"}.get(updated.status.value, "info")
     audit_service.notify(
         updated.owner_id,

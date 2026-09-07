@@ -211,15 +211,16 @@ def refresh_metrics(job: Job) -> Job:
     metrics_parser.write_series(work_dir, parsed)
 
     def mutate(item: Job) -> None:
-        if item.status.is_terminal and item.progress.percent >= 100:
-            # keep the final snapshot, but still refresh metric summaries
-            item.metrics = parsed.summary
-            return
-        message = item.progress.message
+        previous = item.progress
+        item.metrics = parsed.summary
         item.progress = parsed.progress
         if not item.progress.message:
-            item.progress.message = message
-        item.metrics = parsed.summary
+            item.progress.message = previous.message
+        if item.status.is_terminal:
+            # Adopt the fresher counters (steps / trials) but keep the terminal
+            # verdict the supervisor wrote — a finished job stays at 100%.
+            item.progress.message = previous.message
+            item.progress.percent = 100.0 if item.status == JobStatus.SUCCEEDED else previous.percent
         item.updated_at = utcnow()
 
     return store.jobs.update(job.id, mutate) or job

@@ -113,3 +113,54 @@ def test_parsers_survive_garbage(tmp_path):
     parsed = metrics_parser.parse_llamafactory(tmp_path)
     assert parsed.progress.current_step == 0
     assert parsed.series == {}
+
+
+def test_job_trials_parsing(tmp_path, monkeypatch):
+    """Per-trial results are read from the Harbor job dir, worst reward first."""
+    from backend.app.models import Framework, Job, JobType, ResourceSpec, User, VerifyConfig, Role
+    from backend.app.services import job_service
+    from backend.app.store import store
+
+    jobs_dir = tmp_path / "outputs"
+    job = Job(
+        name="verify-parse",
+        type=JobType.VERIFY,
+        framework=Framework.HARBOR,
+        owner_id="usr_metrics",
+        resources=ResourceSpec(n_gpus=0),
+        verify=VerifyConfig(tasks_path=str(tmp_path), agent="oracle"),
+    )
+    job.runtime.output_dir = str(jobs_dir)
+    store.jobs.put(job)
+
+    harbor_dir = jobs_dir / job.id
+    for name, reward, exc in (("task-a", 1.0, None), ("task-b", 0.0, None), ("task-c", None, "AgentTimeoutError")):
+        trial_dir = harbor_dir / f"{name}.1"
+        trial_dir.mkdir(parents=True)
+        payload = {
+            "task_name": name,
+            "trial_name": f"{name}.1",
+            "agent_info": {"name": "oracle", "version": "1", "model_info": {"name": "n/a"}},
+            "started_at": "2026-01-01T00:00:00+00:00",
+            "finished_at": "2026-01-01T00:01:30+00:00",
+        }
+        if reward is not None:
+            payload["verifier_result"] = {"rewards": {"reward": reward}}
+        if exc:
+            payload["exception_info"] = {
+                "exception_type": exc,
+                "exception_message": "timed out",
+                "exception_traceback": "",
+                "occurred_at": "2026-01-01T00:01:30+00:00",
+            }
+        (trial_dir / "results.json").write_text(json.dumps(payload), encoding="utf-8")
+    (harbor_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    actor = User(id="usr_metrics", email="m@prt.local", display_name="m", role=Role.ADMIN, password_hash="x")
+    result = job_service.job_trials(job.id, actor=actor)
+    assert result["total"] == 3
+    assert result["resolved"] == 1
+    assert result["errored"] == 1
+    assert result["trials"][0]["reward"] == 0.0          # worst first
+    assert result["trials"][-1]["exception_type"] == "AgentTimeoutError"
+    assert result["trials"][0]["duration_seconds"] == 90.0
