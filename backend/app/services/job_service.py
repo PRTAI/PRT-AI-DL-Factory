@@ -341,9 +341,9 @@ def get_job(job_id: str) -> Job:
 def get_job_for(job_id: str, actor: User) -> Job:
     job = get_job(job_id)
     _assert_can_view(job, actor)
-    if job.status.is_active:
-        return refresh_metrics(job)
-    return job
+    # Terminal jobs are re-parsed too: it is one bounded log-tail read per page
+    # open, and it lets a parser fix heal jobs that finished before the upgrade.
+    return refresh_metrics(job)
 
 
 def list_jobs(
@@ -401,8 +401,7 @@ def job_log(job_id: str, *, actor: User, tail_bytes: int | None = None, offset: 
 def job_metrics(job_id: str, *, actor: User) -> dict[str, Any]:
     job = get_job(job_id)
     _assert_can_view(job, actor)
-    if job.status.is_active:
-        job = refresh_metrics(job)
+    job = refresh_metrics(job)
     work_dir = Path(job.runtime.work_dir or runner.work_dir_for(job))
     payload = metrics_parser.read_series(work_dir)
     payload["status"] = job.status.value
