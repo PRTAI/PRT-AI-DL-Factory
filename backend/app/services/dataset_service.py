@@ -249,12 +249,15 @@ def _validate_harbor_tasks(root: Path) -> tuple[DatasetStats, list[DatasetFileIn
     missing_instruction: list[str] = []
     missing_tests: list[str] = []
     missing_solution: list[str] = []
+    missing_environment: list[str] = []
 
     for task_file in task_files:
         task_dir = task_file.parent
         rel = task_dir.relative_to(root).as_posix()
         if not (task_dir / "instruction.md").is_file():
             missing_instruction.append(rel)
+        if not (task_dir / "environment").is_dir():
+            missing_environment.append(rel)
         if not any((task_dir / "tests").glob("test.*")):
             missing_tests.append(rel)
         if not any((task_dir / "solution").glob("solve.*")):
@@ -268,6 +271,14 @@ def _validate_harbor_tasks(root: Path) -> tuple[DatasetStats, list[DatasetFileIn
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail=f"{len(missing_instruction)} 个任务缺少 instruction.md，例如: {missing_instruction[:3]}",
+        )
+    if missing_environment:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{len(missing_environment)} 个任务缺少 environment/ 目录，Harbor 会直接跳过这些任务，"
+                f"例如: {missing_environment[:3]}"
+            ),
         )
     if missing_tests:
         stats.warnings.append(
