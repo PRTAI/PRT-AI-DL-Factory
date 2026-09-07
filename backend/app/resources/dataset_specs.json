@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "specs": [
+    {
+      "kind": "sft_alpaca",
+      "title": "SFT · Alpaca 格式",
+      "frameworks": ["llamafactory"],
+      "stages": ["sft", "pt"],
+      "summary": "指令微调最常用的格式。zip 内放一个或多个 JSON 文件，每个文件是一个数组。",
+      "layout": [
+        "dataset.zip",
+        "├── train.json        # 必需，JSON 数组",
+        "└── eval.json         # 可选，验证集"
+      ],
+      "required_fields": ["instruction", "output"],
+      "optional_fields": ["input", "system", "history"],
+      "example": [
+        {
+          "instruction": "解释一下 GRPO 与 PPO 的区别。",
+          "input": "",
+          "output": "GRPO 去掉了价值网络，用同一 prompt 的一组采样回报做基线……",
+          "system": "你是一个严谨的算法助手。",
+          "history": [["上一轮问题", "上一轮回答"]]
+        }
+      ],
+      "notes": [
+        "文件编码必须是 UTF-8。",
+        "平台会自动写入 LLaMA-Factory 的 dataset_info.json，训练时直接引用数据集名即可。"
+      ]
+    },
+    {
+      "kind": "sft_sharegpt",
+      "title": "SFT · ShareGPT 多轮格式",
+      "frameworks": ["llamafactory"],
+      "stages": ["sft"],
+      "summary": "多轮对话/工具调用场景。每条样本是一个 conversations 数组。",
+      "layout": ["dataset.zip", "└── train.json"],
+      "required_fields": ["conversations"],
+      "optional_fields": ["system", "tools"],
+      "example": [
+        {
+          "conversations": [
+            { "from": "human", "value": "帮我查一下今天的 GPU 占用" },
+            { "from": "gpt", "value": "好的，我调用监控接口……" }
+          ],
+          "system": "你是运维助手",
+          "tools": "[{\"name\": \"get_gpu\", \"parameters\": {}}]"
+        }
+      ],
+      "notes": ["from 取值：human / gpt / function_call / observation / system。"]
+    },
+    {
+      "kind": "dpo_pairs",
+      "title": "偏好对齐 · DPO / ORPO / SimPO",
+      "frameworks": ["llamafactory", "trl"],
+      "stages": ["dpo", "orpo", "simpo"],
+      "summary": "成对偏好数据：同一个 prompt 下的优劣两条回复。",
+      "layout": ["dataset.zip", "└── train.json"],
+      "required_fields": ["chosen", "rejected"],
+      "optional_fields": ["instruction", "conversations", "system"],
+      "example": [
+        {
+          "conversations": [{ "from": "human", "value": "写一个快速排序" }],
+          "chosen": { "from": "gpt", "value": "def quicksort(a): ..." },
+          "rejected": { "from": "gpt", "value": "你可以自己搜一下。" }
+        }
+      ],
+      "notes": [
+        "也支持扁平写法：{\"instruction\": ..., \"chosen\": \"...\", \"rejected\": \"...\"}。",
+        "TRL 的 DPOTrainer 使用 prompt/chosen/rejected 三列，平台会在生成配置时自动映射。"
+      ]
+    },
+    {
+      "kind": "kto_pairs",
+      "title": "偏好对齐 · KTO",
+      "frameworks": ["llamafactory", "trl"],
+      "stages": ["kto"],
+      "summary": "单条回复 + 二元标签（好/坏），不需要成对数据。",
+      "layout": ["dataset.zip", "└── train.json"],
+      "required_fields": ["messages", "label"],
+      "optional_fields": ["system"],
+      "example": [
+        {
+          "messages": [
+            { "role": "user", "content": "总结这段日志" },
+            { "role": "assistant", "content": "训练在第 300 步 loss 收敛……" }
+          ],
+          "label": true
+        }
+      ],
+      "notes": ["label 为 true 表示期望的回复，false 表示不期望。"]
+    },
+    {
+      "kind": "harbor_tasks",
+      "title": "Agent 评测 / Agentic RL · Harbor 任务树",
+      "frameworks": ["harbor", "trl", "verl"],
+      "stages": ["verify", "grpo", "dapo"],
+      "summary": "Harbor framework 的标准任务目录。既用于 Verify 评测，也用于 Agentic RL 训练（TRL HarborSpec）。",
+      "layout": [
+        "dataset.zip",
+        "└── tasks/                     # 也可以直接把任务目录放在压缩包根部",
+        "    └── my-task-001/",
+        "        ├── task.toml          # 必需：难度、超时、资源、verifier 配置",
+        "        ├── instruction.md     # 必需：给 agent 的任务描述",
+        "        ├── environment/",
+        "        │   └── Dockerfile     # 必需：沙箱环境",
+        "        ├── tests/",
+        "        │   ├── test.sh        # 必需：verifier 入口，写出 reward",
+        "        │   └── reward.toml    # 可选：reward-kit 打分规则",
+        "        └── solution/",
+        "            └── solve.sh       # 可选：oracle agent 的参考解"
+      ],
+      "required_fields": ["task.toml", "instruction.md"],
+      "optional_fields": ["environment/Dockerfile", "tests/test.sh", "solution/solve.sh", "tests/reward.toml"],
+      "example": {
+        "task.toml": "version = \"1.0\"\n\n[metadata]\ndifficulty = \"easy\"\ncategory = \"programming\"\ntags = [\"bash\"]\n\n[agent]\ntimeout_sec = 300.0\n\n[verifier]\ntimeout_sec = 120.0\n\n[environment]\nbuild_timeout_sec = 600.0\ncpus = 1\nmemory = \"2G\"\nstorage = \"10G\"\n"
+      },
+      "notes": [
+        "oracle agent 会执行 solution/solve.sh，用于验证任务本身是否自洽；没有 solution 时请改用 nop 或真实 agent。",
+        "reward-kit 形式的 judge 评测：在 tests/ 下提供 reward.toml + criteria.py，test.sh 里调用 reward-kit 即可，平台按 Harbor 的 reward.json 读取分数。",
+        "需要 API Key 的 judge（例如 ANTHROPIC_API_KEY）请在提交评测任务时填到「环境变量」中，平台以 --agent-env / --environment-env 注入，不会写入日志。"
+      ]
+    },
+    {
+      "kind": "verl_parquet",
+      "title": "verl RL · Parquet 格式",
+      "frameworks": ["verl"],
+      "stages": ["grpo", "dapo", "ppo"],
+      "summary": "verl 原生训练数据，parquet 文件，每行一个 prompt 及其打分信息。",
+      "layout": ["dataset.zip", "├── train.parquet", "└── test.parquet"],
+      "required_fields": ["prompt", "data_source", "reward_model"],
+      "optional_fields": ["extra_info", "ability", "agent_name"],
+      "example": [
+        {
+          "data_source": "prt/math",
+          "prompt": [{ "role": "user", "content": "计算 (3+5)*2" }],
+          "ability": "math",
+          "reward_model": { "style": "rule", "ground_truth": "16" },
+          "extra_info": { "index": 0, "split": "train" }
+        }
+      ],
+      "notes": [
+        "train.parquet 必需；test.parquet 可选，用于 val_before_train / test_freq。",
+        "如果只有 Harbor 任务树，请选择 harbor_tasks 类型，平台会用 TRL + HarborSpec 做 agentic RL。"
+      ]
+    },
+    {
+      "kind": "raw",
+      "title": "原始文件",
+      "frameworks": [],
+      "stages": [],
+      "summary": "不做结构校验，仅解压归档。适合自定义脚本或临时资料。",
+      "layout": ["dataset.zip", "└── <任意结构>"],
+      "required_fields": [],
+      "optional_fields": [],
+      "example": null,
+      "notes": ["该类型不会自动注册到任何框架，仅提供路径供高级配置引用。"]
+    }
+  ]
+}

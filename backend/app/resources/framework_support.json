@@ -1,0 +1,5412 @@
+{
+  "generated_at": "2026-09-07T08:50:11.017874+00:00",
+  "llamafactory": {
+    "name": "LLaMA-Factory",
+    "root": "/workspace/LiHanlin_Workspace/github/LlamaFactory",
+    "version": "0.9.6.dev0",
+    "available": true,
+    "models": [
+      {
+        "name": "Aeva-Air-Chat",
+        "template": "aeva",
+        "multimodal": false,
+        "hf": "louzongzhi/Aeva-Air",
+        "modelscope": "louzongktsi/Aeva-Air",
+        "openmind": "louzongzhi/Aeva-Air"
+      },
+      {
+        "name": "Aeva-Chat",
+        "template": "aeva",
+        "multimodal": false,
+        "hf": "louzongzhi/Aeva",
+        "modelscope": "louzongktsi/Aeva",
+        "openmind": "louzongzhi/Aeva"
+      },
+      {
+        "name": "Aeva-Flash-Chat",
+        "template": "aeva",
+        "multimodal": false,
+        "hf": "louzongzhi/Aeva-Flash",
+        "modelscope": "louzongktsi/Aeva-Flash",
+        "openmind": "louzongzhi/Aeva-Flash"
+      },
+      {
+        "name": "Aeva-Max-Chat",
+        "template": "aeva",
+        "multimodal": false,
+        "hf": "louzongzhi/Aeva-Max",
+        "modelscope": "louzongktsi/Aeva-Max",
+        "openmind": "louzongzhi/Aeva-Max"
+      },
+      {
+        "name": "Aeva-Pro-Chat",
+        "template": "aeva",
+        "multimodal": false,
+        "hf": "louzongzhi/Aeva-Pro",
+        "modelscope": "louzongktsi/Aeva-Pro",
+        "openmind": "louzongzhi/Aeva-Pro"
+      },
+      {
+        "name": "Aya-23-35B-Chat",
+        "template": "cohere",
+        "multimodal": false,
+        "hf": "CohereForAI/aya-23-35B",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Aya-23-8B-Chat",
+        "template": "cohere",
+        "multimodal": false,
+        "hf": "CohereForAI/aya-23-8B",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "BLOOM-3B",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigscience/bloom-3b",
+        "modelscope": "AI-ModelScope/bloom-3b",
+        "openmind": ""
+      },
+      {
+        "name": "BLOOM-560M",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigscience/bloom-560m",
+        "modelscope": "AI-ModelScope/bloom-560m",
+        "openmind": ""
+      },
+      {
+        "name": "BLOOM-7B1",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigscience/bloom-7b1",
+        "modelscope": "AI-ModelScope/bloom-7b1",
+        "openmind": ""
+      },
+      {
+        "name": "BLOOMZ-3B",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigscience/bloomz-3b",
+        "modelscope": "AI-ModelScope/bloomz-3b",
+        "openmind": ""
+      },
+      {
+        "name": "BLOOMZ-560M",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigscience/bloomz-560m",
+        "modelscope": "AI-ModelScope/bloomz-560m",
+        "openmind": ""
+      },
+      {
+        "name": "BLOOMZ-7B1-mt",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigscience/bloomz-7b1-mt",
+        "modelscope": "AI-ModelScope/bloomz-7b1-mt",
+        "openmind": ""
+      },
+      {
+        "name": "Breeze-7B",
+        "template": "breeze",
+        "multimodal": false,
+        "hf": "MediaTek-Research/Breeze-7B-Base-v1_0",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Breeze-7B-Instruct",
+        "template": "breeze",
+        "multimodal": false,
+        "hf": "MediaTek-Research/Breeze-7B-Instruct-v1_0",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "ChatGLM3-6B-Base",
+        "template": "chatglm3",
+        "multimodal": false,
+        "hf": "zai-org/chatglm3-6b-base",
+        "modelscope": "ZhipuAI/chatglm3-6b-base",
+        "openmind": ""
+      },
+      {
+        "name": "ChatGLM3-6B-Chat",
+        "template": "chatglm3",
+        "multimodal": false,
+        "hf": "zai-org/chatglm3-6b",
+        "modelscope": "ZhipuAI/chatglm3-6b",
+        "openmind": ""
+      },
+      {
+        "name": "Chinese-Alpaca-2-1.3B-Chat",
+        "template": "llama2_zh",
+        "multimodal": false,
+        "hf": "hfl/chinese-alpaca-2-1.3b",
+        "modelscope": "AI-ModelScope/chinese-alpaca-2-1.3b",
+        "openmind": ""
+      },
+      {
+        "name": "Chinese-Alpaca-2-13B-Chat",
+        "template": "llama2_zh",
+        "multimodal": false,
+        "hf": "hfl/chinese-alpaca-2-13b",
+        "modelscope": "AI-ModelScope/chinese-alpaca-2-13b",
+        "openmind": ""
+      },
+      {
+        "name": "Chinese-Alpaca-2-7B-Chat",
+        "template": "llama2_zh",
+        "multimodal": false,
+        "hf": "hfl/chinese-alpaca-2-7b",
+        "modelscope": "AI-ModelScope/chinese-alpaca-2-7b",
+        "openmind": ""
+      },
+      {
+        "name": "Chinese-Llama-2-1.3B",
+        "template": "llama2_zh",
+        "multimodal": false,
+        "hf": "hfl/chinese-llama-2-1.3b",
+        "modelscope": "AI-ModelScope/chinese-llama-2-1.3b",
+        "openmind": ""
+      },
+      {
+        "name": "Chinese-Llama-2-13B",
+        "template": "llama2_zh",
+        "multimodal": false,
+        "hf": "hfl/chinese-llama-2-13b",
+        "modelscope": "AI-ModelScope/chinese-llama-2-13b",
+        "openmind": ""
+      },
+      {
+        "name": "Chinese-Llama-2-7B",
+        "template": "llama2_zh",
+        "multimodal": false,
+        "hf": "hfl/chinese-llama-2-7b",
+        "modelscope": "AI-ModelScope/chinese-llama-2-7b",
+        "openmind": ""
+      },
+      {
+        "name": "CodeGemma-1.1-2B",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/codegemma-1.1-2b",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "CodeGemma-1.1-7B-Instruct",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/codegemma-1.1-7b-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "CodeGemma-7B",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/codegemma-7b",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "CodeGemma-7B-Instruct",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/codegemma-7b-it",
+        "modelscope": "AI-ModelScope/codegemma-7b-it",
+        "openmind": ""
+      },
+      {
+        "name": "Codestral-22B-v0.1-Chat",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Codestral-22B-v0.1",
+        "modelscope": "swift/Codestral-22B-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "CommandR-35B-4bit-Chat",
+        "template": "cohere",
+        "multimodal": false,
+        "hf": "CohereForAI/c4ai-command-r-v01-4bit",
+        "modelscope": "mirror013/c4ai-command-r-v01-4bit",
+        "openmind": ""
+      },
+      {
+        "name": "CommandR-35B-Chat",
+        "template": "cohere",
+        "multimodal": false,
+        "hf": "CohereForAI/c4ai-command-r-v01",
+        "modelscope": "AI-ModelScope/c4ai-command-r-v01",
+        "openmind": ""
+      },
+      {
+        "name": "CommandR-Plus-104B-4bit-Chat",
+        "template": "cohere",
+        "multimodal": false,
+        "hf": "CohereForAI/c4ai-command-r-plus-4bit",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "CommandR-Plus-104B-Chat",
+        "template": "cohere",
+        "multimodal": false,
+        "hf": "CohereForAI/c4ai-command-r-plus",
+        "modelscope": "AI-ModelScope/c4ai-command-r-plus",
+        "openmind": ""
+      },
+      {
+        "name": "DBRX-132B-Base",
+        "template": "dbrx",
+        "multimodal": false,
+        "hf": "databricks/dbrx-base",
+        "modelscope": "AI-ModelScope/dbrx-base",
+        "openmind": ""
+      },
+      {
+        "name": "DBRX-132B-Instruct",
+        "template": "dbrx",
+        "multimodal": false,
+        "hf": "databricks/dbrx-instruct",
+        "modelscope": "AI-ModelScope/dbrx-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-33B-Base",
+        "template": "deepseekcoder",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-coder-33b-base",
+        "modelscope": "deepseek-ai/deepseek-coder-33b-base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-33B-Instruct",
+        "template": "deepseekcoder",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-coder-33b-instruct",
+        "modelscope": "deepseek-ai/deepseek-coder-33b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-6.7B-Base",
+        "template": "deepseekcoder",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-coder-6.7b-base",
+        "modelscope": "deepseek-ai/deepseek-coder-6.7b-base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-6.7B-Instruct",
+        "template": "deepseekcoder",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-coder-6.7b-instruct",
+        "modelscope": "deepseek-ai/deepseek-coder-6.7b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-7B-Base",
+        "template": "deepseekcoder",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-coder-7b-base-v1.5",
+        "modelscope": "deepseek-ai/deepseek-coder-7b-base-v1.5",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-7B-Instruct",
+        "template": "deepseekcoder",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-coder-7b-instruct-v1.5",
+        "modelscope": "deepseek-ai/deepseek-coder-7b-instruct-v1.5",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-V2-16B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-Coder-V2-Lite-Base",
+        "modelscope": "deepseek-ai/DeepSeek-Coder-V2-Lite-Base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-V2-16B-Instruct",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+        "modelscope": "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-V2-236B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-Coder-V2-Base",
+        "modelscope": "deepseek-ai/DeepSeek-Coder-V2-Base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Coder-V2-236B-Instruct",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-Coder-V2-Instruct",
+        "modelscope": "deepseek-ai/DeepSeek-Coder-V2-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-LLM-67B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-llm-67b-base",
+        "modelscope": "deepseek-ai/deepseek-llm-67b-base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-LLM-67B-Chat",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-llm-67b-chat",
+        "modelscope": "deepseek-ai/deepseek-llm-67b-chat",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-LLM-7B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-llm-7b-base",
+        "modelscope": "deepseek-ai/deepseek-llm-7b-base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-LLM-7B-Chat",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-llm-7b-chat",
+        "modelscope": "deepseek-ai/deepseek-llm-7b-chat",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Math-7B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-math-7b-base",
+        "modelscope": "deepseek-ai/deepseek-math-7b-base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-Math-7B-Instruct",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-math-7b-instruct",
+        "modelscope": "deepseek-ai/deepseek-math-7b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-MoE-16B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-moe-16b-base",
+        "modelscope": "deepseek-ai/deepseek-moe-16b-base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-MoE-16B-Chat",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/deepseek-moe-16b-chat",
+        "modelscope": "deepseek-ai/deepseek-moe-16b-chat",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-0528-671B-Chat",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-0528",
+        "modelscope": "deepseek-ai/DeepSeek-R1-0528",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-0528-8B-Distill",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+        "modelscope": "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-1.5B-Distill",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+        "modelscope": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-14B-Distill",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        "modelscope": "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-32B-Distill",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+        "modelscope": "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-671B-Chat",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1",
+        "modelscope": "deepseek-ai/DeepSeek-R1",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-671B-Chat-Zero",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-Zero",
+        "modelscope": "deepseek-ai/DeepSeek-R1-Zero",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-70B-Distill",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+        "modelscope": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-7B-Distill",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "modelscope": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-R1-8B-Distill",
+        "template": "deepseekr1",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+        "modelscope": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V2-0628-236B-Chat",
+        "template": "deepseek3",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V2-Chat-0628",
+        "modelscope": "deepseek-ai/DeepSeek-V2-Chat-0628",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V2-16B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V2-Lite",
+        "modelscope": "deepseek-ai/DeepSeek-V2-Lite",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V2-16B-Chat",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V2-Lite-Chat",
+        "modelscope": "deepseek-ai/DeepSeek-V2-Lite-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V2-236B-Base",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V2",
+        "modelscope": "deepseek-ai/DeepSeek-V2",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V2-236B-Chat",
+        "template": "deepseek",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V2-Chat",
+        "modelscope": "deepseek-ai/DeepSeek-V2-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V2.5-1210-236B-Chat",
+        "template": "deepseek3",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V2.5-1210",
+        "modelscope": "deepseek-ai/DeepSeek-V2.5-1210",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V2.5-236B-Chat",
+        "template": "deepseek3",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V2.5",
+        "modelscope": "deepseek-ai/DeepSeek-V2.5",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V3-0324-671B-Chat",
+        "template": "deepseek3",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V3-0324",
+        "modelscope": "deepseek-ai/DeepSeek-V3-0324",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V3-671B-Base",
+        "template": "deepseek3",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V3-Base",
+        "modelscope": "deepseek-ai/DeepSeek-V3-Base",
+        "openmind": ""
+      },
+      {
+        "name": "DeepSeek-V3-671B-Chat",
+        "template": "deepseek3",
+        "multimodal": false,
+        "hf": "deepseek-ai/DeepSeek-V3",
+        "modelscope": "deepseek-ai/DeepSeek-V3",
+        "openmind": ""
+      },
+      {
+        "name": "Devstral-Small-2507-Instruct",
+        "template": "mistral_small",
+        "multimodal": false,
+        "hf": "mistralai/Devstral-Small-2507",
+        "modelscope": "mistralai/Devstral-Small-2507",
+        "openmind": ""
+      },
+      {
+        "name": "dots.ocr",
+        "template": "dots_ocr",
+        "multimodal": true,
+        "hf": "rednote-hilab/dots.ocr",
+        "modelscope": "rednote-hilab/dots.ocr",
+        "openmind": ""
+      },
+      {
+        "name": "ERNIE-4.5-0.3B-Instruct",
+        "template": "ernie_nothink",
+        "multimodal": false,
+        "hf": "baidu/ERNIE-4.5-0.3B-PT",
+        "modelscope": "PaddlePaddle/ERNIE-4.5-0.3B-PT",
+        "openmind": ""
+      },
+      {
+        "name": "ERNIE-4.5-21B-A3B-Instruct",
+        "template": "ernie_nothink",
+        "multimodal": false,
+        "hf": "baidu/ERNIE-4.5-21B-A3B-PT",
+        "modelscope": "PaddlePaddle/ERNIE-4.5-21B-A3B-PT",
+        "openmind": ""
+      },
+      {
+        "name": "ERNIE-4.5-21B-A3B-Thinking",
+        "template": "ernie",
+        "multimodal": false,
+        "hf": "baidu/ERNIE-4.5-21B-A3B-Thinking",
+        "modelscope": "PaddlePaddle/ERNIE-4.5-21B-A3B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "ERNIE-4.5-300B-A47B-Instruct",
+        "template": "ernie_nothink",
+        "multimodal": false,
+        "hf": "baidu/ERNIE-4.5-300B-A47B-PT",
+        "modelscope": "PaddlePaddle/ERNIE-4.5-300B-A47B-PT",
+        "openmind": ""
+      },
+      {
+        "name": "ERNIE-4.5-VL-28B-A3B-Instruct",
+        "template": "ernie_vl",
+        "multimodal": true,
+        "hf": "baidu/ERNIE-4.5-VL-28B-A3B-PT",
+        "modelscope": "PaddlePaddle/ERNIE-4.5-VL-28B-A3B-PT",
+        "openmind": ""
+      },
+      {
+        "name": "ERNIE-4.5-VL-28B-A3B-Thinking",
+        "template": "ernie_vl",
+        "multimodal": true,
+        "hf": "baidu/ERNIE-4.5-VL-28B-A3B-Thinking",
+        "modelscope": "PaddlePaddle/ERNIE-4.5-VL-28B-A3B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "ERNIE-4.5-VL-424B-A47B-Instruct",
+        "template": "ernie_vl",
+        "multimodal": true,
+        "hf": "baidu/ERNIE-4.5-VL-424B-A47B-PT",
+        "modelscope": "PaddlePaddle/ERNIE-4.5-VL-424B-A47B-PT",
+        "openmind": ""
+      },
+      {
+        "name": "EXAONE-3.0-7.8B-Instruct",
+        "template": "exaone",
+        "multimodal": false,
+        "hf": "LGAI-EXAONE/EXAONE-3.0-7.8B-Instruct",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-11B",
+        "template": "falcon",
+        "multimodal": false,
+        "hf": "tiiuae/falcon-11B",
+        "modelscope": "tiiuae/falcon-11B",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-180B",
+        "template": "falcon",
+        "multimodal": false,
+        "hf": "tiiuae/falcon-180b",
+        "modelscope": "modelscope/falcon-180B",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-180B-Chat",
+        "template": "falcon",
+        "multimodal": false,
+        "hf": "tiiuae/falcon-180b-chat",
+        "modelscope": "modelscope/falcon-180B-chat",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-40B",
+        "template": "falcon",
+        "multimodal": false,
+        "hf": "tiiuae/falcon-40b",
+        "modelscope": "AI-ModelScope/falcon-40b",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-40B-Instruct",
+        "template": "falcon",
+        "multimodal": false,
+        "hf": "tiiuae/falcon-40b-instruct",
+        "modelscope": "AI-ModelScope/falcon-40b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-7B",
+        "template": "falcon",
+        "multimodal": false,
+        "hf": "tiiuae/falcon-7b",
+        "modelscope": "AI-ModelScope/falcon-7b",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-7B-Instruct",
+        "template": "falcon",
+        "multimodal": false,
+        "hf": "tiiuae/falcon-7b-instruct",
+        "modelscope": "AI-ModelScope/falcon-7b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-0.5B-Base",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-0.5B-Base",
+        "modelscope": "tiiuae/Falcon-H1-0.5B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-0.5B-Instruct",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-0.5B-Instruct",
+        "modelscope": "tiiuae/Falcon-H1-0.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-1.5B-Base",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-1.5B-Base",
+        "modelscope": "tiiuae/Falcon-H1-1.5B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-1.5B-Deep-Base",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiuae/Falcon-H1-1.5B-Deep-Base",
+        "modelscope": "tiiuae/Falcon-H1-1.5B-Deep-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-1.5B-Deep-Instruct",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-1.5B-Deep-Instruct",
+        "modelscope": "tiiuae/Falcon-H1-1.5B-Deep-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-1.5B-Instruct",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-1.5B-Instruct",
+        "modelscope": "tiiuae/Falcon-H1-1.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-34B-Base",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-34B-Base",
+        "modelscope": "tiiuae/Falcon-H1-34B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-34B-Instruct",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-34B-Instruct",
+        "modelscope": "tiiuae/Falcon-H1-34B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-3B-Base",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-3B-Base",
+        "modelscope": "tiiuae/Falcon-H1-3B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-3B-Instruct",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-3B-Instruct",
+        "modelscope": "tiiuae/Falcon-H1-3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-7B-Base",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-7B-Base",
+        "modelscope": "tiiuae/Falcon-H1-7B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Falcon-H1-7B-Instruct",
+        "template": "falcon_h1",
+        "multimodal": false,
+        "hf": "tiiuae/Falcon-H1-7B-Instruct",
+        "modelscope": "tiiuae/Falcon-H1-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-1.1-2B-Instruct",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/gemma-1.1-2b-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-1.1-7B-Instruct",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/gemma-1.1-7b-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-2-27B",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-2-27b",
+        "modelscope": "LLM-Research/gemma-2-27b",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-2-27B-Instruct",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-2-27b-it",
+        "modelscope": "LLM-Research/gemma-2-27b-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-2-2B",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-2-2b",
+        "modelscope": "LLM-Research/gemma-2-2b",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-2-2B-Instruct",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-2-2b-it",
+        "modelscope": "LLM-Research/gemma-2-2b-it",
+        "openmind": "LlamaFactory/gemma-2-2b-it"
+      },
+      {
+        "name": "Gemma-2-9B",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-2-9b",
+        "modelscope": "LLM-Research/gemma-2-9b",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-2-9B-Instruct",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-2-9b-it",
+        "modelscope": "LLM-Research/gemma-2-9b-it",
+        "openmind": "LlamaFactory/gemma-2-9b-it"
+      },
+      {
+        "name": "Gemma-2B",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/gemma-2b",
+        "modelscope": "AI-ModelScope/gemma-2b",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-2B-Instruct",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/gemma-2b-it",
+        "modelscope": "AI-ModelScope/gemma-7b",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-12B",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/gemma-3-12b-pt",
+        "modelscope": "LLM-Research/gemma-3-12b-pt",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-12B-Instruct",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/gemma-3-12b-it",
+        "modelscope": "LLM-Research/gemma-3-12b-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-1B",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-3-1b-pt",
+        "modelscope": "LLM-Research/gemma-3-1b-pt",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-1B-Instruct",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-3-1b-it",
+        "modelscope": "LLM-Research/gemma-3-1b-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-270M",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-3-270m",
+        "modelscope": "LLM-Research/gemma-3-270m",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-270M-Instruct",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/gemma-3-270m-it",
+        "modelscope": "LLM-Research/gemma-3-270m-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-27B",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/gemma-3-27b-pt",
+        "modelscope": "LLM-Research/gemma-3-27b-pt",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-27B-Instruct",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/gemma-3-27b-it",
+        "modelscope": "LLM-Research/gemma-3-27b-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-4B",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/gemma-3-4b-pt",
+        "modelscope": "LLM-Research/gemma-3-4b-pt",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3-4B-Instruct",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/gemma-3-4b-it",
+        "modelscope": "LLM-Research/gemma-3-4b-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3n-E2B",
+        "template": "gemma3n",
+        "multimodal": true,
+        "hf": "google/gemma-3n-E2B",
+        "modelscope": "LLM-Research/gemma-3n-E2B",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3n-E2B-Instruct",
+        "template": "gemma3n",
+        "multimodal": true,
+        "hf": "google/gemma-3n-E2B-it",
+        "modelscope": "LLM-Research/gemma-3n-E2B-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3n-E4B",
+        "template": "gemma3n",
+        "multimodal": true,
+        "hf": "google/gemma-3n-E4B",
+        "modelscope": "LLM-Research/gemma-3n-E4B",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-3n-E4B-Instruct",
+        "template": "gemma3n",
+        "multimodal": true,
+        "hf": "google/gemma-3n-E4B-it",
+        "modelscope": "LLM-Research/gemma-3n-E4B-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-4-12B-Thinking",
+        "template": "gemma4n",
+        "multimodal": true,
+        "hf": "google/gemma-4-12B-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-4-26B-A4B-Thinking",
+        "template": "gemma4",
+        "multimodal": true,
+        "hf": "google/gemma-4-26B-A4B-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-4-31B-Thinking",
+        "template": "gemma4",
+        "multimodal": true,
+        "hf": "google/gemma-4-31B-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-4-E2B-Thinking",
+        "template": "gemma4n",
+        "multimodal": true,
+        "hf": "google/gemma-4-E2B-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-4-E4B-Thinking",
+        "template": "gemma4n",
+        "multimodal": true,
+        "hf": "google/gemma-4-E4B-it",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-7B",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/gemma-7b",
+        "modelscope": "AI-ModelScope/gemma-2b-it",
+        "openmind": ""
+      },
+      {
+        "name": "Gemma-7B-Instruct",
+        "template": "gemma",
+        "multimodal": false,
+        "hf": "google/gemma-7b-it",
+        "modelscope": "AI-ModelScope/gemma-7b-it",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4-0414-32B-Base",
+        "template": "glm4",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4-32B-Base-0414",
+        "modelscope": "ZhipuAI/GLM-4-32B-Base-0414",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4-0414-32B-Chat",
+        "template": "glm4",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4-32B-0414",
+        "modelscope": "ZhipuAI/GLM-4-32B-0414",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4-0414-9B-Chat",
+        "template": "glm4",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4-9B-0414",
+        "modelscope": "ZhipuAI/GLM-4-9B-0414",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4-9B",
+        "template": "glm4",
+        "multimodal": false,
+        "hf": "zai-org/glm-4-9b",
+        "modelscope": "ZhipuAI/glm-4-9b",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4-9B-1M-Chat",
+        "template": "glm4",
+        "multimodal": false,
+        "hf": "zai-org/glm-4-9b-chat-1m",
+        "modelscope": "ZhipuAI/glm-4-9b-chat-1m",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4-9B-Chat",
+        "template": "glm4",
+        "multimodal": false,
+        "hf": "zai-org/glm-4-9b-chat",
+        "modelscope": "ZhipuAI/glm-4-9b-chat",
+        "openmind": "LlamaFactory/glm-4-9b-chat"
+      },
+      {
+        "name": "GLM-4.1V-9B-Base",
+        "template": "glm4v",
+        "multimodal": true,
+        "hf": "zai-org/GLM-4.1V-9B-Base",
+        "modelscope": "ZhipuAI/GLM-4.1V-9B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.1V-9B-Thinking",
+        "template": "glm4v",
+        "multimodal": true,
+        "hf": "zai-org/GLM-4.1V-9B-Thinking",
+        "modelscope": "ZhipuAI/GLM-4.1V-9B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.5-Air-Base",
+        "template": "glm4_moe",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4.5-Air-Base",
+        "modelscope": "ZhipuAI/GLM-4.5-Air-Base",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.5-Air-Thinking",
+        "template": "glm4_moe",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4.5-Air",
+        "modelscope": "ZhipuAI/GLM-4.5-Air",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.5-Base",
+        "template": "glm4_moe",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4.5-Base",
+        "modelscope": "ZhipuAI/GLM-4.5-Base",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.5-Thinking",
+        "template": "glm4_moe",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4.5",
+        "modelscope": "ZhipuAI/GLM-4.5",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.5V-Air-Thinking",
+        "template": "glm4_5v",
+        "multimodal": true,
+        "hf": "zai-org/GLM-4.5V",
+        "modelscope": "ZhipuAI/GLM-4.5V",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.6V",
+        "template": "glm4_5v",
+        "multimodal": true,
+        "hf": "zai-org/GLM-4.6V",
+        "modelscope": "ZhipuAI/GLM-4.6V",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.6V-Flash",
+        "template": "glm4_5v",
+        "multimodal": true,
+        "hf": "zai-org/GLM-4.6V-Flash",
+        "modelscope": "ZhipuAI/GLM-4.6V-Flash",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-4.7-Flash",
+        "template": "glm4_7",
+        "multimodal": false,
+        "hf": "zai-org/GLM-4.7-Flash",
+        "modelscope": "ZhipuAI/GLM-4.7-Flash",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-OCR",
+        "template": "glm_ocr",
+        "multimodal": true,
+        "hf": "zai-org/GLM-OCR",
+        "modelscope": "ZhipuAI/GLM-OCR",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-Z1-0414-32B-Chat",
+        "template": "glmz1",
+        "multimodal": false,
+        "hf": "zai-org/GLM-Z1-32B-0414",
+        "modelscope": "ZhipuAI/GLM-Z1-32B-0414",
+        "openmind": ""
+      },
+      {
+        "name": "GLM-Z1-0414-9B-Chat",
+        "template": "glmz1",
+        "multimodal": false,
+        "hf": "zai-org/GLM-Z1-9B-0414",
+        "modelscope": "ZhipuAI/GLM-Z1-9B-0414",
+        "openmind": ""
+      },
+      {
+        "name": "GPT-2-Large",
+        "template": null,
+        "multimodal": false,
+        "hf": "openai-community/gpt2-large",
+        "modelscope": "AI-ModelScope/gpt2-large",
+        "openmind": ""
+      },
+      {
+        "name": "GPT-2-Medium",
+        "template": null,
+        "multimodal": false,
+        "hf": "openai-community/gpt2-medium",
+        "modelscope": "AI-ModelScope/gpt2-medium",
+        "openmind": ""
+      },
+      {
+        "name": "GPT-2-Small",
+        "template": null,
+        "multimodal": false,
+        "hf": "openai-community/gpt2",
+        "modelscope": "AI-ModelScope/gpt2",
+        "openmind": ""
+      },
+      {
+        "name": "GPT-2-XL",
+        "template": null,
+        "multimodal": false,
+        "hf": "openai-community/gpt2-xl",
+        "modelscope": "goodbai95/GPT2-xl",
+        "openmind": ""
+      },
+      {
+        "name": "GPT-OSS-120B-Thinking",
+        "template": "gpt_oss",
+        "multimodal": false,
+        "hf": "openai/gpt-oss-120b",
+        "modelscope": "openai/gpt-oss-120b",
+        "openmind": ""
+      },
+      {
+        "name": "GPT-OSS-20B-Thinking",
+        "template": "gpt_oss",
+        "multimodal": false,
+        "hf": "openai/gpt-oss-20b",
+        "modelscope": "openai/gpt-oss-20b",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-1B-A400M-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-1b-a400m-base",
+        "modelscope": "AI-ModelScope/granite-3.0-1b-a400m-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-1B-A400M-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-1b-a400m-instruct",
+        "modelscope": "AI-ModelScope/granite-3.0-1b-a400m-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-2B-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-2b-base",
+        "modelscope": "AI-ModelScope/granite-3.0-2b-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-2B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-2b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.0-2b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-3B-A800M-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-3b-a800m-base",
+        "modelscope": "AI-ModelScope/granite-3.0-3b-a800m-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-3B-A800M-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-3b-a800m-instruct",
+        "modelscope": "AI-ModelScope/granite-3.0-3b-a800m-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-8B-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-8b-base",
+        "modelscope": "AI-ModelScope/granite-3.0-8b-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.0-8B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.0-8b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.0-8b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-1B-A400M-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-1b-a400m-base",
+        "modelscope": "AI-ModelScope/granite-3.1-1b-a400m-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-1B-A400M-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-1b-a400m-instruct",
+        "modelscope": "AI-ModelScope/granite-3.1-1b-a400m-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-2B-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-2b-base",
+        "modelscope": "AI-ModelScope/granite-3.1-2b-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-2B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-2b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.1-2b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-3B-A800M-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-3b-a800m-base",
+        "modelscope": "AI-ModelScope/granite-3.1-3b-a800m-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-3B-A800M-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-3b-a800m-instruct",
+        "modelscope": "AI-ModelScope/granite-3.1-3b-a800m-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-8B-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-8b-base",
+        "modelscope": "AI-ModelScope/granite-3.1-8b-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.1-8B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.1-8b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.1-8b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.2-2B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.2-2b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.2-2b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.2-8B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.2-8b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.2-8b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.3-2B-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.3-2b-base",
+        "modelscope": "AI-ModelScope/granite-3.3-2b-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.3-2B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.3-2b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.3-2b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.3-8B-Base",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.3-8b-base",
+        "modelscope": "AI-ModelScope/granite-3.3-8b-base",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-3.3-8B-Instruct",
+        "template": "granite3",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-3.3-8b-instruct",
+        "modelscope": "AI-ModelScope/granite-3.3-8b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-4.0-tiny-preview",
+        "template": "granite4",
+        "multimodal": false,
+        "hf": "ibm-granite/granite-4.0-tiny-preview",
+        "modelscope": "ibm-granite/granite-4.0-tiny-preview",
+        "openmind": ""
+      },
+      {
+        "name": "Granite-Vision-3.2-2B",
+        "template": "granite3_vision",
+        "multimodal": true,
+        "hf": "ibm-granite/granite-vision-3.2-2b",
+        "modelscope": "AI-ModelScope/granite-vision-3.2-2b",
+        "openmind": ""
+      },
+      {
+        "name": "Hunyuan-0.5B-Instruct",
+        "template": "hunyuan",
+        "multimodal": false,
+        "hf": "tencent/Hunyuan-0.5B-Instruct",
+        "modelscope": "Tencent-Hunyuan/Hunyuan-0.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Hunyuan-1.8B-Instruct",
+        "template": "hunyuan",
+        "multimodal": false,
+        "hf": "tencent/Hunyuan-1.8B-Instruct",
+        "modelscope": "Tencent-Hunyuan/Hunyuan-1.8B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Hunyuan-4B-Instruct",
+        "template": "hunyuan",
+        "multimodal": false,
+        "hf": "tencent/Hunyuan-4B-Instruct",
+        "modelscope": "Tencent-Hunyuan/Hunyuan-4B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Hunyuan-7B-Instruct",
+        "template": "hunyuan",
+        "multimodal": false,
+        "hf": "tencent/Hunyuan-7B-Instruct",
+        "modelscope": "Tencent-Hunyuan/Hunyuan-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Hunyuan-A13B-Instruct",
+        "template": "hunyuan",
+        "multimodal": false,
+        "hf": "tencent/Hunyuan-A13B-Instruct",
+        "modelscope": "Tencent-Hunyuan/Hunyuan-A13B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Hunyuan-MT-7B-Instruct",
+        "template": "hunyuan",
+        "multimodal": false,
+        "hf": "tencent/Hunyuan-MT-7B",
+        "modelscope": "Tencent-Hunyuan/Hunyuan-MT-7B",
+        "openmind": ""
+      },
+      {
+        "name": "HY-MT1.5-1.8B-Instruct",
+        "template": "hunyuan_small",
+        "multimodal": false,
+        "hf": "tencent/HY-MT1.5-1.8B",
+        "modelscope": "Tencent-Hunyuan/HY-MT1.5-1.8B",
+        "openmind": ""
+      },
+      {
+        "name": "HY-MT1.5-7B-Instruct",
+        "template": "hunyuan",
+        "multimodal": false,
+        "hf": "tencent/HY-MT1.5-7B",
+        "modelscope": "Tencent-Hunyuan/HY-MT1.5-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Hy-MT2-1.8B-Instruct",
+        "template": "hy_dense_1_8b",
+        "multimodal": false,
+        "hf": "tencent/Hy-MT2-1.8B",
+        "modelscope": "Tencent-Hunyuan/Hy-MT2-1.8B",
+        "openmind": ""
+      },
+      {
+        "name": "Hy-MT2-7B-Instruct",
+        "template": "hy_dense_7b",
+        "multimodal": false,
+        "hf": "tencent/Hy-MT2-7B",
+        "modelscope": "Tencent-Hunyuan/Hy-MT2-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Hy3-Preview",
+        "template": "hy3",
+        "multimodal": false,
+        "hf": "tencent/Hy3-preview",
+        "modelscope": "tencent/Hy3-preview",
+        "openmind": ""
+      },
+      {
+        "name": "Index-1.9B-Base",
+        "template": "index",
+        "multimodal": false,
+        "hf": "IndexTeam/Index-1.9B",
+        "modelscope": "IndexTeam/Index-1.9B",
+        "openmind": ""
+      },
+      {
+        "name": "Index-1.9B-Base-Pure",
+        "template": "index",
+        "multimodal": false,
+        "hf": "IndexTeam/Index-1.9B-Pure",
+        "modelscope": "IndexTeam/Index-1.9B-Pure",
+        "openmind": ""
+      },
+      {
+        "name": "Index-1.9B-Character-Chat",
+        "template": "index",
+        "multimodal": false,
+        "hf": "IndexTeam/Index-1.9B-Character",
+        "modelscope": "IndexTeam/Index-1.9B-Character",
+        "openmind": ""
+      },
+      {
+        "name": "Index-1.9B-Chat",
+        "template": "index",
+        "multimodal": false,
+        "hf": "IndexTeam/Index-1.9B-Chat",
+        "modelscope": "IndexTeam/Index-1.9B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Index-1.9B-Chat-32K",
+        "template": "index",
+        "multimodal": false,
+        "hf": "IndexTeam/Index-1.9B-32K",
+        "modelscope": "IndexTeam/Index-1.9B-32K",
+        "openmind": ""
+      },
+      {
+        "name": "Intern-S1-mini",
+        "template": "intern_s1",
+        "multimodal": true,
+        "hf": "internlm/Intern-S1-mini",
+        "modelscope": "Shanghai_AI_Laboratory/Intern-S1-mini",
+        "openmind": ""
+      },
+      {
+        "name": "InternLM2-20B",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2-20b",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2-20b",
+        "openmind": ""
+      },
+      {
+        "name": "InternLM2-20B-Chat",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2-chat-20b",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2-chat-20b",
+        "openmind": ""
+      },
+      {
+        "name": "InternLM2-7B",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2-7b",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2-7b",
+        "openmind": ""
+      },
+      {
+        "name": "InternLM2-7B-Chat",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2-chat-7b",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2-chat-7b",
+        "openmind": ""
+      },
+      {
+        "name": "InternLM2.5-1.8B",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2_5-1_8b",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2_5-1_8b",
+        "openmind": "Intern/internlm2_5-1_8b"
+      },
+      {
+        "name": "InternLM2.5-1.8B-Chat",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2_5-1_8b-chat",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2_5-1_8b-chat",
+        "openmind": "Intern/internlm2_5-1_8b-chat"
+      },
+      {
+        "name": "InternLM2.5-20B",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2_5-20b",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2_5-20b",
+        "openmind": "Intern/internlm2_5-20b"
+      },
+      {
+        "name": "InternLM2.5-20B-Chat",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2_5-20b-chat",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2_5-20b-chat",
+        "openmind": "Intern/internlm2_5-20b-chat"
+      },
+      {
+        "name": "InternLM2.5-7B",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2_5-7b",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2_5-7b",
+        "openmind": ""
+      },
+      {
+        "name": "InternLM2.5-7B-1M-Chat",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2_5-7b-chat-1m",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2_5-7b-chat-1m",
+        "openmind": "Intern/internlm2_5-7b-chat-1m"
+      },
+      {
+        "name": "InternLM2.5-7B-Chat",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm2_5-7b-chat",
+        "modelscope": "Shanghai_AI_Laboratory/internlm2_5-7b-chat",
+        "openmind": "Intern/internlm2_5-7b-chat"
+      },
+      {
+        "name": "InternLM3-8B-Chat",
+        "template": "intern2",
+        "multimodal": false,
+        "hf": "internlm/internlm3-8b-instruct",
+        "modelscope": "Shanghai_AI_Laboratory/internlm3-8b-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL2.5-2B-MPO",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL2_5-2B-MPO-hf",
+        "modelscope": "OpenGVLab/InternVL2_5-2B-MPO-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL2.5-8B-MPO",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL2_5-8B-MPO-hf",
+        "modelscope": "OpenGVLab/InternVL2_5-8B-MPO-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3-14B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3-14B-hf",
+        "modelscope": "OpenGVLab/InternVL3-14B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3-1B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3-1B-hf",
+        "modelscope": "OpenGVLab/InternVL3-1B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3-2B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3-2B-hf",
+        "modelscope": "OpenGVLab/InternVL3-2B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3-38B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3-38B-hf",
+        "modelscope": "OpenGVLab/InternVL3-38B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3-78B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3-78B-hf",
+        "modelscope": "OpenGVLab/InternVL3-78B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3-8B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3-8B-hf",
+        "modelscope": "OpenGVLab/InternVL3-8B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3.5-14B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3_5-14B-HF",
+        "modelscope": "OpenGVLab/InternVL3_5-14B-HF",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3.5-1B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3_5-1B-HF",
+        "modelscope": "OpenGVLab/InternVL3_5-1B-HF",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3.5-2B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3_5-2B-HF",
+        "modelscope": "OpenGVLab/InternVL3_5-2B-HF",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3.5-30B-A3B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3_5-30B-A3B-HF",
+        "modelscope": "OpenGVLab/InternVL3_5-30B-A3B-HF",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3.5-38B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3_5-38B-HF",
+        "modelscope": "OpenGVLab/InternVL3_5-38B-HF",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3.5-4B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3_5-4B-HF",
+        "modelscope": "OpenGVLab/InternVL3_5-4B-HF",
+        "openmind": ""
+      },
+      {
+        "name": "InternVL3.5-8B-hf",
+        "template": "intern_vl",
+        "multimodal": true,
+        "hf": "OpenGVLab/InternVL3_5-8B-HF",
+        "modelscope": "OpenGVLab/InternVL3_5-8B-HF",
+        "openmind": ""
+      },
+      {
+        "name": "Jamba-v0.1",
+        "template": null,
+        "multimodal": false,
+        "hf": "ai21labs/Jamba-v0.1",
+        "modelscope": "AI-ModelScope/Jamba-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "Keye-VL-8B-Chat",
+        "template": "keye_vl",
+        "multimodal": true,
+        "hf": "Kwai-Keye/Keye-VL-8B-Preview",
+        "modelscope": "Kwai-Keye/Keye-VL-8B-Preview",
+        "openmind": ""
+      },
+      {
+        "name": "Kimi-Dev-72B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "moonshotai/Kimi-Dev-72B",
+        "modelscope": "moonshotai/Kimi-Dev-72B",
+        "openmind": ""
+      },
+      {
+        "name": "Kimi-VL-A3B-Instruct",
+        "template": "kimi_vl",
+        "multimodal": true,
+        "hf": "moonshotai/Kimi-VL-A3B-Instruct",
+        "modelscope": "moonshotai/Kimi-VL-A3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Kimi-VL-A3B-Thinking",
+        "template": "kimi_vl",
+        "multimodal": true,
+        "hf": "moonshotai/Kimi-VL-A3B-Thinking",
+        "modelscope": "moonshotai/Kimi-VL-A3B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Kimi-VL-A3B-Thinking-2506",
+        "template": "kimi_vl",
+        "multimodal": true,
+        "hf": "moonshotai/Kimi-VL-A3B-Thinking-2506",
+        "modelscope": "moonshotai/Kimi-VL-A3B-Thinking-2506",
+        "openmind": ""
+      },
+      {
+        "name": "LFM2.5-1.2B",
+        "template": "lfm2",
+        "multimodal": false,
+        "hf": "LiquidAI/LFM2.5-1.2B-Base",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "LFM2.5-1.2B-Instruct",
+        "template": "lfm2",
+        "multimodal": false,
+        "hf": "LiquidAI/LFM2.5-1.2B-Instruct",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "LFM2.5-VL-1.6B",
+        "template": "lfm2_vl",
+        "multimodal": true,
+        "hf": "LiquidAI/LFM2.5-VL-1.6B",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-13B",
+        "template": null,
+        "multimodal": false,
+        "hf": "huggyllama/llama-13b",
+        "modelscope": "skyline2006/llama-13b",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-2-13B",
+        "template": "llama2",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-2-13b-hf",
+        "modelscope": "modelscope/Llama-2-13b-ms",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-2-13B-Chat",
+        "template": "llama2",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-2-13b-chat-hf",
+        "modelscope": "modelscope/Llama-2-13b-chat-ms",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-2-70B",
+        "template": "llama2",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-2-70b-hf",
+        "modelscope": "modelscope/Llama-2-70b-ms",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-2-70B-Chat",
+        "template": "llama2",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-2-70b-chat-hf",
+        "modelscope": "modelscope/Llama-2-70b-chat-ms",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-2-7B",
+        "template": "llama2",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-2-7b-hf",
+        "modelscope": "modelscope/Llama-2-7b-ms",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-2-7B-Chat",
+        "template": "llama2",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-2-7b-chat-hf",
+        "modelscope": "modelscope/Llama-2-7b-chat-ms",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3-70B",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3-70B",
+        "modelscope": "LLM-Research/Meta-Llama-3-70B",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3-70B-Chinese-Chat",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "shenzhi-wang/Llama3-70B-Chinese-Chat",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3-70B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3-70B-Instruct",
+        "modelscope": "LLM-Research/Meta-Llama-3-70B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3-8B",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3-8B",
+        "modelscope": "LLM-Research/Meta-Llama-3-8B",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3-8B-Chinese-Chat",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "shenzhi-wang/Llama3-8B-Chinese-Chat",
+        "modelscope": "LLM-Research/Llama3-8B-Chinese-Chat",
+        "openmind": "LlamaFactory/Llama3-Chinese-8B-Instruct"
+      },
+      {
+        "name": "Llama-3-8B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3-8B-Instruct",
+        "modelscope": "LLM-Research/Meta-Llama-3-8B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-405B",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3.1-405B",
+        "modelscope": "LLM-Research/Meta-Llama-3.1-405B",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-405B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3.1-405B-Instruct",
+        "modelscope": "LLM-Research/Meta-Llama-3.1-405B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-70B",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3.1-70B",
+        "modelscope": "LLM-Research/Meta-Llama-3.1-70B",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-70B-Chinese-Chat",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "shenzhi-wang/Llama3.1-70B-Chinese-Chat",
+        "modelscope": "XD_AI/Llama3.1-70B-Chinese-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-70B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+        "modelscope": "LLM-Research/Meta-Llama-3.1-70B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-8B",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3.1-8B",
+        "modelscope": "LLM-Research/Meta-Llama-3.1-8B",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-8B-Chinese-Chat",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "shenzhi-wang/Llama3.1-8B-Chinese-Chat",
+        "modelscope": "XD_AI/Llama3.1-8B-Chinese-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.1-8B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        "modelscope": "LLM-Research/Meta-Llama-3.1-8B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-11B-Vision",
+        "template": "mllama",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-3.2-11B-Vision",
+        "modelscope": "LLM-Research/Llama-3.2-11B-Vision",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-11B-Vision-Instruct",
+        "template": "mllama",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-3.2-11B-Vision-Instruct",
+        "modelscope": "LLM-Research/Llama-3.2-11B-Vision-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-1B",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-3.2-1B",
+        "modelscope": "LLM-Research/Llama-3.2-1B",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-1B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-3.2-1B-Instruct",
+        "modelscope": "LLM-Research/Llama-3.2-1B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-3B",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-3.2-3B",
+        "modelscope": "LLM-Research/Llama-3.2-3B",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-3B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-3.2-3B-Instruct",
+        "modelscope": "LLM-Research/Llama-3.2-3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-90B-Vision",
+        "template": "mllama",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-3.2-90B-Vision",
+        "modelscope": "LLM-Research/Llama-3.2-90B-Vision",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.2-90B-Vision-Instruct",
+        "template": "mllama",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-3.2-90B-Vision-Instruct",
+        "modelscope": "LLM-Research/Llama-3.2-90B-Vision-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-3.3-70B-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "meta-llama/Llama-3.3-70B-Instruct",
+        "modelscope": "LLM-Research/Llama-3.3-70B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-30B",
+        "template": null,
+        "multimodal": false,
+        "hf": "huggyllama/llama-30b",
+        "modelscope": "skyline2006/llama-30b",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-4-Maverick-17B-128E",
+        "template": "llama4",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-4-Maverick-17B-128E",
+        "modelscope": "LLM-Research/Llama-4-Maverick-17B-128E",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-4-Maverick-17B-128E-Instruct",
+        "template": "llama4",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-4-Maverick-17B-128E-Instruct",
+        "modelscope": "LLM-Research/Llama-4-Maverick-17B-128E-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-4-Scout-17B-16E",
+        "template": "llama4",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-4-Scout-17B-16E",
+        "modelscope": "LLM-Research/Llama-4-Scout-17B-16E",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-4-Scout-17B-16E-Instruct",
+        "template": "llama4",
+        "multimodal": true,
+        "hf": "meta-llama/Llama-4-Scout-17B-16E-Instruct",
+        "modelscope": "LLM-Research/Llama-4-Scout-17B-16E-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-65B",
+        "template": null,
+        "multimodal": false,
+        "hf": "huggyllama/llama-65b",
+        "modelscope": "skyline2006/llama-65b",
+        "openmind": ""
+      },
+      {
+        "name": "Llama-7B",
+        "template": null,
+        "multimodal": false,
+        "hf": "huggyllama/llama-7b",
+        "modelscope": "skyline2006/llama-7b",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-1.5-13B-Chat",
+        "template": "llava",
+        "multimodal": true,
+        "hf": "llava-hf/llava-1.5-13b-hf",
+        "modelscope": "swift/llava-1.5-13b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-1.5-7B-Chat",
+        "template": "llava",
+        "multimodal": true,
+        "hf": "llava-hf/llava-1.5-7b-hf",
+        "modelscope": "swift/llava-1.5-7b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-110B-Chat",
+        "template": "llava_next_qwen",
+        "multimodal": true,
+        "hf": "llava-hf/llava-next-110b-hf",
+        "modelscope": "AI-ModelScope/llava-next-110b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-13B-Chat",
+        "template": "llava_next",
+        "multimodal": true,
+        "hf": "llava-hf/llava-v1.6-vicuna-13b-hf",
+        "modelscope": "swift/llava-v1.6-vicuna-13b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-34B-Chat",
+        "template": "llava_next_yi",
+        "multimodal": true,
+        "hf": "llava-hf/llava-v1.6-34b-hf",
+        "modelscope": "LLM-Research/llava-v1.6-34b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-72B-Chat",
+        "template": "llava_next_qwen",
+        "multimodal": true,
+        "hf": "llava-hf/llava-next-72b-hf",
+        "modelscope": "AI-ModelScope/llava-next-72b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-7B-Chat",
+        "template": "llava_next",
+        "multimodal": true,
+        "hf": "llava-hf/llava-v1.6-vicuna-7b-hf",
+        "modelscope": "swift/llava-v1.6-vicuna-7b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-Llama3-8B-Chat",
+        "template": "llava_next_llama3",
+        "multimodal": true,
+        "hf": "llava-hf/llama3-llava-next-8b-hf",
+        "modelscope": "swift/llama3-llava-next-8b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-Mistral-7B-Chat",
+        "template": "llava_next_mistral",
+        "multimodal": true,
+        "hf": "llava-hf/llava-v1.6-mistral-7b-hf",
+        "modelscope": "swift/llava-v1.6-mistral-7b-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-Video-34B-Chat",
+        "template": "llava_next_video_yi",
+        "multimodal": true,
+        "hf": "llava-hf/LLaVA-NeXT-Video-34B-hf",
+        "modelscope": "swift/LLaVA-NeXT-Video-34B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-Video-34B-DPO-Chat",
+        "template": "llava_next_video_yi",
+        "multimodal": true,
+        "hf": "llava-hf/LLaVA-NeXT-Video-34B-DPO-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-Video-7B-32k-Chat",
+        "template": "llava_next_video_mistral",
+        "multimodal": true,
+        "hf": "llava-hf/LLaVA-NeXT-Video-7B-32K-hf",
+        "modelscope": "swift/LLaVA-NeXT-Video-7B-32K-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-Video-7B-Chat",
+        "template": "llava_next_video",
+        "multimodal": true,
+        "hf": "llava-hf/LLaVA-NeXT-Video-7B-hf",
+        "modelscope": "swift/LLaVA-NeXT-Video-7B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "LLaVA-NeXT-Video-7B-DPO-Chat",
+        "template": "llava_next_video",
+        "multimodal": true,
+        "hf": "llava-hf/LLaVA-NeXT-Video-7B-DPO-hf",
+        "modelscope": "swift/LLaVA-NeXT-Video-7B-DPO-hf",
+        "openmind": ""
+      },
+      {
+        "name": "MedGemma-27B-Instruct",
+        "template": "gemma2",
+        "multimodal": false,
+        "hf": "google/medgemma-27b-text-it",
+        "modelscope": "google/medgemma-27b-text-it",
+        "openmind": ""
+      },
+      {
+        "name": "MedGemma-27B-Instruct",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/medgemma-27b-text-it",
+        "modelscope": "google/medgemma-27b-text-it",
+        "openmind": ""
+      },
+      {
+        "name": "MedGemma-4B",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/medgemma-4b-pt",
+        "modelscope": "google/medgemma-4b-pt",
+        "openmind": ""
+      },
+      {
+        "name": "MedGemma-4B-Instruct",
+        "template": "gemma3",
+        "multimodal": true,
+        "hf": "google/medgemma-4b-it",
+        "modelscope": "google/medgemma-4b-it",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-7B-Base",
+        "template": "mimo",
+        "multimodal": false,
+        "hf": "XiaomiMiMo/MiMo-7B-Base",
+        "modelscope": "XiaomiMiMo/MiMo-7B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-7B-Instruct",
+        "template": "mimo",
+        "multimodal": false,
+        "hf": "XiaomiMiMo/MiMo-7B-SFT",
+        "modelscope": "XiaomiMiMo/MiMo-7B-SFT",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-7B-Instruct-RL",
+        "template": "mimo",
+        "multimodal": false,
+        "hf": "XiaomiMiMo/MiMo-7B-RL",
+        "modelscope": "XiaomiMiMo/MiMo-7B-RL",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-7B-RL-ZERO",
+        "template": "mimo",
+        "multimodal": false,
+        "hf": "XiaomiMiMo/MiMo-7B-RL-ZERO",
+        "modelscope": "XiaomiMiMo/MiMo-7B-RL-ZERO",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-7B-VL-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "XiaomiMiMo/MiMo-VL-7B-SFT",
+        "modelscope": "XiaomiMiMo/MiMo-VL-7B-SFT",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-7B-VL-RL",
+        "template": "mimo_vl",
+        "multimodal": true,
+        "hf": "XiaomiMiMo/MiMo-VL-7B-RL",
+        "modelscope": "XiaomiMiMo/MiMo-VL-7B-RL",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-V2-Flash",
+        "template": "mimo_v2",
+        "multimodal": false,
+        "hf": "XiaomiMiMo/MiMo-V2-Flash",
+        "modelscope": "XiaomiMiMo/MiMo-V2-Flash",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-V2-Flash-Base",
+        "template": "mimo_v2",
+        "multimodal": false,
+        "hf": "XiaomiMiMo/MiMo-V2-Flash-Base",
+        "modelscope": "XiaomiMiMo/MiMo-V2-Flash-Base",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-VL-7B-RL-2508",
+        "template": "mimo_vl",
+        "multimodal": true,
+        "hf": "XiaomiMiMo/MiMo-VL-7B-RL-2508",
+        "modelscope": "XiaomiMiMo/MiMo-VL-7B-RL-2508",
+        "openmind": ""
+      },
+      {
+        "name": "MiMo-VL-7B-SFT-2508",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "XiaomiMiMo/MiMo-VL-7B-SFT-2508",
+        "modelscope": "XiaomiMiMo/MiMo-VL-7B-SFT-2508",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM-o-2.6",
+        "template": "minicpm_o",
+        "multimodal": true,
+        "hf": "openbmb/MiniCPM-o-2_6",
+        "modelscope": "OpenBMB/MiniCPM-o-2_6",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM-o-4_5",
+        "template": "minicpm_o",
+        "multimodal": true,
+        "hf": "openbmb/MiniCPM-o-4_5",
+        "modelscope": "OpenBMB/MiniCPM-o-4_5",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM-V-2.6",
+        "template": "minicpm_v",
+        "multimodal": true,
+        "hf": "openbmb/MiniCPM-V-2_6",
+        "modelscope": "OpenBMB/MiniCPM-V-2_6",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM-V-4",
+        "template": "minicpm_v",
+        "multimodal": true,
+        "hf": "openbmb/MiniCPM-V-4",
+        "modelscope": "OpenBMB/MiniCPM-V-4",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM-V-4.5",
+        "template": "minicpm_v",
+        "multimodal": true,
+        "hf": "openbmb/MiniCPM-V-4_5",
+        "modelscope": "OpenBMB/MiniCPM-V-4_5",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM-V-4.6",
+        "template": "minicpm_v_4_6",
+        "multimodal": true,
+        "hf": "openbmb/MiniCPM-V-4_6",
+        "modelscope": "OpenBMB/MiniCPM-V-4_6",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM4-0.5B-Chat",
+        "template": "cpm4",
+        "multimodal": false,
+        "hf": "openbmb/MiniCPM4-0.5B",
+        "modelscope": "OpenBMB/MiniCPM4-0.5B",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM4-8B-Chat",
+        "template": "cpm4",
+        "multimodal": false,
+        "hf": "openbmb/MiniCPM4-8B",
+        "modelscope": "OpenBMB/MiniCPM4-8B",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM4.1-8B-Chat",
+        "template": "cpm4",
+        "multimodal": false,
+        "hf": "openbmb/MiniCPM4.1-8B",
+        "modelscope": "OpenBMB/MiniCPM4.1-8B",
+        "openmind": ""
+      },
+      {
+        "name": "MiniCPM5-1B-Chat",
+        "template": "empty",
+        "multimodal": false,
+        "hf": "openbmb/MiniCPM5-1B",
+        "modelscope": "OpenBMB/MiniCPM5-1B",
+        "openmind": ""
+      },
+      {
+        "name": "MiniMax-M1-40k-Thinking",
+        "template": "minimax1",
+        "multimodal": false,
+        "hf": "MiniMaxAI/MiniMax-M1-40k-hf",
+        "modelscope": "MiniMaxAI/MiniMax-M1-40k-hf",
+        "openmind": ""
+      },
+      {
+        "name": "MiniMax-M1-80k-Thinking",
+        "template": "minimax1",
+        "multimodal": false,
+        "hf": "MiniMaxAI/MiniMax-M1-80k-hf",
+        "modelscope": "MiniMaxAI/MiniMax-M1-80k-hf",
+        "openmind": ""
+      },
+      {
+        "name": "MiniMax-M2-Thinking",
+        "template": "minimax2",
+        "multimodal": false,
+        "hf": "MiniMaxAI/MiniMax-M2",
+        "modelscope": "MiniMaxAI/MiniMax-M2",
+        "openmind": ""
+      },
+      {
+        "name": "MiniMax-M2.1-Thinking",
+        "template": "minimax2",
+        "multimodal": false,
+        "hf": "MiniMaxAI/MiniMax-M2.1",
+        "modelscope": "MiniMaxAI/MiniMax-M2.1",
+        "openmind": ""
+      },
+      {
+        "name": "MiniMax-Text-01-Instruct",
+        "template": "minimax1",
+        "multimodal": false,
+        "hf": "MiniMaxAI/MiniMax-Text-01-hf",
+        "modelscope": "MiniMaxAI/MiniMax-Text-01",
+        "openmind": ""
+      },
+      {
+        "name": "Ministral-3-14B-Base-2512",
+        "template": "ministral3",
+        "multimodal": true,
+        "hf": "mistralai/Ministral-3-14B-Base-2512",
+        "modelscope": "mistralai/Ministral-3-14B-Base-2512",
+        "openmind": ""
+      },
+      {
+        "name": "Ministral-3-14B-Instruct-2512",
+        "template": "ministral3",
+        "multimodal": true,
+        "hf": "mistralai/Ministral-3-14B-Instruct-2512",
+        "modelscope": "mistralai/Ministral-3-14B-Instruct-2512",
+        "openmind": ""
+      },
+      {
+        "name": "Ministral-3-3B-Base-2512",
+        "template": "ministral3",
+        "multimodal": true,
+        "hf": "mistralai/Ministral-3-3B-Base-2512",
+        "modelscope": "mistralai/Ministral-3-3B-Base-2512",
+        "openmind": ""
+      },
+      {
+        "name": "Ministral-3-3B-Instruct-2512",
+        "template": "ministral3",
+        "multimodal": true,
+        "hf": "mistralai/Ministral-3-3B-Instruct-2512",
+        "modelscope": "mistralai/Ministral-3-3B-Instruct-2512",
+        "openmind": ""
+      },
+      {
+        "name": "Ministral-3-8B-Base-2512",
+        "template": "ministral3",
+        "multimodal": true,
+        "hf": "mistralai/Ministral-3-8B-Base-2512",
+        "modelscope": "mistralai/Ministral-3-8B-Base-2512",
+        "openmind": ""
+      },
+      {
+        "name": "Ministral-3-8B-Instruct-2512",
+        "template": "ministral3",
+        "multimodal": true,
+        "hf": "mistralai/Ministral-3-8B-Instruct-2512",
+        "modelscope": "mistralai/Ministral-3-8B-Instruct-2512",
+        "openmind": ""
+      },
+      {
+        "name": "Ministral-8B-Instruct-2410",
+        "template": "ministral",
+        "multimodal": false,
+        "hf": "mistralai/Ministral-8B-Instruct-2410",
+        "modelscope": "mistralai/Ministral-8B-Instruct-2410",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-7B-Instruct-v0.1",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-7B-Instruct-v0.1",
+        "modelscope": "AI-ModelScope/Mistral-7B-Instruct-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-7B-Instruct-v0.2",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-7B-Instruct-v0.2",
+        "modelscope": "AI-ModelScope/Mistral-7B-Instruct-v0.2",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-7B-Instruct-v0.3",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-7B-Instruct-v0.3",
+        "modelscope": "LLM-Research/Mistral-7B-Instruct-v0.3",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-7B-v0.1",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-7B-v0.1",
+        "modelscope": "AI-ModelScope/Mistral-7B-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-7B-v0.2",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "alpindale/Mistral-7B-v0.2-hf",
+        "modelscope": "AI-ModelScope/Mistral-7B-v0.2-hf",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-7B-v0.3",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-7B-v0.3",
+        "modelscope": "LLM-Research/mistral-7b-v0.3",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-Nemo-Base-2407",
+        "template": "ministral",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-Nemo-Base-2407",
+        "modelscope": "LLM-Research/Mistral-Nemo-Base-2407",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-Nemo-Instruct-2407",
+        "template": "ministral",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-Nemo-Instruct-2407",
+        "modelscope": "AI-ModelScope/Mistral-Nemo-Instruct-2407",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-Small-24B-Base-2501",
+        "template": "mistral_small",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-Small-24B-Base-2501",
+        "modelscope": "mistralai/Mistral-Small-24B-Base-2501",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-Small-24B-Instruct-2501",
+        "template": "mistral_small",
+        "multimodal": false,
+        "hf": "mistralai/Mistral-Small-24B-Instruct-2501",
+        "modelscope": "mistralai/Mistral-Small-24B-Instruct-2501",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-Small-3.1-24B-Base",
+        "template": "mistral_small",
+        "multimodal": true,
+        "hf": "mistralai/Mistral-Small-3.1-24B-Base-2503",
+        "modelscope": "mistralai/Mistral-Small-3.1-24B-Base-2503",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-Small-3.1-24B-Instruct",
+        "template": "mistral_small",
+        "multimodal": true,
+        "hf": "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+        "modelscope": "mistralai/Mistral-Small-3.1-24B-Instruct-2503",
+        "openmind": ""
+      },
+      {
+        "name": "Mistral-Small-3.2-24B-Instruct",
+        "template": "mistral_small",
+        "multimodal": true,
+        "hf": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+        "modelscope": "mistralai/Mistral-Small-3.2-24B-Instruct-2506",
+        "openmind": ""
+      },
+      {
+        "name": "Mixtral-8x22B-v0.1",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mixtral-8x22B-v0.1",
+        "modelscope": "AI-ModelScope/Mixtral-8x22B-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "Mixtral-8x22B-v0.1-Instruct",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mixtral-8x22B-Instruct-v0.1",
+        "modelscope": "AI-ModelScope/Mixtral-8x22B-Instruct-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "Mixtral-8x7B-v0.1",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mixtral-8x7B-v0.1",
+        "modelscope": "AI-ModelScope/Mixtral-8x7B-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "Mixtral-8x7B-v0.1-Instruct",
+        "template": "mistral",
+        "multimodal": false,
+        "hf": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "modelscope": "AI-ModelScope/Mixtral-8x7B-Instruct-v0.1",
+        "openmind": ""
+      },
+      {
+        "name": "MobileLLM-R1-140M-Base",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "facebook/MobileLLM-R1-140M-base",
+        "modelscope": "facebook/MobileLLM-R1-140M-base",
+        "openmind": ""
+      },
+      {
+        "name": "MobileLLM-R1-140M-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "facebook/MobileLLM-R1-140M",
+        "modelscope": "facebook/MobileLLM-R1-140M",
+        "openmind": ""
+      },
+      {
+        "name": "MobileLLM-R1-360M-Base",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "facebook/MobileLLM-R1-360M-base",
+        "modelscope": "facebook/MobileLLM-R1-360M-base",
+        "openmind": ""
+      },
+      {
+        "name": "MobileLLM-R1-360M-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "facebook/MobileLLM-R1-360M",
+        "modelscope": "facebook/MobileLLM-R1-360M",
+        "openmind": ""
+      },
+      {
+        "name": "MobileLLM-R1-950M-Base",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "facebook/MobileLLM-R1-950M-base",
+        "modelscope": "facebook/MobileLLM-R1-950M-base",
+        "openmind": ""
+      },
+      {
+        "name": "MobileLLM-R1-950M-Instruct",
+        "template": "llama3",
+        "multimodal": false,
+        "hf": "facebook/MobileLLM-R1-950M",
+        "modelscope": "facebook/MobileLLM-R1-950M",
+        "openmind": ""
+      },
+      {
+        "name": "Moonlight-16B-A3B",
+        "template": "moonlight",
+        "multimodal": false,
+        "hf": "moonshotai/Moonlight-16B-A3B",
+        "modelscope": "moonshotai/Moonlight-16B-A3B",
+        "openmind": ""
+      },
+      {
+        "name": "Moonlight-16B-A3B-Instruct",
+        "template": "moonlight",
+        "multimodal": false,
+        "hf": "moonshotai/Moonlight-16B-A3B-Instruct",
+        "modelscope": "moonshotai/Moonlight-16B-A3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "MOSS-VL-Instruct-0708",
+        "template": "moss_vl",
+        "multimodal": true,
+        "hf": "OpenMOSS-Team/MOSS-VL-Instruct-0708",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "OLMo-1.7-7B",
+        "template": null,
+        "multimodal": false,
+        "hf": "allenai/OLMo-1.7-7B-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "OLMo-1B",
+        "template": null,
+        "multimodal": false,
+        "hf": "allenai/OLMo-1B-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "OLMo-7B",
+        "template": null,
+        "multimodal": false,
+        "hf": "allenai/OLMo-7B-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "OLMo-7B-Chat",
+        "template": null,
+        "multimodal": false,
+        "hf": "ssec-uw/OLMo-7B-Instruct-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "OpenChat3.5-7B-Chat",
+        "template": "openchat",
+        "multimodal": false,
+        "hf": "openchat/openchat-3.5-0106",
+        "modelscope": "xcwzxcwz/openchat-3.5-0106",
+        "openmind": ""
+      },
+      {
+        "name": "OpenChat3.6-8B-Chat",
+        "template": "openchat-3.6",
+        "multimodal": false,
+        "hf": "openchat/openchat-3.6-8b-20240522",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "OpenCoder-1.5B-Base",
+        "template": "opencoder",
+        "multimodal": false,
+        "hf": "infly/OpenCoder-1.5B-Base",
+        "modelscope": "infly/OpenCoder-1.5B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "OpenCoder-1.5B-Instruct",
+        "template": "opencoder",
+        "multimodal": false,
+        "hf": "infly/OpenCoder-1.5B-Instruct",
+        "modelscope": "infly/OpenCoder-1.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "OpenCoder-8B-Base",
+        "template": "opencoder",
+        "multimodal": false,
+        "hf": "infly/OpenCoder-8B-Base",
+        "modelscope": "infly/OpenCoder-8B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "OpenCoder-8B-Instruct",
+        "template": "opencoder",
+        "multimodal": false,
+        "hf": "infly/OpenCoder-8B-Instruct",
+        "modelscope": "infly/OpenCoder-8B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma-3B-mix-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma-3b-mix-224",
+        "modelscope": "AI-ModelScope/paligemma-3b-mix-224",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma-3B-mix-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma-3b-mix-448",
+        "modelscope": "AI-ModelScope/paligemma-3b-mix-448",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma-3B-pt-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma-3b-pt-224",
+        "modelscope": "AI-ModelScope/paligemma-3b-pt-224",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma-3B-pt-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma-3b-pt-448",
+        "modelscope": "AI-ModelScope/paligemma-3b-pt-448",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma-3B-pt-896",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma-3b-pt-896",
+        "modelscope": "AI-ModelScope/paligemma-3b-pt-896",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-10B-mix-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-10b-mix-224",
+        "modelscope": "mlx-community/paligemma2-10b-mix-224-bf16",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-10B-mix-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-10b-mix-448",
+        "modelscope": "mlx-community/paligemma2-10b-mix-448-bf16",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-10B-pt-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-10b-pt-224",
+        "modelscope": "AI-ModelScope/paligemma2-10b-pt-224",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-10B-pt-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-10b-pt-448",
+        "modelscope": "AI-ModelScope/paligemma2-10b-pt-448",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-10B-pt-896",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-10b-pt-896",
+        "modelscope": "AI-ModelScope/paligemma2-10b-pt-896",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-28B-mix-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-28b-mix-224",
+        "modelscope": "mlx-community/paligemma2-28b-mix-224-bf16",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-28B-mix-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-28b-mix-448",
+        "modelscope": "mlx-community/paligemma2-28b-mix-448-bf16",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-28B-pt-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-28b-pt-224",
+        "modelscope": "AI-ModelScope/paligemma2-28b-pt-224",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-28B-pt-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-28b-pt-448",
+        "modelscope": "AI-ModelScope/paligemma2-28b-pt-448",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-28B-pt-896",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-28b-pt-896",
+        "modelscope": "AI-ModelScope/paligemma2-28b-pt-896",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-3B-mix-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-3b-mix-224",
+        "modelscope": "mlx-community/paligemma2-3b-mix-224-bf16",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-3B-mix-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-3b-mix-448",
+        "modelscope": "mlx-community/paligemma2-3b-mix-448-bf16",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-3B-pt-224",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-3b-pt-224",
+        "modelscope": "AI-ModelScope/paligemma2-3b-pt-224",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-3B-pt-448",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-3b-pt-448",
+        "modelscope": "AI-ModelScope/paligemma2-3b-pt-448",
+        "openmind": ""
+      },
+      {
+        "name": "PaliGemma2-3B-pt-896",
+        "template": "paligemma",
+        "multimodal": true,
+        "hf": "google/paligemma2-3b-pt-896",
+        "modelscope": "AI-ModelScope/paligemma2-3b-pt-896",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3-14B-128k-Instruct",
+        "template": "phi",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3-medium-128k-instruct",
+        "modelscope": "LLM-Research/Phi-3-medium-128k-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3-14B-8k-Instruct",
+        "template": "phi",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3-medium-4k-instruct",
+        "modelscope": "LLM-Research/Phi-3-medium-4k-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3-4B-128k-Instruct",
+        "template": "phi",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3-mini-128k-instruct",
+        "modelscope": "LLM-Research/Phi-3-mini-128k-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3-4B-4k-Instruct",
+        "template": "phi",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3-mini-4k-instruct",
+        "modelscope": "LLM-Research/Phi-3-mini-4k-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3-7B-128k-Instruct",
+        "template": "phi_small",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3-small-128k-instruct",
+        "modelscope": "LLM-Research/Phi-3-small-128k-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3-7B-8k-Instruct",
+        "template": "phi_small",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3-small-8k-instruct",
+        "modelscope": "LLM-Research/Phi-3-small-8k-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3.5-4B-instruct",
+        "template": "phi",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3.5-mini-instruct",
+        "modelscope": "LLM-Research/Phi-3.5-mini-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-3.5-MoE-42B-A6.6B-instruct",
+        "template": "phi",
+        "multimodal": false,
+        "hf": "microsoft/Phi-3.5-MoE-instruct",
+        "modelscope": "LLM-Research/Phi-3.5-MoE-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-4-14B-Instruct",
+        "template": "phi4",
+        "multimodal": false,
+        "hf": "microsoft/phi-4",
+        "modelscope": "LLM-Research/phi-4",
+        "openmind": ""
+      },
+      {
+        "name": "Phi-4-3.8B-instruct",
+        "template": "phi4_mini",
+        "multimodal": false,
+        "hf": "microsoft/Phi-4-mini-instruct",
+        "modelscope": "LLM-Research/Phi-4-mini-instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Pixtral-12B",
+        "template": "pixtral",
+        "multimodal": true,
+        "hf": "mistral-community/pixtral-12b",
+        "modelscope": "AI-ModelScope/pixtral-12b",
+        "openmind": ""
+      },
+      {
+        "name": "QVQ-72B-Preview",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/QVQ-72B-Preview",
+        "modelscope": "Qwen/QVQ-72B-Preview",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen-AgentWorld-35B-A3B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen-AgentWorld-35B-A3B",
+        "modelscope": "Qwen/Qwen-AgentWorld-35B-A3B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+        "modelscope": "Qwen/Qwen3-Next-80B-A3B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-0.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-0.5B",
+        "modelscope": "Qwen/Qwen2-0.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-0.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-0.5B-Instruct",
+        "modelscope": "Qwen/Qwen2-0.5B-Instruct",
+        "openmind": "LlamaFactory/Qwen2-0.5B-Instruct"
+      },
+      {
+        "name": "Qwen2-0.5B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-0.5B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2-0.5B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-0.5B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-0.5B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-0.5B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-0.5B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-0.5B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2-0.5B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-1.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-1.5B",
+        "modelscope": "Qwen/Qwen2-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-1.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-1.5B-Instruct",
+        "modelscope": "Qwen/Qwen2-1.5B-Instruct",
+        "openmind": "LlamaFactory/Qwen2-1.5B-Instruct"
+      },
+      {
+        "name": "Qwen2-1.5B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-1.5B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2-1.5B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-1.5B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-1.5B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-1.5B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-1.5B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-1.5B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2-1.5B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-57B-A14B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-57B-A14B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-57B-A14B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-72B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-72B",
+        "modelscope": "Qwen/Qwen2-72B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-72B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-72B-Instruct",
+        "modelscope": "Qwen/Qwen2-72B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-72B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-72B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2-72B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-72B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-72B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-72B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-72B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-72B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2-72B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-7B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-7B",
+        "modelscope": "Qwen/Qwen2-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-7B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-7B-Instruct",
+        "modelscope": "Qwen/Qwen2-7B-Instruct",
+        "openmind": "LlamaFactory/Qwen2-7B-Instruct"
+      },
+      {
+        "name": "Qwen2-7B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-7B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2-7B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-7B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-7B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-7B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-7B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-7B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2-7B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Audio-7B",
+        "template": "qwen2_audio",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-Audio-7B",
+        "modelscope": "Qwen/Qwen2-Audio-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Audio-7B-Instruct",
+        "template": "qwen2_audio",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-Audio-7B-Instruct",
+        "modelscope": "Qwen/Qwen2-Audio-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Math-1.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-Math-1.5B",
+        "modelscope": "Qwen/Qwen2-Math-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Math-1.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-Math-1.5B-Instruct",
+        "modelscope": "Qwen/Qwen2-Math-1.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Math-72B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-Math-72B",
+        "modelscope": "Qwen/Qwen2-Math-72B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Math-72B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-Math-72B-Instruct",
+        "modelscope": "Qwen/Qwen2-Math-72B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Math-7B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-Math-7B",
+        "modelscope": "Qwen/Qwen2-Math-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-Math-7B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-Math-7B-Instruct",
+        "modelscope": "Qwen/Qwen2-Math-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-MoE-57B-A14B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-57B-A14B",
+        "modelscope": "Qwen/Qwen2-57B-A14B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-MoE-57B-A14B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2-57B-A14B-Instruct",
+        "modelscope": "Qwen/Qwen2-57B-A14B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-2B",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-2B",
+        "modelscope": "Qwen/Qwen2-VL-2B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-2B-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-2B-Instruct",
+        "modelscope": "Qwen/Qwen2-VL-2B-Instruct",
+        "openmind": "LlamaFactory/Qwen2-VL-2B-Instruct"
+      },
+      {
+        "name": "Qwen2-VL-2B-Instruct-AWQ",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-2B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2-VL-2B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-2B-Instruct-GPTQ-Int4",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-2B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-VL-2B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-2B-Instruct-GPTQ-Int8",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-2B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2-VL-2B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-72B",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-72B",
+        "modelscope": "Qwen/Qwen2-VL-72B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-72B-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-72B-Instruct",
+        "modelscope": "Qwen/Qwen2-VL-72B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-72B-Instruct-AWQ",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-72B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2-VL-72B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-72B-Instruct-GPTQ-Int4",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-72B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-VL-72B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-72B-Instruct-GPTQ-Int8",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-72B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2-VL-72B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-7B",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-7B",
+        "modelscope": "Qwen/Qwen2-VL-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-7B-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-7B-Instruct",
+        "modelscope": "Qwen/Qwen2-VL-7B-Instruct",
+        "openmind": "LlamaFactory/Qwen2-VL-7B-Instruct"
+      },
+      {
+        "name": "Qwen2-VL-7B-Instruct-AWQ",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-7B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2-VL-7B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-7B-Instruct-GPTQ-Int4",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-7B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2-VL-7B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2-VL-7B-Instruct-GPTQ-Int8",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2-VL-7B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2-VL-7B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-0.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-0.5B",
+        "modelscope": "Qwen/Qwen2.5-0.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-0.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-0.5B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-0.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-0.5B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-0.5B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-0.5B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-0.5B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-0.5B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-0.5B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-0.5B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-0.5B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2.5-0.5B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-1.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-1.5B",
+        "modelscope": "Qwen/Qwen2.5-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-1.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-1.5B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-1.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-1.5B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-1.5B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-1.5B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-1.5B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2.5-1.5B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-14B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-14B",
+        "modelscope": "Qwen/Qwen2.5-14B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-14B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-14B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-14B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-14B-Instruct-1M",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-14B-Instruct-1M",
+        "modelscope": "Qwen/Qwen2.5-14B-Instruct-1M",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-14B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-14B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-14B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-14B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-14B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-14B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-14B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-14B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2.5-14B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-32B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-32B",
+        "modelscope": "Qwen/Qwen2.5-32B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-32B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-32B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-32B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-32B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-32B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-32B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-32B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-32B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-3B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-3B",
+        "modelscope": "Qwen/Qwen2.5-3B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-3B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-3B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-3B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-3B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-3B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-3B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-3B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2.5-3B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-72B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-72B",
+        "modelscope": "Qwen/Qwen2.5-72B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-72B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-72B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-72B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-72B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-72B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-72B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-72B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-72B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2.5-72B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-7B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-7B",
+        "modelscope": "Qwen/Qwen2.5-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-7B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-7B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-7B-Instruct-1M",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-7B-Instruct-1M",
+        "modelscope": "Qwen/Qwen2.5-7B-Instruct-1M",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-7B-Instruct-AWQ",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-7B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-7B-Instruct-GPTQ-Int4",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-7B-Instruct-GPTQ-Int8",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-0.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-0.5B",
+        "modelscope": "Qwen/Qwen2.5-Coder-0.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-0.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-1.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-1.5B",
+        "modelscope": "Qwen/Qwen2.5-Coder-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-1.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-14B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-14B",
+        "modelscope": "Qwen/Qwen2.5-Coder-14B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-14B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-14B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-14B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-32B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-32B",
+        "modelscope": "Qwen/Qwen2.5-Coder-32B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-32B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-32B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-32B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-3B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-3B",
+        "modelscope": "Qwen/Qwen2.5-Coder-3B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-3B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-3B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-7B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-7B",
+        "modelscope": "Qwen/Qwen2.5-Coder-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Coder-7B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Coder-7B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Math-1.5B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Math-1.5B",
+        "modelscope": "Qwen/Qwen2.5-Math-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Math-1.5B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Math-1.5B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-1.5B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Math-72B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Math-72B",
+        "modelscope": "Qwen/Qwen2.5-Math-72B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Math-72B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Math-72B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-72B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Math-7B",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Math-7B",
+        "modelscope": "Qwen/Qwen2.5-Math-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Math-7B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/Qwen2.5-Math-7B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-Coder-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Omni-3B",
+        "template": "qwen2_omni",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-Omni-3B",
+        "modelscope": "Qwen/Qwen2.5-Omni-3B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Omni-7B",
+        "template": "qwen2_omni",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-Omni-7B",
+        "modelscope": "Qwen/Qwen2.5-Omni-7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Omni-7B-AWQ",
+        "template": "qwen2_omni",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-Omni-7B-AWQ",
+        "modelscope": "Qwen/Qwen2.5-Omni-7B-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-Omni-7B-GPTQ-Int4",
+        "template": "qwen2_omni",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-Omni-7B-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen2.5-Omni-7B-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-VL-32B-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-VL-32B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-VL-32B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-VL-3B-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-VL-3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-VL-3B-Instruct-AWQ",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-VL-3B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-VL-72B-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-VL-72B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-VL-72B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-VL-72B-Instruct-AWQ",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-VL-72B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-VL-7B-Instruct",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "modelscope": "Qwen/Qwen2.5-VL-7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen2.5-VL-7B-Instruct-AWQ",
+        "template": "qwen2_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
+        "modelscope": "Qwen/Qwen2.5-VL-7B-Instruct-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-0.6B-Base",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-0.6B-Base",
+        "modelscope": "Qwen/Qwen3-0.6B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-0.6B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-0.6B",
+        "modelscope": "Qwen/Qwen3-0.6B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-0.6B-Thinking-GPTQ-Int8",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-0.6B-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen3-0.6B-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-1.7B-Base",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-1.7B-Base",
+        "modelscope": "Qwen/Qwen3-1.7B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-1.7B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-1.7B",
+        "modelscope": "Qwen/Qwen3-1.7B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-1.7B-Thinking-GPTQ-Int8",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-1.7B-GPTQ-Int8",
+        "modelscope": "Qwen/Qwen3-1.7B-GPTQ-Int8",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-14B-Base",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-14B-Base",
+        "modelscope": "Qwen/Qwen3-14B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-14B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-14B",
+        "modelscope": "Qwen/Qwen3-14B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-14B-Thinking-AWQ",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-14B-AWQ",
+        "modelscope": "Qwen/Qwen3-14B-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-235B-A22B-Instruct-2507",
+        "template": "qwen3_nothink",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+        "modelscope": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-235B-A22B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-235B-A22B",
+        "modelscope": "Qwen/Qwen3-235B-A22B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-235B-A22B-Thinking-2507",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-235B-A22B-Thinking-2507",
+        "modelscope": "Qwen/Qwen3-235B-A22B-Thinking-2507",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-235B-A22B-Thinking-GPTQ-Int4",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-235B-A22B-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen3-235B-A22B-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-30B-A3B-Base",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-30B-A3B-Base",
+        "modelscope": "Qwen/Qwen3-30B-A3B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-30B-A3B-Instruct-2507",
+        "template": "qwen3_nothink",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "modelscope": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-30B-A3B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-30B-A3B",
+        "modelscope": "Qwen/Qwen3-30B-A3B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-30B-A3B-Thinking-2507",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+        "modelscope": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-30B-A3B-Thinking-GPTQ-Int4",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-30B-A3B-GPTQ-Int4",
+        "modelscope": "Qwen/Qwen3-30B-A3B-GPTQ-Int4",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-32B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-32B",
+        "modelscope": "Qwen/Qwen3-32B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-32B-Thinking-AWQ",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-32B-AWQ",
+        "modelscope": "Qwen/Qwen3-32B-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-4B-Base",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-4B-Base",
+        "modelscope": "Qwen/Qwen3-4B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-4B-Instruct-2507",
+        "template": "qwen3_nothink",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-4B-Instruct-2507",
+        "modelscope": "Qwen/Qwen3-4B-Instruct-2507",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-4B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-4B",
+        "modelscope": "Qwen/Qwen3-4B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-4B-Thinking-2507",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-4B-Thinking-2507",
+        "modelscope": "Qwen/Qwen3-4B-Thinking-2507",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-4B-Thinking-AWQ",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-4B-AWQ",
+        "modelscope": "Qwen/Qwen3-4B-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-8B-Base",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-8B-Base",
+        "modelscope": "Qwen/Qwen3-8B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-8B-Thinking",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-8B",
+        "modelscope": "Qwen/Qwen3-8B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-8B-Thinking-AWQ",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-8B-AWQ",
+        "modelscope": "Qwen/Qwen3-8B-AWQ",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-Next-80B-A3B-Instruct",
+        "template": "qwen3_nothink",
+        "multimodal": false,
+        "hf": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+        "modelscope": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-Omni-30B-A3B-Captioner",
+        "template": "qwen3_omni_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-Omni-30B-A3B-Captioner",
+        "modelscope": "Qwen/Qwen3-Omni-30B-A3B-Captioner",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-Omni-30B-A3B-Instruct",
+        "template": "qwen3_omni_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+        "modelscope": "Qwen/Qwen3-Omni-30B-A3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-Omni-30B-A3B-Thinking",
+        "template": "qwen3_omni",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-Omni-30B-A3B-Thinking",
+        "modelscope": "Qwen/Qwen3-Omni-30B-A3B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-235B-A22B-Instruct",
+        "template": "qwen3_vl_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+        "modelscope": "Qwen/Qwen3-VL-235B-A22B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-235B-A22B-Thinking",
+        "template": "qwen3_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-235B-A22B-Thinking",
+        "modelscope": "Qwen/Qwen3-VL-235B-A22B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-2B-Instruct",
+        "template": "qwen3_vl_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-2B-Instruct",
+        "modelscope": "Qwen/Qwen3-VL-2B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-2B-Thinking",
+        "template": "qwen3_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-2B-Thinking",
+        "modelscope": "Qwen/Qwen3-VL-2B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-30B-A3B-Instruct",
+        "template": "qwen3_vl_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        "modelscope": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-30B-A3B-Thinking",
+        "template": "qwen3_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-30B-A3B-Thinking",
+        "modelscope": "Qwen/Qwen3-VL-30B-A3B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-32B-Instruct",
+        "template": "qwen3_vl_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-32B-Instruct",
+        "modelscope": "Qwen/Qwen3-VL-32B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-32B-Thinking",
+        "template": "qwen3_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-32B-Thinking",
+        "modelscope": "Qwen/Qwen3-VL-32B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-4B-Instruct",
+        "template": "qwen3_vl_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-4B-Instruct",
+        "modelscope": "Qwen/Qwen3-VL-4B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-4B-Thinking",
+        "template": "qwen3_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-4B-Thinking",
+        "modelscope": "Qwen/Qwen3-VL-4B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-8B-Instruct",
+        "template": "qwen3_vl_nothink",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-8B-Instruct",
+        "modelscope": "Qwen/Qwen3-VL-8B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3-VL-8B-Thinking",
+        "template": "qwen3_vl",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3-VL-8B-Thinking",
+        "modelscope": "Qwen/Qwen3-VL-8B-Thinking",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-0.8B-Base",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-0.8B-Base",
+        "modelscope": "Qwen/Qwen3.5-0.8B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-0.8B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-0.8B",
+        "modelscope": "Qwen/Qwen3.5-0.8B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-122B-A10B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-122B-A10B",
+        "modelscope": "Qwen/Qwen3.5-122B-A10B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-27B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-27B",
+        "modelscope": "Qwen/Qwen3.5-27B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-2B-Base",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-2B-Base",
+        "modelscope": "Qwen/Qwen3.5-2B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-2B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-2B",
+        "modelscope": "Qwen/Qwen3.5-2B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-35B-A3B-Base",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-35B-A3B-Base",
+        "modelscope": "Qwen/Qwen3.5-35B-A3B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-35B-A3B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-35B-A3B",
+        "modelscope": "Qwen/Qwen3.5-35B-A3B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-397B-A17B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-397B-A17B",
+        "modelscope": "Qwen/Qwen3.5-397B-A17B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-4B-Base",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-4B-Base",
+        "modelscope": "Qwen/Qwen3.5-4B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-4B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-4B",
+        "modelscope": "Qwen/Qwen3.5-4B",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-9B-Base",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-9B-Base",
+        "modelscope": "Qwen/Qwen3.5-9B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Qwen3.5-9B-Thinking",
+        "template": "qwen3_5",
+        "multimodal": true,
+        "hf": "Qwen/Qwen3.5-9B",
+        "modelscope": "Qwen/Qwen3.5-9B",
+        "openmind": ""
+      },
+      {
+        "name": "QwQ-32B-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/QwQ-32B",
+        "modelscope": "Qwen/QwQ-32B",
+        "openmind": ""
+      },
+      {
+        "name": "QwQ-32B-Preview-Instruct",
+        "template": "qwen",
+        "multimodal": false,
+        "hf": "Qwen/QwQ-32B-Preview",
+        "modelscope": "Qwen/QwQ-32B-Preview",
+        "openmind": ""
+      },
+      {
+        "name": "Seed-Coder-8B-Base",
+        "template": "seed_coder",
+        "multimodal": false,
+        "hf": "ByteDance-Seed/Seed-Coder-8B-Base",
+        "modelscope": "ByteDance-Seed/Seed-Coder-8B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Seed-Coder-8B-Instruct",
+        "template": "seed_coder",
+        "multimodal": false,
+        "hf": "ByteDance-Seed/Seed-Coder-8B-Instruct",
+        "modelscope": "ByteDance-Seed/Seed-Coder-8B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Seed-Coder-8B-Thinking",
+        "template": "seed_coder",
+        "multimodal": false,
+        "hf": "ByteDance-Seed/Seed-Coder-8B-Reasoning-bf16",
+        "modelscope": "ByteDance-Seed/Seed-Coder-8B-Reasoning-bf16",
+        "openmind": ""
+      },
+      {
+        "name": "Seed-OSS-36B-Base",
+        "template": "seed_oss",
+        "multimodal": false,
+        "hf": "ByteDance-Seed/Seed-OSS-36B-Base",
+        "modelscope": "ByteDance-Seed/Seed-OSS-36B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Seed-OSS-36B-Base-woSyn",
+        "template": "seed_oss",
+        "multimodal": false,
+        "hf": "ByteDance-Seed/Seed-OSS-36B-Base-woSyn",
+        "modelscope": "ByteDance-Seed/Seed-OSS-36B-Base-woSyn",
+        "openmind": ""
+      },
+      {
+        "name": "Seed-OSS-36B-Instruct",
+        "template": "seed_oss",
+        "multimodal": false,
+        "hf": "ByteDance-Seed/Seed-OSS-36B-Instruct",
+        "modelscope": "ByteDance-Seed/Seed-OSS-36B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM-1.7B",
+        "template": "smollm",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM-1.7B",
+        "modelscope": "HuggingFaceTB/SmolLM-1.7B",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM-1.7B-Instruct",
+        "template": "smollm",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM-1.7B-Instruct",
+        "modelscope": "HuggingFaceTB/SmolLM-1.7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM-135M",
+        "template": "smollm",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM-135M",
+        "modelscope": "HuggingFaceTB/SmolLM-135M",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM-135M-Instruct",
+        "template": "smollm",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "modelscope": "HuggingFaceTB/SmolLM-135M-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM-360M",
+        "template": "smollm",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM-360M",
+        "modelscope": "HuggingFaceTB/SmolLM-360M",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM-360M-Instruct",
+        "template": "smollm",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM-360M-Instruct",
+        "modelscope": "HuggingFaceTB/SmolLM-360M-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM2-1.7B",
+        "template": "smollm2",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM2-1.7B",
+        "modelscope": "HuggingFaceTB/SmolLM2-1.7B",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM2-1.7B-Instruct",
+        "template": "smollm2",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        "modelscope": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM2-135M",
+        "template": "smollm2",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM2-135M",
+        "modelscope": "HuggingFaceTB/SmolLM2-135M",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM2-135M-Instruct",
+        "template": "smollm2",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "modelscope": "HuggingFaceTB/SmolLM2-135M-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM2-360M",
+        "template": "smollm2",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM2-360M",
+        "modelscope": "HuggingFaceTB/SmolLM2-360M",
+        "openmind": ""
+      },
+      {
+        "name": "SmolLM2-360M-Instruct",
+        "template": "smollm2",
+        "multimodal": false,
+        "hf": "HuggingFaceTB/SmolLM2-360M-Instruct",
+        "modelscope": "HuggingFaceTB/SmolLM2-360M-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "SOLAR-10.7B-Instruct-v1.0",
+        "template": "solar",
+        "multimodal": false,
+        "hf": "upstage/SOLAR-10.7B-Instruct-v1.0",
+        "modelscope": "AI-ModelScope/SOLAR-10.7B-Instruct-v1.0",
+        "openmind": ""
+      },
+      {
+        "name": "SOLAR-10.7B-v1.0",
+        "template": "solar",
+        "multimodal": false,
+        "hf": "upstage/SOLAR-10.7B-v1.0",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "StarCoder2-15B",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigcode/starcoder2-15b",
+        "modelscope": "AI-ModelScope/starcoder2-15b",
+        "openmind": ""
+      },
+      {
+        "name": "StarCoder2-3B",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigcode/starcoder2-3b",
+        "modelscope": "AI-ModelScope/starcoder2-3b",
+        "openmind": ""
+      },
+      {
+        "name": "StarCoder2-7B",
+        "template": null,
+        "multimodal": false,
+        "hf": "bigcode/starcoder2-7b",
+        "modelscope": "AI-ModelScope/starcoder2-7b",
+        "openmind": ""
+      },
+      {
+        "name": "TeleChat2-115B-Chat",
+        "template": "telechat2",
+        "multimodal": false,
+        "hf": "Tele-AI/TeleChat2-115B",
+        "modelscope": "TeleAI/TeleChat2-115B",
+        "openmind": ""
+      },
+      {
+        "name": "TeleChat2-3B-Chat",
+        "template": "telechat2",
+        "multimodal": false,
+        "hf": "Tele-AI/TeleChat2-3B",
+        "modelscope": "TeleAI/TeleChat2-3B",
+        "openmind": ""
+      },
+      {
+        "name": "TeleChat2-7B-Chat",
+        "template": "telechat2",
+        "multimodal": false,
+        "hf": "Tele-AI/TeleChat2-7B",
+        "modelscope": "TeleAI/TeleChat2-7B",
+        "openmind": ""
+      },
+      {
+        "name": "TeleChat2.5-35B-Chat",
+        "template": "telechat2",
+        "multimodal": false,
+        "hf": "Tele-AI/TeleChat2.5-35B",
+        "modelscope": "TeleAI/TeleChat2-35B-Nov",
+        "openmind": ""
+      },
+      {
+        "name": "VibeThinker-1.5B",
+        "template": "qwen3",
+        "multimodal": false,
+        "hf": "WeiboAI/VibeThinker-1.5B",
+        "modelscope": "WeiboAI/VibeThinker-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Vicuna-v1.5-13B-Chat",
+        "template": "vicuna",
+        "multimodal": false,
+        "hf": "lmsys/vicuna-13b-v1.5",
+        "modelscope": "Xorbits/vicuna-13b-v1.5",
+        "openmind": ""
+      },
+      {
+        "name": "Vicuna-v1.5-7B-Chat",
+        "template": "vicuna",
+        "multimodal": false,
+        "hf": "lmsys/vicuna-7b-v1.5",
+        "modelscope": "Xorbits/vicuna-7b-v1.5",
+        "openmind": ""
+      },
+      {
+        "name": "Video-LLaVA-7B-Chat",
+        "template": "video_llava",
+        "multimodal": true,
+        "hf": "LanguageBind/Video-LLaVA-7B-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-6B",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-6B",
+        "modelscope": "Duxiaoman-DI/XuanYuan-6B",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-6B-Chat",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-6B-Chat",
+        "modelscope": "Duxiaoman-DI/XuanYuan-6B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-6B-Chat-4bit",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-6B-Chat-4bit",
+        "modelscope": "Duxiaoman-DI/XuanYuan-6B-Chat-4bit",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-6B-Chat-8bit",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-6B-Chat-8bit",
+        "modelscope": "Duxiaoman-DI/XuanYuan-6B-Chat-8bit",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-70B",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-70B",
+        "modelscope": "Duxiaoman-DI/XuanYuan-70B",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-70B-Chat",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-70B-Chat",
+        "modelscope": "Duxiaoman-DI/XuanYuan-70B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-70B-Chat-4bit",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-70B-Chat-4bit",
+        "modelscope": "Duxiaoman-DI/XuanYuan-70B-Chat-4bit",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan-70B-Chat-8bit",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan-70B-Chat-8bit",
+        "modelscope": "Duxiaoman-DI/XuanYuan-70B-Chat-8bit",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan2-70B",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan2-70B",
+        "modelscope": "Duxiaoman-DI/XuanYuan2-70B",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan2-70B-Chat",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan2-70B-Chat",
+        "modelscope": "Duxiaoman-DI/XuanYuan2-70B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan2-70B-Chat-4bit",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan2-70B-Chat-4bit",
+        "modelscope": "Duxiaoman-DI/XuanYuan2-70B-Chat-4bit",
+        "openmind": ""
+      },
+      {
+        "name": "XuanYuan2-70B-Chat-8bit",
+        "template": "xuanyuan",
+        "multimodal": false,
+        "hf": "Duxiaoman-DI/XuanYuan2-70B-Chat-8bit",
+        "modelscope": "Duxiaoman-DI/XuanYuan2-70B-Chat-8bit",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-1.5-34B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-1.5-34B",
+        "modelscope": "01ai/Yi-1.5-34B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-1.5-34B-Chat",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-1.5-34B-Chat",
+        "modelscope": "01ai/Yi-1.5-34B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-1.5-6B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-1.5-6B",
+        "modelscope": "01ai/Yi-1.5-6B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-1.5-6B-Chat",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-1.5-6B-Chat",
+        "modelscope": "01ai/Yi-1.5-6B-Chat",
+        "openmind": "LlamaFactory/Yi-1.5-6B-Chat"
+      },
+      {
+        "name": "Yi-1.5-9B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-1.5-9B",
+        "modelscope": "01ai/Yi-1.5-9B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-1.5-9B-Chat",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-1.5-9B-Chat",
+        "modelscope": "01ai/Yi-1.5-9B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-34B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-34B",
+        "modelscope": "01ai/Yi-34B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-34B-Chat",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-34B-Chat",
+        "modelscope": "01ai/Yi-34B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-34B-Chat-4bits",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-34B-Chat-4bits",
+        "modelscope": "01ai/Yi-34B-Chat-4bits",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-34B-Chat-8bits",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-34B-Chat-8bits",
+        "modelscope": "01ai/Yi-34B-Chat-8bits",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-6B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-6B",
+        "modelscope": "01ai/Yi-6B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-6B-Chat",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-6B-Chat",
+        "modelscope": "01ai/Yi-6B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-6B-Chat-4bits",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-6B-Chat-4bits",
+        "modelscope": "01ai/Yi-6B-Chat-4bits",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-6B-Chat-8bits",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-6B-Chat-8bits",
+        "modelscope": "01ai/Yi-6B-Chat-8bits",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-9B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-9B",
+        "modelscope": "01ai/Yi-9B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-Coder-1.5B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-Coder-1.5B",
+        "modelscope": "01ai/Yi-Coder-1.5B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-Coder-1.5B-Chat",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-Coder-1.5B-Chat",
+        "modelscope": "01ai/Yi-Coder-1.5B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-Coder-9B",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-Coder-9B",
+        "modelscope": "01ai/Yi-Coder-9B",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-Coder-9B-Chat",
+        "template": "yi",
+        "multimodal": false,
+        "hf": "01-ai/Yi-Coder-9B-Chat",
+        "modelscope": "01ai/Yi-Coder-9B-Chat",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-VL-34B-Chat",
+        "template": "yi_vl",
+        "multimodal": true,
+        "hf": "BUAADreamer/Yi-VL-34B-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Yi-VL-6B-Chat",
+        "template": "yi_vl",
+        "multimodal": true,
+        "hf": "BUAADreamer/Yi-VL-6B-hf",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Youtu-LLM-2B-Base",
+        "template": "youtu",
+        "multimodal": false,
+        "hf": "tencent/Youtu-LLM-2B-Base",
+        "modelscope": "Tencent-YouTu-Research/Youtu-LLM-2B-Base",
+        "openmind": ""
+      },
+      {
+        "name": "Youtu-LLM-2B-Instruct",
+        "template": "youtu",
+        "multimodal": false,
+        "hf": "tencent/Youtu-LLM-2B",
+        "modelscope": "Tencent-YouTu-Research/Youtu-LLM-2B",
+        "openmind": ""
+      },
+      {
+        "name": "Youtu-VL-4B-Instruct",
+        "template": "youtu_vl",
+        "multimodal": true,
+        "hf": "tencent/Youtu-VL-4B-Instruct",
+        "modelscope": "Tencent-YouTu-Research/Youtu-VL-4B-Instruct",
+        "openmind": ""
+      },
+      {
+        "name": "Yuan2-102B-Chat",
+        "template": "yuan",
+        "multimodal": false,
+        "hf": "IEITYuan/Yuan2-102B-hf",
+        "modelscope": "YuanLLM/Yuan2.0-102B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "Yuan2-2B-Chat",
+        "template": "yuan",
+        "multimodal": false,
+        "hf": "IEITYuan/Yuan2-2B-hf",
+        "modelscope": "YuanLLM/Yuan2.0-2B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "Yuan2-51B-Chat",
+        "template": "yuan",
+        "multimodal": false,
+        "hf": "IEITYuan/Yuan2-51B-hf",
+        "modelscope": "YuanLLM/Yuan2.0-51B-hf",
+        "openmind": ""
+      },
+      {
+        "name": "Zephyr-141B-ORPO-Chat",
+        "template": "zephyr",
+        "multimodal": false,
+        "hf": "HuggingFaceH4/zephyr-orpo-141b-A35b-v0.1",
+        "modelscope": "",
+        "openmind": ""
+      },
+      {
+        "name": "Zephyr-7B-Alpha-Chat",
+        "template": "zephyr",
+        "multimodal": false,
+        "hf": "HuggingFaceH4/zephyr-7b-alpha",
+        "modelscope": "AI-ModelScope/zephyr-7b-alpha",
+        "openmind": ""
+      },
+      {
+        "name": "Zephyr-7B-Beta-Chat",
+        "template": "zephyr",
+        "multimodal": false,
+        "hf": "HuggingFaceH4/zephyr-7b-beta",
+        "modelscope": "modelscope/zephyr-7b-beta",
+        "openmind": ""
+      }
+    ],
+    "templates": [
+      "aeva",
+      "breeze",
+      "chatglm3",
+      "cohere",
+      "cpm4",
+      "dbrx",
+      "deepseek",
+      "deepseek3",
+      "deepseekcoder",
+      "deepseekr1",
+      "dots_ocr",
+      "empty",
+      "ernie",
+      "ernie_nothink",
+      "ernie_vl",
+      "exaone",
+      "falcon",
+      "falcon_h1",
+      "gemma",
+      "gemma2",
+      "gemma3",
+      "gemma3n",
+      "gemma4",
+      "gemma4n",
+      "glm4",
+      "glm4_5v",
+      "glm4_7",
+      "glm4_moe",
+      "glm4v",
+      "glm_ocr",
+      "glmz1",
+      "gpt_oss",
+      "granite3",
+      "granite3_vision",
+      "granite4",
+      "hunyuan",
+      "hunyuan_small",
+      "hy3",
+      "hy_dense_1_8b",
+      "hy_dense_7b",
+      "index",
+      "intern2",
+      "intern_s1",
+      "intern_vl",
+      "keye_vl",
+      "kimi_vl",
+      "lfm2",
+      "lfm2_vl",
+      "llama2",
+      "llama2_zh",
+      "llama3",
+      "llama4",
+      "llava",
+      "llava_next",
+      "llava_next_llama3",
+      "llava_next_mistral",
+      "llava_next_qwen",
+      "llava_next_video",
+      "llava_next_video_mistral",
+      "llava_next_video_yi",
+      "llava_next_yi",
+      "mimo",
+      "mimo_v2",
+      "mimo_vl",
+      "minicpm_o",
+      "minicpm_v",
+      "minicpm_v_4_6",
+      "minimax1",
+      "minimax2",
+      "ministral",
+      "ministral3",
+      "mistral",
+      "mistral_small",
+      "mllama",
+      "moonlight",
+      "moss_vl",
+      "openchat",
+      "openchat-3.6",
+      "opencoder",
+      "paligemma",
+      "phi",
+      "phi4",
+      "phi4_mini",
+      "phi_small",
+      "pixtral",
+      "qwen",
+      "qwen2_audio",
+      "qwen2_omni",
+      "qwen2_vl",
+      "qwen3",
+      "qwen3_5",
+      "qwen3_nothink",
+      "qwen3_omni",
+      "qwen3_omni_nothink",
+      "qwen3_vl",
+      "qwen3_vl_nothink",
+      "seed_coder",
+      "seed_oss",
+      "smollm",
+      "smollm2",
+      "solar",
+      "telechat2",
+      "vicuna",
+      "video_llava",
+      "xuanyuan",
+      "yi",
+      "yi_vl",
+      "youtu",
+      "youtu_vl",
+      "yuan",
+      "zephyr"
+    ],
+    "stages": [
+      "pt",
+      "sft",
+      "rm",
+      "ppo",
+      "dpo",
+      "kto"
+    ],
+    "finetuning_types": [
+      "lora",
+      "full",
+      "freeze"
+    ]
+  },
+  "verl": {
+    "name": "verl",
+    "root": "/workspace/LiHanlin_Workspace/github/verl",
+    "version": "0.9.0.dev",
+    "available": true,
+    "advantage_estimators": [
+      "gae",
+      "grpo",
+      "reinforce_plus_plus",
+      "reinforce_plus_plus_baseline",
+      "remax",
+      "rloo",
+      "opo",
+      "grpo_passk",
+      "gpg",
+      "rloo_vectorized",
+      "grpo_vectorized",
+      "optimal_token_baseline",
+      "tir_optimal_token_baseline",
+      "gdpo"
+    ],
+    "megatron_models": [
+      "ApertusForCausalLM",
+      "LlamaForCausalLM",
+      "MistralForCausalLM",
+      "Qwen2ForCausalLM"
+    ],
+    "transformers_patches": [
+      "apertus",
+      "dense_common",
+      "glm4v",
+      "kimi_vl",
+      "llama",
+      "qwen2",
+      "qwen2_vl",
+      "qwen3_5",
+      "qwen3_vl",
+      "tiled_mlp"
+    ],
+    "rollout_backends": [
+      "vllm",
+      "sglang",
+      "hf"
+    ],
+    "strategies": [
+      "fsdp",
+      "fsdp2",
+      "megatron"
+    ]
+  },
+  "trl": {
+    "name": "TRL",
+    "root": "/workspace/LiHanlin_Workspace/github/trl",
+    "version": "1.10.0.dev0",
+    "available": true,
+    "trainers": [
+      "DPOTrainer",
+      "GRPOTrainer",
+      "KTOTrainer",
+      "RLOOTrainer",
+      "RewardTrainer",
+      "SFTTrainer"
+    ],
+    "has_harbor_integration": true,
+    "harbor_harnesses": [
+      "bash",
+      "jupyter",
+      "terminal_notes"
+    ]
+  },
+  "harbor": {
+    "name": "Harbor",
+    "root": "/workspace/LiHanlin_Workspace/github/harbor",
+    "version": "0.22.0",
+    "available": true,
+    "agents": [
+      "acp",
+      "aider",
+      "antigravity-cli",
+      "antigravity-sdk",
+      "claude-code",
+      "cline-cli",
+      "codex",
+      "computer-1",
+      "copilot-cli",
+      "cortex-code",
+      "cursor-cli",
+      "deerflow",
+      "devin",
+      "dspy-rlm",
+      "eve",
+      "fx",
+      "gemini-cli",
+      "goose",
+      "grok-build",
+      "hermes",
+      "junie",
+      "kimi-cli",
+      "kimi-code",
+      "langgraph",
+      "mcode",
+      "mimo",
+      "mini-swe-agent",
+      "nemo-agent",
+      "nop",
+      "openclaw",
+      "opencode",
+      "openhands",
+      "openhands-sdk",
+      "oracle",
+      "pi",
+      "qwen-coder",
+      "rovodev-cli",
+      "swe-agent",
+      "terminus",
+      "terminus-1",
+      "terminus-2",
+      "trae-agent",
+      "vibe"
+    ],
+    "environments": [
+      "ack",
+      "apple-container",
+      "beam",
+      "blaxel",
+      "cua-cloud",
+      "cwsandbox",
+      "daytona",
+      "docker",
+      "e2b",
+      "ec2",
+      "gke",
+      "hf-sandbox",
+      "hyperbrowser",
+      "islo",
+      "langsmith",
+      "modal",
+      "novita",
+      "opensandbox",
+      "openshift",
+      "runloop",
+      "singularity",
+      "skypilot",
+      "tensorlake",
+      "use-computer",
+      "vercel",
+      "wandb"
+    ],
+    "installed_agents": [
+      "acp",
+      "acp_registry",
+      "acp_runner",
+      "aider",
+      "antigravity_cli",
+      "antigravity_sdk",
+      "antigravity_sdk_runner",
+      "base",
+      "claude_code",
+      "codex",
+      "copilot_cli",
+      "cortex_code",
+      "cursor_cli",
+      "deerflow",
+      "deerflow_runner",
+      "devin",
+      "eve",
+      "fx",
+      "gemini_cli",
+      "goose",
+      "grok_build",
+      "hermes",
+      "junie",
+      "kimi_cli",
+      "kimi_code",
+      "langgraph",
+      "langgraph_runner",
+      "mcode",
+      "mimo",
+      "mini_swe_agent",
+      "nemo_agent",
+      "nemo_agent_run_wrapper",
+      "node_install",
+      "openclaw",
+      "opencode",
+      "openhands",
+      "openhands_sdk",
+      "openhands_sdk_runner",
+      "pi",
+      "qwen_code",
+      "rovodev_cli",
+      "swe_agent",
+      "trae_agent",
+      "vibe"
+    ]
+  }
+}

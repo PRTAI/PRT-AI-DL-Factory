@@ -1,0 +1,41 @@
+# ---- runtime data (never commit user data / logs / checkpoints) ----
+data/
+!data/.gitkeep
+uploads/
+*.log
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- node / frontend ----
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/stats.html
+.pnpm-store/
+npm-debug.log*
+yarn-error.log*
+
+# ---- editors / os ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- secrets ----
+.env
+.env.local
+backend/.env
+*.pem

@@ -1,0 +1,506 @@
+"""Job lifecycle: create -> review -> queue -> run -> inspect."""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+from typing import Any
+
+from fastapi import HTTPException, status
+
+from ..builders import BuildError, build_job
+from ..config import settings
+from ..models import (
+    DatasetKind,
+    Framework,
+    Job,
+    JobCreate,
+    JobStatus,
+    JobType,
+    TrainStage,
+    User,
+    utcnow,
+)
+from ..store import store
+from . import audit_service, metrics_parser, model_service, runner
+from .scheduler import refresh_metrics, scheduler
+
+# Which dataset kinds each algorithm can actually consume.
+_ALLOWED_DATASETS: dict[TrainStage, set[DatasetKind]] = {
+    TrainStage.SFT: {DatasetKind.SFT_ALPACA, DatasetKind.SFT_SHAREGPT},
+    TrainStage.DPO: {DatasetKind.DPO_PAIRS},
+    TrainStage.ORPO: {DatasetKind.DPO_PAIRS},
+    TrainStage.SIMPO: {DatasetKind.DPO_PAIRS},
+    TrainStage.KTO: {DatasetKind.KTO_PAIRS},
+    TrainStage.GRPO: {DatasetKind.VERL_PARQUET, DatasetKind.HARBOR_TASKS},
+    TrainStage.DAPO: {DatasetKind.VERL_PARQUET, DatasetKind.HARBOR_TASKS},
+    TrainStage.GSPO: {DatasetKind.VERL_PARQUET, DatasetKind.HARBOR_TASKS},
+    TrainStage.PPO: {DatasetKind.VERL_PARQUET},
+    TrainStage.RLOO: {DatasetKind.VERL_PARQUET},
+    TrainStage.REINFORCE_PLUS_PLUS: {DatasetKind.VERL_PARQUET},
+    TrainStage.REMAX: {DatasetKind.VERL_PARQUET},
+}
+
+
+# --------------------------------------------------------------------------- #
+# Creation
+# --------------------------------------------------------------------------- #
+def create_job(payload: JobCreate, *, owner: User) -> Job:
+    framework = _framework_for(payload)
+    _validate_resources(payload, owner)
+
+    if payload.type == JobType.SFT:
+        _validate_sft(payload)
+    elif payload.type == JobType.RL:
+        _validate_rl(payload)
+    else:
+        _validate_verify(payload)
+
+    system = store.system_settings()
+    require_approval = system.require_approval if system.updated_by else settings.require_approval
+    initial_status = JobStatus.PENDING_REVIEW if require_approval else JobStatus.QUEUED
+
+    job = Job(
+        name=payload.name.strip(),
+        note=payload.note,
+        type=payload.type,
+        framework=framework,
+        status=initial_status,
+        owner_id=owner.id,
+        owner_email=owner.email,
+        tags=payload.tags,
+        resources=payload.resources,
+        sft=payload.sft,
+        rl=payload.rl,
+        verify=payload.verify,
+        parent_job_id=payload.parent_job_id,
+    )
+    job.review.required = require_approval
+    if initial_status == JobStatus.QUEUED:
+        job.queued_at = utcnow()
+
+    store.jobs.put(job)
+    audit_service.record(
+        "job.create",
+        actor=owner,
+        target_type="job",
+        target_id=job.id,
+        summary=f"提交{_TYPE_TEXT[job.type]}任务「{job.name}」({framework.value})",
+        detail={"gpus": job.resources.n_gpus},
+    )
+    if require_approval:
+        audit_service.notify_admins(
+            "有新的任务待审核",
+            body=f"{owner.email} 提交了{_TYPE_TEXT[job.type]}任务「{job.name}」",
+            level="warning",
+            link=f"/jobs/{job.id}",
+        )
+    else:
+        scheduler.dispatch()
+    return job
+
+
+_TYPE_TEXT = {JobType.SFT: "训练", JobType.RL: "强化学习", JobType.VERIFY: "评测"}
+
+
+def _framework_for(payload: JobCreate) -> Framework:
+    if payload.type == JobType.SFT:
+        if payload.sft is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="缺少 SFT 配置")
+        return Framework.LLAMAFACTORY
+    if payload.type == JobType.RL:
+        if payload.rl is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="缺少 RL 配置")
+        return payload.rl.framework
+    if payload.verify is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="缺少评测配置")
+    return Framework.HARBOR
+
+
+def _validate_resources(payload: JobCreate, owner: User) -> None:
+    system = store.system_settings()
+    limit = owner.max_gpus_per_job or system.default_max_gpus_per_job or 8
+    if payload.resources.n_gpus > limit:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail=f"单个任务最多可申请 {limit} 张 GPU"
+        )
+    total = scheduler.total_gpus
+    if total and payload.resources.n_gpus > total:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail=f"本机共有 {total} 张 GPU，无法申请 {payload.resources.n_gpus} 张"
+        )
+
+
+def _dataset_or_400(dataset_id: str, *, label: str):
+    dataset = store.datasets.get(dataset_id)
+    if dataset is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{label}不存在: {dataset_id}")
+    if dataset.status.value != "ready":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{label} {dataset.name} 尚未就绪")
+    return dataset
+
+
+def _check_kind(dataset, stage: TrainStage) -> None:
+    allowed = _ALLOWED_DATASETS.get(stage, set())
+    if allowed and dataset.kind not in allowed:
+        names = " / ".join(sorted(k.value for k in allowed))
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"{stage.value.upper()} 需要 {names} 类型的数据集，当前为 {dataset.kind.value}",
+        )
+
+
+def _validate_sft(payload: JobCreate) -> None:
+    config = payload.sft
+    assert config is not None
+    config.model_path = model_service.resolve_model_path(config.model_id, config.model_path)
+    if not config.dataset_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请至少选择一个训练数据集")
+    for dataset_id in config.dataset_ids:
+        _check_kind(_dataset_or_400(dataset_id, label="数据集"), config.stage)
+    for dataset_id in config.eval_dataset_ids:
+        _check_kind(_dataset_or_400(dataset_id, label="验证集"), config.stage)
+    if config.stage not in {TrainStage.SFT, TrainStage.DPO, TrainStage.KTO, TrainStage.ORPO, TrainStage.SIMPO}:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail=f"LLaMA-Factory 不支持算法 {config.stage.value}"
+        )
+    if not config.template or config.template == "auto":
+        entry = model_service.get_model(config.model_id) if config.model_id else None
+        config.template = (entry.llamafactory_template if entry else None) or "default"
+
+
+def _validate_rl(payload: JobCreate) -> None:
+    config = payload.rl
+    assert config is not None
+    config.model_path = model_service.resolve_model_path(config.model_id, config.model_path)
+    if not config.dataset_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择训练数据集")
+    dataset = _dataset_or_400(config.dataset_id, label="数据集")
+    _check_kind(dataset, config.algorithm)
+
+    if dataset.kind == DatasetKind.HARBOR_TASKS:
+        if config.framework != Framework.TRL:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail="Harbor 任务树目前只能通过 TRL 做 agentic RL，请把框架切换为 TRL",
+            )
+        config.harbor.enabled = True
+    if config.framework == Framework.VERL and config.algorithm == TrainStage.GSPO:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="GSPO 请使用 TRL 框架")
+    if config.rollout.n < 2 and config.algorithm in {TrainStage.GRPO, TrainStage.DAPO, TrainStage.GSPO}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="组相对算法的 rollout 组大小至少为 2")
+
+
+def _validate_verify(payload: JobCreate) -> None:
+    config = payload.verify
+    assert config is not None
+    if not (config.dataset_id or config.tasks_path or config.registry_dataset):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择要评测的 Harbor 任务集")
+    if config.dataset_id:
+        dataset = _dataset_or_400(config.dataset_id, label="任务集")
+        if dataset.kind != DatasetKind.HARBOR_TASKS:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=f"评测需要 harbor_tasks 类型的数据集，当前为 {dataset.kind.value}",
+            )
+    if config.agent not in {"oracle", "nop"} and not config.model:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"agent {config.agent} 需要指定模型")
+
+
+# --------------------------------------------------------------------------- #
+# Review / control
+# --------------------------------------------------------------------------- #
+def review_job(job_id: str, *, approve: bool, comment: str, reviewer: User) -> Job:
+    job = get_job(job_id)
+    if job.status != JobStatus.PENDING_REVIEW:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="该任务不在待审核状态")
+
+    def mutate(item: Job) -> None:
+        item.review.reviewer_id = reviewer.id
+        item.review.reviewer_email = reviewer.email
+        item.review.reviewed_at = utcnow()
+        item.review.comment = comment
+        if approve:
+            item.status = JobStatus.QUEUED
+            item.queued_at = utcnow()
+            item.progress.message = "排队中"
+        else:
+            item.status = JobStatus.REJECTED
+            item.progress.message = "已驳回"
+        item.updated_at = utcnow()
+
+    updated = store.jobs.update(job_id, mutate)
+    assert updated is not None
+    audit_service.record(
+        "job.approve" if approve else "job.reject",
+        actor=reviewer,
+        target_type="job",
+        target_id=job_id,
+        summary=f"{'通过' if approve else '驳回'}任务「{updated.name}」" + (f"：{comment}" if comment else ""),
+    )
+    audit_service.notify(
+        updated.owner_id,
+        f"任务 {updated.name} {'已通过审核' if approve else '被驳回'}",
+        body=comment or ("已进入排队队列" if approve else "请修改后重新提交"),
+        level="success" if approve else "warning",
+        link=f"/jobs/{job_id}",
+    )
+    if approve:
+        scheduler.dispatch()
+    return updated
+
+
+def cancel_job(job_id: str, *, actor: User, reason: str = "") -> Job:
+    job = get_job(job_id)
+    _assert_can_control(job, actor)
+    if job.status.is_terminal:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="任务已结束，无法终止")
+
+    def mutate(item: Job) -> None:
+        item.runtime.cancel_requested = True
+        item.updated_at = utcnow()
+        if item.status in {JobStatus.QUEUED, JobStatus.PENDING_REVIEW}:
+            item.status = JobStatus.CANCELLED
+            item.runtime.finished_at = utcnow()
+            item.progress.message = "已取消"
+
+    updated = store.jobs.update(job_id, mutate)
+    assert updated is not None
+    if updated.status == JobStatus.RUNNING or updated.status == JobStatus.PREPARING:
+        runner.terminate(updated)
+    audit_service.record(
+        "job.cancel",
+        actor=actor,
+        target_type="job",
+        target_id=job_id,
+        summary=f"终止任务「{updated.name}」" + (f"：{reason}" if reason else ""),
+    )
+    if actor.id != updated.owner_id:
+        audit_service.notify(
+            updated.owner_id,
+            f"任务 {updated.name} 被管理员终止",
+            body=reason,
+            level="warning",
+            link=f"/jobs/{job_id}",
+        )
+    return store.jobs.get(job_id) or updated
+
+
+def resubmit_job(job_id: str, *, actor: User) -> Job:
+    """Clone a finished/rejected job back into the review queue."""
+    source = get_job(job_id)
+    _assert_can_view(source, actor)
+    payload = JobCreate(
+        name=f"{source.name} (重跑)",
+        note=source.note,
+        type=source.type,
+        tags=source.tags,
+        resources=source.resources.model_copy(update={"gpu_ids": []}),
+        sft=source.sft,
+        rl=source.rl,
+        verify=source.verify,
+        parent_job_id=source.id,
+    )
+    return create_job(payload, owner=actor)
+
+
+def delete_job(job_id: str, *, actor: User, purge_outputs: bool = False) -> None:
+    job = get_job(job_id)
+    _assert_can_control(job, actor)
+    if job.status.is_active:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="请先终止任务再删除")
+    work_dir = Path(job.runtime.work_dir or runner.work_dir_for(job))
+    if work_dir.is_dir():
+        shutil.rmtree(work_dir, ignore_errors=True)
+    if purge_outputs:
+        output_dir = runner.output_dir_for(job)
+        if output_dir.is_dir():
+            shutil.rmtree(output_dir, ignore_errors=True)
+    store.jobs.delete(job_id)
+    audit_service.record(
+        "job.delete",
+        actor=actor,
+        target_type="job",
+        target_id=job_id,
+        summary=f"删除任务「{job.name}」",
+        detail={"purge_outputs": purge_outputs},
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Reads
+# --------------------------------------------------------------------------- #
+def get_job(job_id: str) -> Job:
+    job = store.jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    return job
+
+
+def get_job_for(job_id: str, actor: User) -> Job:
+    job = get_job(job_id)
+    _assert_can_view(job, actor)
+    if job.status.is_active:
+        return refresh_metrics(job)
+    return job
+
+
+def list_jobs(
+    *,
+    actor: User,
+    mine_only: bool = False,
+    statuses: list[JobStatus] | None = None,
+    types: list[JobType] | None = None,
+    query: str = "",
+    limit: int = 200,
+    offset: int = 0,
+) -> tuple[list[Job], int]:
+    def keep(job: Job) -> bool:
+        if mine_only and job.owner_id != actor.id:
+            return False
+        if statuses and job.status not in statuses:
+            return False
+        if types and job.type not in types:
+            return False
+        if query:
+            haystack = f"{job.name} {job.note} {job.owner_email} {job.id} {' '.join(job.tags)}".lower()
+            if query.lower() not in haystack:
+                return False
+        return True
+
+    items = store.jobs.find(keep)
+    items.sort(key=lambda j: j.created_at, reverse=True)
+    total = len(items)
+    return items[offset : offset + limit], total
+
+
+def job_log(job_id: str, *, actor: User, tail_bytes: int | None = None, offset: int = 0) -> dict[str, Any]:
+    job = get_job(job_id)
+    _assert_can_view(job, actor)
+    path = Path(job.runtime.log_file or "")
+    if not path.is_file():
+        return {"content": "", "size": 0, "offset": 0, "eof": True}
+    size = path.stat().st_size
+    limit = tail_bytes or settings.log_tail_bytes
+    with path.open("rb") as handle:
+        if offset > 0:
+            handle.seek(min(offset, size))
+        elif size > limit:
+            handle.seek(size - limit)
+            handle.readline()
+        data = handle.read()
+    return {
+        "content": data.decode("utf-8", errors="replace"),
+        "size": size,
+        "offset": size,
+        "eof": job.status.is_terminal,
+    }
+
+
+def job_metrics(job_id: str, *, actor: User) -> dict[str, Any]:
+    job = get_job(job_id)
+    _assert_can_view(job, actor)
+    if job.status.is_active:
+        job = refresh_metrics(job)
+    work_dir = Path(job.runtime.work_dir or runner.work_dir_for(job))
+    payload = metrics_parser.read_series(work_dir)
+    payload["status"] = job.status.value
+    payload["framework"] = job.framework.value
+    return payload
+
+
+def job_artifacts(job_id: str, *, actor: User) -> list[dict[str, Any]]:
+    """Checkpoints / result files produced by the job."""
+    job = get_job(job_id)
+    _assert_can_view(job, actor)
+    output_dir = Path(job.runtime.output_dir or runner.output_dir_for(job))
+    if not output_dir.is_dir():
+        return []
+    items: list[dict[str, Any]] = []
+    for path in sorted(output_dir.iterdir()):
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        items.append(
+            {
+                "name": path.name,
+                "path": str(path),
+                "is_dir": path.is_dir(),
+                "size_bytes": stat.st_size if path.is_file() else None,
+                "modified_at": stat.st_mtime,
+            }
+        )
+    return items[:500]
+
+
+def preview_command(job_id: str, *, actor: User) -> dict[str, Any]:
+    """Render the exact command a job will run — used by reviewers."""
+    job = get_job(job_id)
+    _assert_can_view(job, actor)
+    work_dir = runner.work_dir_for(job)
+    output_dir = runner.output_dir_for(job)
+    work_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        result = build_job(job, work_dir, output_dir)
+    except BuildError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return {
+        "command": result.masked_command_line(),
+        "cwd": result.cwd,
+        "env": result.masked_env(),
+        "notes": result.notes,
+        "files": {name: content[:20000] for name, content in result.files.items()},
+        "output_dir": result.output_dir,
+    }
+
+
+def verify_from_training(job_id: str, *, actor: User) -> dict[str, Any]:
+    """Suggest a follow-up verification for a finished training job."""
+    job = get_job(job_id)
+    _assert_can_view(job, actor)
+    if job.type == JobType.VERIFY:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="该任务本身就是评测任务")
+    if job.status != JobStatus.SUCCEEDED:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="只有成功结束的训练任务才能发起评测")
+    output_dir = Path(job.runtime.output_dir or runner.output_dir_for(job))
+    checkpoints = [
+        str(p) for p in sorted(output_dir.glob("checkpoint-*")) if p.is_dir()
+    ] if output_dir.is_dir() else []
+    return {
+        "parent_job_id": job.id,
+        "model_path": str(output_dir),
+        "checkpoints": checkpoints,
+        "hint": "评测本地训练产物时，建议先用 vLLM 起一个 OpenAI 兼容服务，再选择 terminus / claude-code 等 agent。",
+    }
+
+
+# --------------------------------------------------------------------------- #
+def _assert_can_view(job: Job, actor: User) -> None:
+    if actor.is_admin or job.owner_id == actor.id:
+        return
+    raise HTTPException(status.HTTP_403_FORBIDDEN, detail="无权查看该任务")
+
+
+def _assert_can_control(job: Job, actor: User) -> None:
+    if actor.is_admin or job.owner_id == actor.id:
+        return
+    raise HTTPException(status.HTTP_403_FORBIDDEN, detail="无权操作该任务")
+
+
+def stats_overview(actor: User) -> dict[str, Any]:
+    jobs = store.jobs.all()
+    visible = jobs if actor.is_admin else [j for j in jobs if j.owner_id == actor.id]
+    by_status: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    for job in visible:
+        by_status[job.status.value] = by_status.get(job.status.value, 0) + 1
+        by_type[job.type.value] = by_type.get(job.type.value, 0) + 1
+    return {
+        "total": len(visible),
+        "by_status": by_status,
+        "by_type": by_type,
+        "pending_review": sum(1 for j in jobs if j.status == JobStatus.PENDING_REVIEW),
+        "running": sum(1 for j in visible if j.status == JobStatus.RUNNING),
+        "queued": sum(1 for j in visible if j.status == JobStatus.QUEUED),
+    }
