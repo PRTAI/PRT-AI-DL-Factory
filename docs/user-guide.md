@@ -132,8 +132,22 @@ storage = "10G"
 ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY}"
 ```
 
-提交评测时把这个 key 填到「Verifier 环境变量」，平台会写入任务目录下 0600 权限的 `.env`
-并用 `--env-file` 传给 Harbor，插值就能解析到。
+提交评测时把这个 key 填到「Verifier 环境变量」，平台会用 `--verifier-env` 传给 verifier，
+同时写入任务目录下 0600 权限的 `.env` 并用 `--env-file` 传给 Harbor，`${VAR}` 插值就能解析到。
+
+judge 本身在**任务容器内**运行，所以 `tests/test.sh` 通常是：
+
+```bash
+#!/bin/bash
+uvx --from harbor-rewardkit rewardkit /tests
+```
+
+对应的 Dockerfile 需要带上 uv：
+
+```dockerfile
+FROM ubuntu:24.04
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+```
 
 ### 2.6 verl parquet
 

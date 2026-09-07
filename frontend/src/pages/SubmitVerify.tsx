@@ -107,6 +107,8 @@ export default function SubmitVerify() {
   const patch = (values: Partial<VerifyConfig>) => setConfig((previous) => ({ ...previous, ...values }))
   const agentInfo = agents.data?.find((item) => item.name === config.agent)
   const harborReady = toolchain.data?.find((row) => row.key === 'harbor-cli')?.python_ok ?? true
+  const dockerRow = toolchain.data?.find((row) => row.key === 'docker')
+  const dockerBlocked = config.environment_type === 'docker' && dockerRow ? dockerRow.status !== 'ready' : false
 
   React.useEffect(() => {
     if (suggestion.data && !note) {
@@ -186,6 +188,12 @@ export default function SubmitVerify() {
         <WarnHint>
           当前部署环境没有检测到 <Mono>harbor</Mono> 可执行文件，任务可以提交但会在启动时失败。
           请先安装 Harbor（<Mono>uv tool install harbor</Mono>）或在系统设置中配置 <Mono>PRT_HARBOR_BIN</Mono>。
+        </WarnHint>
+      )}
+
+      {dockerBlocked && (
+        <WarnHint>
+          沙箱选择了 docker，但本机 docker 不可用：{dockerRow?.detail}
         </WarnHint>
       )}
 

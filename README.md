@@ -234,10 +234,35 @@ cd frontend && npm run build              # tsc + vite 构建
 
 ---
 
+## 本机当前状态（2026-09-07 实测）
+
+| 组件 | 状态 |
+|---|---|
+| Harbor 0.22.0 + harbor-rewardkit 0.2.0 | ✅ 已 `pip install` 到独立 conda 环境 `harbor`，`backend/.env` 已指向它 |
+| LLaMA-Factory / verl / TRL | ⚠️ **源码在 `github/` 下，但任何 conda 环境里都没有装依赖**（全机器无 torch 的可用环境） |
+| Docker 守护进程 | ⚠️ 服务在跑，但当前用户不在 `docker` 组，Harbor 评测暂时无法启动容器 |
+| GPU | ✅ 1 × NVIDIA H800 80GB |
+
+补齐方式：
+
+```bash
+# 1) Docker 权限（评测的硬前提）
+sudo usermod -aG docker $USER && newgrp docker     # 或重新登录
+
+# 2) 三个训练框架各建一个环境，然后把解释器路径写进 backend/.env
+conda create -n llamafactory python=3.11 && conda activate llamafactory
+pip install -e "/workspace/LiHanlin_Workspace/github/LlamaFactory[torch,metrics]"
+# verl / trl 同理，见 docs/deployment.md
+```
+
+「平台管理 → 工具链」页会实时探测这些组件：它不只看命令是否存在，
+还会用配置的解释器真正 `import` 一次框架与 torch，并 ping 一次 docker 守护进程。
+
 ## 已知限制
 
 - 训练/评测进程的命令行参数（含通过 `--agent-env` 传入的 API Key）在同机器上可被 `ps` 看到。
   平台在数据库、`run.sh`、界面中都会脱敏，但共享主机上仍建议用只读的项目级密钥。
-- Harbor CLI 需要单独安装；未安装时评测页会提前告警，任务可以提交但会在启动时失败。
+- reward-kit judge 在**任务容器内**执行（`uvx --from harbor-rewardkit rewardkit /tests`），
+  所以任务的 Dockerfile 需要自带 uv/uvx；宿主机装的 harbor-rewardkit 只是方便本地调试。
 - verl 当前版本没有把 DAPO 的 `overlong_buffer` 接进配置系统，平台会跳过该项并在任务备注中说明。
 - 文件存储适合团队规模（数千条任务记录）；再大需要迁移到 MySQL。

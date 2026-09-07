@@ -505,25 +505,37 @@ function ToolchainPanel() {
               <Th>组件</Th>
               <Th className="w-28">版本</Th>
               <Th>路径</Th>
-              <Th className="w-24">状态</Th>
+              <Th className="w-28">状态</Th>
+              <Th>说明</Th>
             </tr>
           </thead>
           <tbody>
-            {(toolchain.data ?? []).map((row) => (
-              <Tr key={row.key}>
-                <Td className="text-xs font-medium">{row.label}</Td>
-                <Td className="num text-xs">{row.version || '—'}</Td>
-                <Td className="num truncate text-[11px] text-fg-muted">
-                  <div>{row.root}</div>
-                  <div>{row.python}</div>
-                </Td>
-                <Td>
-                  <Badge tone={row.python_ok && row.root_exists ? 'success' : 'danger'}>
-                    {row.python_ok && row.root_exists ? '可用' : '不可用'}
-                  </Badge>
-                </Td>
-              </Tr>
-            ))}
+            {(toolchain.data ?? []).map((row) => {
+              const tone =
+                row.status === 'ready' ? 'success' : row.status === 'missing_deps' ? 'warning' : 'danger'
+              const label =
+                row.status === 'ready'
+                  ? '可用'
+                  : row.status === 'missing_deps'
+                    ? '依赖缺失'
+                    : row.status === 'missing_python'
+                      ? '未安装'
+                      : '未知'
+              return (
+                <Tr key={row.key}>
+                  <Td className="text-xs font-medium">{row.label}</Td>
+                  <Td className="num text-xs">{row.version || '—'}</Td>
+                  <Td className="num truncate text-[11px] text-fg-muted">
+                    {row.root && <div>{row.root}</div>}
+                    <div>{row.python}</div>
+                  </Td>
+                  <Td>
+                    <Badge tone={tone}>{label}</Badge>
+                  </Td>
+                  <Td className="text-[11px] leading-relaxed text-fg-muted">{row.detail}</Td>
+                </Tr>
+              )
+            })}
           </tbody>
         </Table>
       </Card>

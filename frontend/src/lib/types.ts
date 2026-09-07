@@ -484,6 +484,12 @@ export interface ToolchainRow {
   root_exists: boolean
   python: string
   python_ok: boolean
+  /** framework module importable by the configured interpreter */
+  importable: boolean | null
+  /** hard dependency (torch) present — null when not applicable */
+  deps_ok: boolean | null
+  status: 'ready' | 'missing_deps' | 'missing_python' | 'unknown'
+  detail: string
 }
 
 export interface AlgorithmInfo {

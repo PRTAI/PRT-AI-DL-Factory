@@ -8,8 +8,11 @@ upgraded. Everything here is read-only and cached by file mtime.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -107,10 +110,145 @@ def algorithms() -> list[dict[str, Any]]:
     return presets().get("algorithms", [])
 
 
+_PROBE_TTL = 60.0
+_PROBE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+
+# (import name of the framework itself, PYTHONPATH suffix, hard dependency to look for)
+_FRAMEWORK_PROBES: dict[str, tuple[str, str, str]] = {
+    "llamafactory": ("llamafactory", "src", "torch"),
+    "verl": ("verl", "", "torch"),
+    "trl": ("trl", "", "torch"),
+    "harbor": ("harbor", "src", ""),
+}
+
+
+def _probe_python(python_bin: str, module: str, pythonpath: str, dependency: str) -> dict[str, Any]:
+    """Ask the configured interpreter whether it can actually import the framework.
+
+    Checking that the interpreter *file exists* is not enough — the common failure
+    mode is a valid python that simply has no torch/transformers installed, and
+    reporting that as "可用" sends admins chasing ghosts at run time.
+    """
+    cache_key = f"{python_bin}|{module}|{pythonpath}|{dependency}"
+    cached = _PROBE_CACHE.get(cache_key)
+    now = time.time()
+    if cached and now - cached[0] < _PROBE_TTL:
+        return cached[1]
+
+    result: dict[str, Any] = {"importable": None, "deps_ok": None, "error": ""}
+    resolved = shutil.which(python_bin) or (python_bin if Path(python_bin).is_file() else None)
+    if resolved is None:
+        result["error"] = "解释器不存在"
+        _PROBE_CACHE[cache_key] = (now, result)
+        return result
+
+    script = (
+        "import importlib.util as u, json, sys;"
+        f"print(json.dumps({{'m': u.find_spec({module!r}) is not None,"
+        f"'d': (u.find_spec({dependency!r}) is not None) if {bool(dependency)!r} else None}}))"
+    )
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")}
+    if pythonpath:
+        env["PYTHONPATH"] = pythonpath
+    try:
+        completed = subprocess.run(  # noqa: S603 - argv is built from settings
+            [resolved, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=25,
+            env=env,
+            check=False,
+        )
+        payload = json.loads(completed.stdout.strip() or "{}")
+        result["importable"] = bool(payload.get("m"))
+        result["deps_ok"] = payload.get("d")
+        if completed.returncode != 0:
+            result["error"] = (completed.stderr or "").strip()[:200]
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError) as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"[:200]
+
+    _PROBE_CACHE[cache_key] = (now, result)
+    return result
+
+
+def _docker_status() -> dict[str, Any]:
+    """Harbor's default sandbox is Docker — check the daemon is actually reachable.
+
+    A present ``docker`` binary means nothing if the service user is not in the
+    ``docker`` group; without this check the first evaluation only fails minutes
+    later, inside the environment build.
+    """
+    cached = _PROBE_CACHE.get("__docker__")
+    now = time.time()
+    if cached and now - cached[0] < _PROBE_TTL:
+        return cached[1]
+
+    binary = shutil.which("docker")
+    row: dict[str, Any] = {
+        "key": "docker",
+        "label": "Docker 守护进程",
+        "version": "",
+        "root": "",
+        "root_exists": True,
+        "python": binary or "docker",
+        "python_ok": bool(binary),
+        "deps_ok": None,
+    }
+    if not binary:
+        row.update(
+            importable=False,
+            status="missing_python",
+            detail="未安装 docker；Harbor 评测默认使用 docker 沙箱",
+        )
+    else:
+        try:
+            completed = subprocess.run(  # noqa: S603 - fixed argv
+                [binary, "version", "--format", "{{.Server.Version}}"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            completed = None
+            error = f"{type(exc).__name__}: {exc}"
+        else:
+            error = (completed.stderr or "").strip()
+
+        if completed is not None and completed.returncode == 0:
+            row.update(
+                version=completed.stdout.strip(),
+                importable=True,
+                status="ready",
+                detail="沙箱可用",
+            )
+        elif "permission denied" in error.lower():
+            import getpass
+
+            row.update(
+                importable=False,
+                status="missing_deps",
+                detail=(
+                    f"守护进程存在但当前用户（{getpass.getuser()}）无权访问 docker.sock。"
+                    "执行 `sudo usermod -aG docker $USER` 后重新登录，或改用 e2b / daytona 等云端沙箱。"
+                ),
+            )
+        else:
+            row.update(
+                importable=False,
+                status="missing_deps",
+                detail=f"无法连接 docker 守护进程：{error[:160] or '未知错误'}",
+            )
+
+    _PROBE_CACHE["__docker__"] = (now, row)
+    return row
+
+
 def toolchain_status() -> list[dict[str, Any]]:
     """Is each framework actually usable from this deployment?"""
     support = framework_support()
     rows: list[dict[str, Any]] = []
+
     for key, label in (
         ("llamafactory", "LLaMA-Factory"),
         ("verl", "verl"),
@@ -119,19 +257,52 @@ def toolchain_status() -> list[dict[str, Any]]:
     ):
         info = support.get(key, {})
         root = settings.root_for(key)
+        root_exists = bool(root and root.is_dir())
         python_bin = settings.python_for(key)
+        python_ok = bool(shutil.which(python_bin) or Path(python_bin).is_file())
+
+        module, path_suffix, dependency = _FRAMEWORK_PROBES[key]
+        pythonpath = str(root / path_suffix) if root and path_suffix else (str(root) if root else "")
+        probe = _probe_python(python_bin, module, pythonpath, dependency) if python_ok else {
+            "importable": None,
+            "deps_ok": None,
+            "error": "解释器不存在",
+        }
+
+        if not python_ok:
+            status_value, detail = "missing_python", f"找不到解释器 {python_bin}"
+        elif probe["deps_ok"] is False:
+            status_value = "missing_deps"
+            detail = f"{python_bin} 里没有 {dependency}，请指定装好依赖的环境（PRT_{key.upper()}_PYTHON）"
+        elif probe["importable"] is False:
+            status_value = "missing_deps"
+            detail = (
+                f"{python_bin} 无法导入 {module}"
+                + (f"（源码目录 {root} 不存在）" if not root_exists else "，请检查源码目录或安装该框架")
+            )
+        elif probe["importable"]:
+            status_value, detail = "ready", "可直接启动任务"
+        else:
+            status_value, detail = "unknown", probe.get("error", "")
+
         rows.append(
             {
                 "key": key,
                 "label": label,
                 "version": info.get("version", ""),
                 "root": str(root) if root else "",
-                "root_exists": bool(root and root.is_dir()),
+                "root_exists": root_exists,
                 "python": python_bin,
-                "python_ok": bool(shutil.which(python_bin) or Path(python_bin).is_file()),
+                "python_ok": python_ok,
+                "importable": probe["importable"],
+                "deps_ok": probe["deps_ok"],
+                "status": status_value,
+                "detail": detail,
             }
         )
+
     harbor_cli = settings.harbor_bin
+    cli_ok = bool(shutil.which(harbor_cli) or Path(harbor_cli).is_file())
     rows.append(
         {
             "key": "harbor-cli",
@@ -140,10 +311,22 @@ def toolchain_status() -> list[dict[str, Any]]:
             "root": "",
             "root_exists": True,
             "python": harbor_cli,
-            "python_ok": bool(shutil.which(harbor_cli) or Path(harbor_cli).is_file()),
+            "python_ok": cli_ok,
+            "importable": cli_ok,
+            "deps_ok": None,
+            "status": "ready" if cli_ok else "missing_python",
+            "detail": "评测任务可执行" if cli_ok else "未安装 Harbor（pip install harbor）",
         }
     )
+
+    rows.append(_docker_status())
+
     modelscope = settings.modelscope_bin
+    ms_ok = bool(
+        shutil.which(modelscope)
+        or Path(modelscope).is_file()
+        or Path("/opt/miniconda3/envs/modelscope/bin/modelscope").is_file()
+    )
     rows.append(
         {
             "key": "modelscope",
@@ -152,11 +335,11 @@ def toolchain_status() -> list[dict[str, Any]]:
             "root": "",
             "root_exists": True,
             "python": modelscope,
-            "python_ok": bool(
-                shutil.which(modelscope)
-                or Path(modelscope).is_file()
-                or Path("/opt/miniconda3/envs/modelscope/bin/modelscope").is_file()
-            ),
+            "python_ok": ms_ok,
+            "importable": ms_ok,
+            "deps_ok": None,
+            "status": "ready" if ms_ok else "missing_python",
+            "detail": "可从 ModelScope 下载模型" if ms_ok else "未找到 modelscope 命令",
         }
     )
     return rows
