@@ -320,7 +320,7 @@ def test_harbor_verify_flags(tmp_path, harbor_dataset, monkeypatch):
         n_attempts=4,
         environment_type="docker",
         agent_env={"ANTHROPIC_API_KEY": "sk-super-secret"},
-        environment_env={"HTTP_PROXY": "http://proxy:8080"},
+        verifier_env={"HTTP_PROXY": "http://proxy:8080"},
         task_names=["bash-*"],
         n_tasks=25,
         export_traces=True,
@@ -335,7 +335,7 @@ def test_harbor_verify_flags(tmp_path, harbor_dataset, monkeypatch):
     assert "--env" in command and command[command.index("--env") + 1] == "docker"
     assert "--agent-env" in command
     assert "ANTHROPIC_API_KEY=sk-super-secret" in command
-    assert "--task-name" in command and "bash-*" in command
+    assert "--include-task-name" in command and "bash-*" in command
     assert "--n-tasks" in command and command[command.index("--n-tasks") + 1] == "25"
     assert "--export-traces" in command
     assert "--job-name" in command and job.id in command

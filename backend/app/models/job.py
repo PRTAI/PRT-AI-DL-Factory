@@ -220,18 +220,17 @@ class VerifyConfig(Base):
     max_retries: int = Field(default=0, ge=0, le=10)
     environment_type: str = "docker"
 
-    task_names: list[str] = Field(default_factory=list)
-    exclude_task_names: list[str] = Field(default_factory=list)
+    task_names: list[str] = Field(default_factory=list)  # --include-task-name
+    exclude_task_names: list[str] = Field(default_factory=list)  # --exclude-task-name
     n_tasks: int | None = None
-    shuffle: bool = False
-    seed: int | None = None
 
-    agent_env: dict[str, str] = Field(default_factory=dict)  # --ae
-    agent_kwargs: dict[str, str] = Field(default_factory=dict)  # --ak
-    environment_env: dict[str, str] = Field(default_factory=dict)  # --ee
-    environment_kwargs: dict[str, str] = Field(default_factory=dict)  # --ek
-    verifier_kwargs: dict[str, str] = Field(default_factory=dict)  # --vk
+    agent_env: dict[str, str] = Field(default_factory=dict)  # --agent-env
+    agent_kwargs: dict[str, str] = Field(default_factory=dict)  # --agent-kwarg
+    verifier_env: dict[str, str] = Field(default_factory=dict)  # --verifier-env
+    environment_kwargs: dict[str, str] = Field(default_factory=dict)  # --environment-kwarg
+    verifier_kwargs: dict[str, str] = Field(default_factory=dict)  # --verifier-kwarg
 
+    # Emitted as --override-cpus / --override-memory-mb / --override-gpus
     environment_cpus: int | None = None
     environment_memory_mb: int | None = None
     environment_gpus: int | None = None
@@ -241,9 +240,9 @@ class VerifyConfig(Base):
     verifier_timeout_multiplier: float | None = None
 
     disable_verification: bool = False
-    no_cache: bool = False
+    force_build: bool = False  # --force-build
     export_traces: bool = False
-    sharegpt: bool = False
+    sharegpt: bool = False  # --export-sharegpt
 
     extra_args: dict[str, Any] = Field(default_factory=dict)
 
