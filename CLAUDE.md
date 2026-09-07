@@ -14,7 +14,7 @@ scripts/start_backend.sh                 # :8000
 RELOAD=1 scripts/start_backend.sh        # 开发模式
 
 # 前端
-scripts/start_frontend.sh                # vite dev :5173（代理 /api /ws 到 :8000）
+scripts/start_frontend.sh                # vite dev :5153（代理 /api /ws 到 :8000）
 scripts/start_frontend.sh build          # 产出 frontend/dist
 
 # 测试与构建（提交前都要跑）
@@ -73,6 +73,12 @@ Docker 守护进程在跑但当前用户不在 `docker` 组，Harbor 评测需�
 - LLaMA-Factory 会在 `get_device_count() > 1` 时自动切 torchrun，
   所以多卡只需要设置 `FORCE_TORCHRUN` / `NPROC_PER_NODE`，不要自己拼 torchrun。
 - verl 只吃 parquet；Harbor 任务树做 RL 走 TRL 的 `trl.experimental.harbor.HarborSpec`。
+- Harbor 每个 trial 的结果文件是 `<trial>/result.json`（**单数**），
+  尽管它自己 `TrialPaths` 的 docstring 写的是 `results.json`。用错文件名的后果是
+  Trial 明细页永远空白，且真实任务里不会报错。
+- Harbor `JobStats.increment()` 对**每个**结束的 trial 都 `n_completed += 1`，
+  报错的再额外 `n_errored += 1` —— errored 是 completed 的子集，两者相加会凭空多出 trial。
+  通过率必须用 `成功数 / completed`，否则 9/10 崩掉的评测会显示 100%。
 - LLaMA-Factory 训练结束时会**补写一条只有进度、没有 loss/lr 的记录**，解析摘要时必须取
   「最后一个非空值」而不是「最后一条记录」（TRL 的 `train_runtime` 收尾记录同理），
   已有回归测试 `test_llamafactory_final_progress_record_keeps_last_values`。

@@ -4,7 +4,7 @@ import tailwindcss from '@tailwindcss/vite'
 import path from 'node:path'
 
 // The dev server proxies /api and /ws to the FastAPI backend so the frontend
-// can run on :5173 while the platform runs on :8000.
+// can run on :5153 while the platform runs on :8000.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
@@ -12,7 +12,9 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    // 团队约定的前端端口；可用 PORT 环境变量覆盖
+    port: Number(process.env.PORT) || 5153,
+    strictPort: false,
     proxy: {
       '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
       '/ws': { target: 'ws://127.0.0.1:8000', ws: true },

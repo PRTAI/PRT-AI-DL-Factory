@@ -277,6 +277,22 @@ def parse_trl(output_dir: Path, log_file: Path) -> ParsedMetrics:
 # --------------------------------------------------------------------------- #
 # Harbor
 # --------------------------------------------------------------------------- #
+def _trial_result_files(job_dir: Path, limit: int = 5000) -> list[Path]:
+    """Harbor writes ``<trial>/result.json``.
+
+    Its own ``TrialPaths`` docstring says ``results.json``; the runtime writes the
+    singular form. Accept both so a future rename does not silently empty the
+    trial table.
+    """
+    files: list[Path] = []
+    for pattern in ("*/result.json", "*/results.json", "*/*/result.json", "*/*/results.json"):
+        for path in job_dir.glob(pattern):
+            files.append(path)
+            if len(files) >= limit:
+                return files
+    return files
+
+
 def harbor_job_dir(output_dir: Path, job_id: str) -> Path | None:
     candidate = output_dir / job_id
     if candidate.is_dir():
@@ -303,37 +319,44 @@ def parse_harbor(output_dir: Path, job_id: str) -> ParsedMetrics:
         except (json.JSONDecodeError, OSError):
             stats = {}
 
+    # Harbor's JobStats.increment() bumps n_completed_trials for *every* finished
+    # trial and additionally bumps n_errored_trials when it raised — errored is a
+    # subset of completed, so adding them together would double count.
     completed = int(stats.get("n_completed_trials") or 0)
     errored = int(stats.get("n_errored_trials") or 0)
     running = int(stats.get("n_running_trials") or 0)
     pending = int(stats.get("n_pending_trials") or 0)
-    total = completed + errored + running + pending
+    total = completed + running + pending
 
     if total == 0:  # result.json not written yet — count trial dirs on disk
-        trial_results = list(job_dir.glob("*/results.json")) + list(job_dir.glob("*/*/results.json"))
-        completed = len(trial_results)
+        completed = len(_trial_result_files(job_dir))
         total = completed
 
     pass_at_k: dict[str, float] = {}
     rewards: list[float] = []
-    n_trials = 0
-    for eval_key, eval_stats in (stats.get("evals") or {}).items():
+    for eval_stats in (stats.get("evals") or {}).values():
         if not isinstance(eval_stats, dict):
             continue
-        n_trials += int(eval_stats.get("n_trials") or 0)
         for k, value in (eval_stats.get("pass_at_k") or {}).items():
             pass_at_k[f"pass@{k}"] = float(value)
+        # reward_stats only holds trials that produced a reward; trials that blew
+        # up (timeout, container failure) never land here.
         for _metric, buckets in (eval_stats.get("reward_stats") or {}).items():
             for reward_value, trial_ids in (buckets or {}).items():
                 try:
                     rewards.extend([float(reward_value)] * len(trial_ids or []))
                 except (TypeError, ValueError):
                     continue
-        del eval_key
 
     resolved = None
+    if rewards or completed:
+        # A trial that errored is a failure, not a missing sample: divide by the
+        # number of finished trials, otherwise a run where 9/10 tasks crashed
+        # would proudly report 100%.
+        denominator = max(completed, len(rewards))
+        if denominator:
+            resolved = sum(1 for r in rewards if r >= 1.0) / denominator
     if rewards:
-        resolved = sum(1 for r in rewards if r >= 1.0) / len(rewards)
         distribution: dict[float, int] = {}
         for reward in rewards:
             distribution[reward] = distribution.get(reward, 0) + 1
@@ -341,14 +364,15 @@ def parse_harbor(output_dir: Path, job_id: str) -> ParsedMetrics:
             parsed.add("reward_distribution", reward_value, count)
 
     parsed.progress = JobProgress(
-        percent=(completed + errored) / total * 100 if total else 0.0,
+        # errored trials are already inside `completed`
+        percent=completed / total * 100 if total else 0.0,
         completed_trials=completed,
         total_trials=total,
-        message=f"trials {completed + errored}/{total}" if total else "准备评测环境…",
+        message=f"trials {completed}/{total}" if total else "准备评测环境…",
     )
     parsed.summary = JobMetricsSummary(
         pass_at_k=pass_at_k,
-        n_trials=n_trials or completed,
+        n_trials=completed,
         n_errors=errored,
         resolved_rate=resolved,
         last_reward=rewards[-1] if rewards else None,

@@ -462,7 +462,7 @@ def job_trials(job_id: str, *, actor: User, limit: int = 500) -> dict[str, Any]:
         return {"trials": [], "job_dir": str(output_dir)}
 
     trials: list[dict[str, Any]] = []
-    for result_path in sorted(harbor_dir.glob("*/results.json")) + sorted(harbor_dir.glob("*/*/results.json")):
+    for result_path in sorted(metrics_parser._trial_result_files(harbor_dir, limit=limit * 2)):
         try:
             payload = json.loads(result_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):

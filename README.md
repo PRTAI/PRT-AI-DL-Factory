@@ -94,7 +94,7 @@ scripts/start_backend.sh
 
 ```bash
 RELOAD=1 scripts/start_backend.sh   # 后端 :8000，改代码自动重启
-scripts/start_frontend.sh           # 前端 :5173，/api 与 /ws 自动代理到 :8000
+scripts/start_frontend.sh           # 前端 :5153，/api 与 /ws 自动代理到 :8000
 ```
 
 ---

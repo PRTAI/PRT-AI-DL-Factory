@@ -99,10 +99,12 @@ def test_harbor_result_parsing(tmp_path):
         encoding="utf-8",
     )
     parsed = metrics_parser.parse_harbor(jobs_dir, "job_abc")
-    assert parsed.progress.total_trials == 12
+    # completed(8) already contains the errored one, so the total is 8 + 1 + 2
+    assert parsed.progress.total_trials == 11
     assert parsed.progress.completed_trials == 8
     assert parsed.summary.pass_at_k == {"pass@1": 0.5, "pass@4": 0.75}
-    assert parsed.summary.resolved_rate == 0.5
+    # 2 of the 8 finished trials scored 1.0
+    assert parsed.summary.resolved_rate == 0.25
     assert parsed.summary.n_errors == 1
     assert parsed.summary.cost_usd == 1.25
     assert parsed.summary.tokens == {"input": 1000, "output": 500}
@@ -212,3 +214,91 @@ def test_trl_final_runtime_record_keeps_last_values(tmp_path):
     parsed = metrics_parser.parse_trl(output, tmp_path / "missing.log")
     assert parsed.summary.last_loss == 0.6
     assert parsed.summary.learning_rate == 5e-7
+
+
+def test_harbor_errored_trial_counts_as_failure(tmp_path):
+    """Regression from a real Harbor run (oracle on harbor's own examples).
+
+    Harbor's JobStats bumps n_completed_trials for every finished trial and
+    additionally n_errored_trials when it raised, so errored ⊆ completed.
+    Summing them invented a third trial, and reward_stats — which only holds
+    trials that produced a reward — made a 1-of-2 run look like 100%.
+    """
+    jobs_dir = tmp_path / "jobs"
+    job_dir = jobs_dir / "job_x"
+    job_dir.mkdir(parents=True)
+    (job_dir / "config.json").write_text("{}", encoding="utf-8")
+    (job_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "stats": {
+                    "n_completed_trials": 2,     # includes the errored one
+                    "n_errored_trials": 1,
+                    "n_running_trials": 0,
+                    "n_pending_trials": 0,
+                    "evals": {
+                        "oracle__ds": {
+                            "n_trials": 1,
+                            "pass_at_k": {},
+                            "reward_stats": {"reward": {"1.0": ["hello-workdir__abc"]}},
+                        }
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    parsed = metrics_parser.parse_harbor(jobs_dir, "job_x")
+    assert parsed.progress.total_trials == 2       # not 3
+    assert parsed.progress.completed_trials == 2
+    assert parsed.summary.n_errors == 1
+    assert parsed.summary.resolved_rate == 0.5     # not 1.0
+    assert parsed.summary.n_trials == 2
+
+
+def test_job_trials_reads_singular_result_json(tmp_path):
+    """Harbor writes <trial>/result.json even though its docstring says results.json."""
+    from backend.app.models import Framework, Job, JobType, ResourceSpec, Role, User, VerifyConfig
+    from backend.app.services import job_service
+    from backend.app.store import store
+
+    jobs_dir = tmp_path / "out"
+    job = Job(
+        name="verify-singular",
+        type=JobType.VERIFY,
+        framework=Framework.HARBOR,
+        owner_id="usr_singular",
+        resources=ResourceSpec(n_gpus=0),
+        verify=VerifyConfig(tasks_path=str(tmp_path), agent="oracle"),
+    )
+    job.runtime.output_dir = str(jobs_dir)
+    store.jobs.put(job)
+
+    harbor_dir = jobs_dir / job.id
+    (harbor_dir / "hello-world__aaa").mkdir(parents=True)
+    (harbor_dir / "config.json").write_text("{}", encoding="utf-8")
+    (harbor_dir / "hello-world__aaa" / "result.json").write_text(
+        json.dumps(
+            {
+                "task_name": "harbor/hello-world",
+                "trial_name": "hello-world__aaa",
+                "agent_info": {"name": "oracle", "version": "1.0.0", "model_info": None},
+                "exception_info": {
+                    "exception_type": "VerifierTimeoutError",
+                    "exception_message": "Verifier execution timed out after 240.0 seconds",
+                    "exception_traceback": "",
+                    "occurred_at": "2026-09-07T13:24:39Z",
+                },
+                "started_at": "2026-09-07T13:19:57Z",
+                "finished_at": "2026-09-07T13:24:39Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    actor = User(id="usr_singular", email="s@prt.local", display_name="s", role=Role.ADMIN, password_hash="x")
+    result = job_service.job_trials(job.id, actor=actor)
+    assert result["total"] == 1
+    assert result["errored"] == 1
+    assert result["trials"][0]["exception_type"] == "VerifierTimeoutError"
+    assert result["trials"][0]["agent"] == "oracle"
