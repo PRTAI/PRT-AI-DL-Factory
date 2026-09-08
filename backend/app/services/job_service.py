@@ -357,12 +357,15 @@ def list_jobs(
     statuses: list[JobStatus] | None = None,
     types: list[JobType] | None = None,
     project_id: str = "",
+    owner_id: str = "",
     query: str = "",
     limit: int = 200,
     offset: int = 0,
 ) -> tuple[list[Job], int]:
     def keep(job: Job) -> bool:
         if mine_only and job.owner_id != actor.id:
+            return False
+        if owner_id and job.owner_id != owner_id:
             return False
         if project_id and job.project_id != project_id:
             return False

@@ -6,15 +6,14 @@
  */
 import * as React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FolderKanban } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useProject } from '@/lib/store'
-import { Button, Card, EmptyState, Spinner } from './ui'
-import { ProjectSwitcher } from './ProjectSwitcher'
+import { ProjectPicker } from './ProjectPicker'
+import { Spinner } from './ui'
 
 export function ProjectGate({ children }: { children: React.ReactNode }) {
   const { projectId, setProject } = useProject()
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
+  const projects = useQuery({ queryKey: ['projects', '', '', 'all'], queryFn: () => api.projects() })
 
   const rows = projects.data
   const current = rows?.find((row) => row.project.id === projectId)
@@ -27,7 +26,7 @@ export function ProjectGate({ children }: { children: React.ReactNode }) {
 
   if (projects.isLoading) {
     return (
-      <div className="flex justify-center py-16">
+      <div className="flex justify-center py-24">
         <Spinner className="h-6 w-6" />
       </div>
     )
@@ -35,26 +34,11 @@ export function ProjectGate({ children }: { children: React.ReactNode }) {
 
   if (!current || current.project.archived) {
     return (
-      <Card className="mx-auto max-w-xl">
-        <EmptyState
-          icon={<FolderKanban className="h-8 w-8" aria-hidden />}
-          title="请先选择一个项目"
-          description={
-            rows?.length
-              ? '训练与评测任务都归属于项目。选择一个项目后即可继续提交。'
-              : '还没有任何项目。项目是任务的归属单位，先创建一个再回来提交任务。'
-          }
-          action={
-            rows?.length ? (
-              <ProjectSwitcher />
-            ) : (
-              <Button variant="primary" onClick={() => window.location.assign('/projects')}>
-                去创建项目
-              </Button>
-            )
-          }
-        />
-      </Card>
+      <ProjectPicker
+        centered
+        title="先选择一个项目"
+        description="训练与评测任务都归属于项目。项目和任务在团队内共享——可以直接进入别人的项目，看他们跑了什么。"
+      />
     )
   }
 

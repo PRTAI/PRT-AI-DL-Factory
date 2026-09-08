@@ -48,7 +48,16 @@ from .deployment import (
     VLLMConfig,
 )
 from .model_registry import ModelDownload, ModelDownloadRequest, ModelEntry
-from .project import Project, ProjectCreate, ProjectStats, ProjectUpdate, ProjectWithStats, slugify
+from .project import (
+    Project,
+    ProjectCreate,
+    ProjectMatch,
+    ProjectStats,
+    ProjectUpdate,
+    ProjectWithStats,
+    TeamMember,
+    slugify,
+)
 from .user import (
     LoginRequest,
     PasswordChange,
@@ -71,9 +80,11 @@ __all__ = [
     "ExportTask",
     "Project",
     "ProjectCreate",
+    "ProjectMatch",
     "ProjectStats",
     "ProjectUpdate",
     "ProjectWithStats",
+    "TeamMember",
     "VLLMConfig",
     "slugify",
     "Base",

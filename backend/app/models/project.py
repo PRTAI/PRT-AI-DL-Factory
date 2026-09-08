@@ -68,10 +68,44 @@ class ProjectStats(Base):
     pending_review: int = 0
     succeeded: int = 0
     failed: int = 0
+    # 按类型分开：选项目时想知道这条线是在做训练还是在做评测
+    training_jobs: int = 0
+    verify_jobs: int = 0
     last_activity_at: datetime | None = None
     members: list[str] = Field(default_factory=list)
+
+
+class ProjectMatch(Base):
+    """搜索命中的任务。
+
+    用来回答「为什么这个项目出现在结果里」——按任务名/负责人搜项目时，
+    光给项目名没法判断是不是要找的那个。
+    """
+
+    id: str
+    name: str
+    type: str
+    status: str
+    owner_email: str
+    updated_at: datetime
+
+
+class TeamMember(Base):
+    """负责人下拉框的一行。
+
+    只有展示名与邮箱 —— 这些在每行任务上本来就看得到，
+    所以不需要管理员权限（``/api/users`` 是管理员专属的）。
+    """
+
+    id: str
+    display_name: str
+    email: str
+    jobs: int = 0
 
 
 class ProjectWithStats(Base):
     project: Project
     stats: ProjectStats
+    # 命中的任务（有筛选条件时）或最近的任务（没有筛选条件时）
+    matches: list[ProjectMatch] = Field(default_factory=list)
+    matched_jobs: int = 0

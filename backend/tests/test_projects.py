@@ -141,6 +141,114 @@ def test_project_with_jobs_cannot_be_deleted(client, member_headers, dataset_id_
     assert client.delete(f"/api/projects/{empty['id']}", headers=member_headers).status_code == 204
 
 
+def test_combined_filters_are_an_intersection(
+    client, admin_headers, member_headers, dataset_id_for_projects
+):
+    """关键词 / 负责人 / 类型三个条件是交集，且关键词也匹配项目里的任务。
+
+    「找张三上周那个评测」不该要求先猜对项目名。
+    """
+    project = client.post(
+        "/api/projects", headers=member_headers, json={"name": "联合筛选项目"}
+    ).json()
+
+    def submit(name: str, headers: dict[str, str], job_type: str = "sft") -> str:
+        if job_type == "sft":
+            payload = {
+                "name": name,
+                "type": "sft",
+                "project_id": project["id"],
+                "resources": {"n_gpus": 0},
+                "sft": {
+                    "stage": "sft",
+                    "model_id": FAKE_MODEL_ID,
+                    "model_path": "",
+                    "dataset_ids": [dataset_id_for_projects],
+                },
+            }
+        else:
+            payload = {
+                "name": name,
+                "type": "verify",
+                "project_id": project["id"],
+                "resources": {"n_gpus": 0},
+                "verify": {"agent": "oracle", "tasks_path": "/tmp/tasks"},
+            }
+        response = client.post("/api/jobs", headers=headers, json=payload)
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    dev_train = submit("dev-的-训练-alpha", member_headers)
+    dev_verify = submit("dev-的-评测-alpha", member_headers, "verify")
+    admin_verify = submit("admin-的-评测-alpha", admin_headers, "verify")
+
+    def ids(**params) -> set[str]:
+        rows = client.get("/api/projects", headers=member_headers, params=params).json()
+        row = next((r for r in rows if r["project"]["id"] == project["id"]), None)
+        return {m["id"] for m in row["matches"]} if row else set()
+
+    def present(**params) -> bool:
+        rows = client.get("/api/projects", headers=member_headers, params=params).json()
+        return any(r["project"]["id"] == project["id"] for r in rows)
+
+    # 关键词命中任务名 —— 项目名里根本没有 "alpha"
+    assert ids(q="alpha") == {dev_train, dev_verify, admin_verify}
+
+    # 关键词 + 类型
+    assert ids(q="alpha", job_type="verify") == {dev_verify, admin_verify}
+
+    # 负责人（拿 members 接口里的 id，普通成员也能调）
+    members = client.get("/api/projects/members", headers=member_headers).json()
+    admin_id = next(m["id"] for m in members if m["email"] == "admin@prt.local")
+    dev_id = next(m["id"] for m in members if m["email"] == "dev@prt.local")
+
+    assert ids(owner_id=admin_id) == {admin_verify}
+
+    # 三个条件同时给 = 交集，不是并集
+    assert ids(q="alpha", owner_id=dev_id, job_type="verify") == {dev_verify}
+    assert ids(q="alpha", owner_id=admin_id, job_type="sft") == set()
+    assert not present(q="alpha", owner_id=admin_id, job_type="sft")
+
+    # 关键词只匹配项目名时，项目仍然出现（哪怕没有任务命中）
+    assert present(q="联合筛选")
+
+    # 统计里分开算训练与评测
+    rows = client.get("/api/projects", headers=member_headers).json()
+    stats = next(r["stats"] for r in rows if r["project"]["id"] == project["id"])
+    assert stats["training_jobs"] == 1
+    assert stats["verify_jobs"] == 2
+    assert sorted(stats["members"]) == ["admin@prt.local", "dev@prt.local"]
+
+
+def test_jobs_can_be_filtered_by_owner(client, admin_headers, member_headers, dataset_id_for_projects):
+    """任务列表的负责人筛选：默认看全员，指定后只看那个人的。"""
+    members = client.get("/api/projects/members", headers=member_headers).json()
+    admin_id = next(m["id"] for m in members if m["email"] == "admin@prt.local")
+
+    payload = {
+        "name": "admin-的任务",
+        "type": "sft",
+        "project_id": project_id(),
+        "resources": {"n_gpus": 0},
+        "sft": {
+            "stage": "sft",
+            "model_id": FAKE_MODEL_ID,
+            "model_path": "",
+            "dataset_ids": [dataset_id_for_projects],
+        },
+    }
+    mine = client.post("/api/jobs", headers=admin_headers, json=payload).json()["id"]
+
+    scoped = client.get(f"/api/jobs?owner_id={admin_id}", headers=member_headers).json()
+    assert mine in [row["id"] for row in scoped["items"]]
+    assert all(row["owner_email"] == "admin@prt.local" for row in scoped["items"])
+
+    # 别人也能看到（团队共享），只是默认不过滤
+    everyone = client.get("/api/jobs", headers=member_headers).json()
+    owners = {row["owner_email"] for row in everyone["items"]}
+    assert len(owners) > 1, owners
+
+
 def test_jobs_can_be_filtered_by_project(client, member_headers, dataset_id_for_projects):
     other = client.post("/api/projects", headers=member_headers, json={"name": "过滤项目"}).json()
     payload = {

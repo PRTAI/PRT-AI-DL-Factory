@@ -7,7 +7,15 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from ..deps import CurrentUser
-from ..models import Job, Project, ProjectCreate, ProjectUpdate, ProjectWithStats
+from ..models import (
+    Job,
+    JobType,
+    Project,
+    ProjectCreate,
+    ProjectUpdate,
+    ProjectWithStats,
+    TeamMember,
+)
 from ..services import project_service
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -16,11 +24,21 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 @router.get("", response_model=list[ProjectWithStats], summary="项目列表（全员可见）")
 def list_projects(
     user: CurrentUser,
-    q: str = Query(default="", description="按名称/描述/标签/负责人搜索"),
+    q: str = Query(default="", description="项目名/描述/标签，以及项目内的任务名/负责人"),
+    owner_id: str = Query(default="", description="只看某个负责人参与的项目"),
+    job_type: JobType | None = Query(default=None, description="只看含有该类型任务的项目"),
     include_archived: bool = False,
 ) -> list[dict[str, Any]]:
     del user  # 登录即可查看，团队内共享
-    return project_service.list_with_stats(query=q, include_archived=include_archived)
+    return project_service.list_with_stats(
+        query=q, owner_id=owner_id, job_type=job_type, include_archived=include_archived
+    )
+
+
+@router.get("/members", response_model=list[TeamMember], summary="团队成员（筛选用）")
+def members(user: CurrentUser) -> list[dict[str, Any]]:
+    del user
+    return project_service.members()
 
 
 @router.post("", response_model=Project, status_code=201, summary="创建项目")

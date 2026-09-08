@@ -1,327 +1,122 @@
 /**
- * 项目管理：列表 / 搜索 / 创建 / 改名 / 归档 / 删除。
- * 列表是全团队共享的（谁在跑什么应该透明），只有负责人和管理员能改。
+ * 项目管理页。
+ *
+ * 浏览 / 搜索 / 选择用的是和提交页闸门同一个 `ProjectPicker`——
+ * 同一份东西不该有两种长相。这里只多给负责人与管理员一组卡内操作，
+ * 以及改名 / 转交负责人的弹窗。
  */
 import * as React from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  Archive,
-  ArchiveRestore,
-  FolderKanban,
-  Pencil,
-  Plus,
-  Search,
-  Trash2,
-  Users,
-} from 'lucide-react'
+import { Archive, ArchiveRestore } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import { useAuth, useProject } from '@/lib/store'
+import { useAuth } from '@/lib/store'
 import { formatRelative } from '@/lib/utils'
-import { PageHeader } from '@/components/common'
-import {
-  Badge,
-  Button,
-  Card,
-  Dialog,
-  EmptyState,
-  Field,
-  Input,
-  LinkButton,
-  Skeleton,
-  Table,
-  Td,
-  Th,
-  Tr,
-  Textarea,
-} from '@/components/ui'
+import { ProjectPicker } from '@/components/ProjectPicker'
+import { Button, Dialog, Field, Input, Table, Td, Textarea, Th, Tr } from '@/components/ui'
 import type { Project } from '@/lib/types'
 
 export default function Projects() {
-  const { user } = useAuth()
-  const { projectId, setProject } = useProject()
-  const [keyword, setKeyword] = React.useState('')
-  const [showArchived, setShowArchived] = React.useState(false)
-  const [creating, setCreating] = React.useState(false)
   const [editing, setEditing] = React.useState<Project | null>(null)
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-
-  const projects = useQuery({
-    queryKey: ['projects', keyword, showArchived],
-    queryFn: () => api.projects({ q: keyword, include_archived: showArchived }),
-  })
-
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['projects'] })
-
-  const archive = useMutation({
-    mutationFn: ({ id, archived }: { id: string; archived: boolean }) =>
-      api.updateProject(id, { archived }),
-    onSuccess: (project) => {
-      toast.success(project.archived ? `已归档「${project.name}」` : `已恢复「${project.name}」`)
-      invalidate()
-    },
-    onError: (error: ApiError) => toast.error(error.message),
-  })
-
-  const remove = useMutation({
-    mutationFn: (id: string) => api.deleteProject(id),
-    onSuccess: (_, id) => {
-      toast.success('项目已删除')
-      if (id === projectId) setProject('')
-      invalidate()
-    },
-    onError: (error: ApiError) => toast.error(error.message),
-  })
-
-  const rows = projects.data ?? []
-  const canManage = (project: Project) => user?.role === 'admin' || project.owner_id === user?.id
+  const [showArchived, setShowArchived] = React.useState(false)
 
   return (
     <div>
-      <PageHeader
+      <ProjectPicker
+        manage
         title="项目"
-        description="训练与评测任务都归属于项目。项目列表对全团队可见，只有负责人和管理员能修改。"
-        actions={
-          <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4" aria-hidden />
-            新建项目
-          </Button>
-        }
+        description="任务的归属单位。列表与搜索对全团队可见——搜索会同时匹配项目名和项目里的任务名、负责人；只有负责人和管理员可以修改。"
+        onEdit={setEditing}
       />
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="relative w-72">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" aria-hidden />
-          <Input
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
-            placeholder="按名称 / 描述 / 标签 / 负责人搜索"
-            className="pl-9"
-            aria-label="搜索项目"
-          />
-        </div>
-        <Button
-          variant={showArchived ? 'primary' : 'secondary'}
-          size="sm"
+      <div className="mt-6">
+        <button
+          type="button"
+          className="link text-xs"
           onClick={() => setShowArchived((value) => !value)}
         >
-          <Archive className="h-3.5 w-3.5" aria-hidden />
-          含已归档
-        </Button>
+          {showArchived ? '收起已归档项目' : '查看已归档项目'}
+        </button>
+        {showArchived && <ArchivedTable />}
       </div>
 
-      <Card>
-        {projects.isLoading ? (
-          <div className="space-y-2 p-4">
-            {[0, 1, 2].map((index) => (
-              <Skeleton key={index} className="h-12 w-full" />
-            ))}
-          </div>
-        ) : rows.length === 0 ? (
-          <EmptyState
-            icon={<FolderKanban className="h-8 w-8" aria-hidden />}
-            title={keyword ? '没有匹配的项目' : '还没有项目'}
-            description="项目是任务的归属单位，先创建一个项目才能提交训练或评测。"
-            action={
-              <Button variant="primary" onClick={() => setCreating(true)}>
-                <Plus className="h-4 w-4" aria-hidden />
-                新建项目
-              </Button>
-            }
-          />
-        ) : (
-          <Table>
-            <thead>
-              <tr>
-                <Th className="w-[280px]">项目</Th>
-                <Th className="w-[180px]">负责人</Th>
-                <Th className="w-[110px] text-right">任务数</Th>
-                <Th className="w-[150px]">运行 / 待审</Th>
-                <Th className="w-[130px]">最近活动</Th>
-                <Th>操作</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map(({ project, stats }) => (
-                <Tr key={project.id}>
-                  <Td>
-                    <button
-                      type="button"
-                      className="block max-w-full text-left"
-                      onClick={() => {
-                        setProject(project.id)
-                        navigate('/jobs')
-                      }}
-                    >
-                      <span className="flex items-center gap-1.5">
-                        <span className="truncate text-[13px] font-medium text-primary hover:underline">
-                          {project.name}
-                        </span>
-                        {project.id === projectId && <Badge tone="primary">当前</Badge>}
-                        {project.archived && <Badge tone="neutral">已归档</Badge>}
-                      </span>
-                      {project.description && (
-                        <span className="mt-0.5 block truncate text-[11px] text-fg-subtle">
-                          {project.description}
-                        </span>
-                      )}
-                    </button>
-                  </Td>
-                  <Td>
-                    <span className="truncate text-xs text-fg-muted">{project.owner_email}</span>
-                    {stats.members.length > 1 && (
-                      <span className="mt-0.5 flex items-center gap-1 text-[11px] text-fg-subtle">
-                        <Users className="h-3 w-3" aria-hidden />
-                        {stats.members.length} 人参与
-                      </span>
-                    )}
-                  </Td>
-                  <Td className="num text-right text-xs">{stats.total_jobs}</Td>
-                  <Td className="text-xs text-fg-muted">
-                    {stats.running > 0 ? <span className="text-success">{stats.running} 运行中</span> : '—'}
-                    {stats.pending_review > 0 && (
-                      <span className="ml-1.5 text-warning">{stats.pending_review} 待审</span>
-                    )}
-                  </Td>
-                  <Td className="text-xs text-fg-subtle">
-                    {stats.last_activity_at ? formatRelative(stats.last_activity_at) : '—'}
-                  </Td>
-                  <Td>
-                    <div className="flex items-center gap-3">
-                      <LinkButton
-                        onClick={() => {
-                          setProject(project.id)
-                          toast.success(`已切换到项目「${project.name}」`)
-                        }}
-                        disabled={project.id === projectId || project.archived}
-                      >
-                        进入
-                      </LinkButton>
-                      <LinkButton onClick={() => setEditing(project)} disabled={!canManage(project)}>
-                        <Pencil className="mr-0.5 inline h-3 w-3" aria-hidden />
-                        编辑
-                      </LinkButton>
-                      <LinkButton
-                        onClick={() => archive.mutate({ id: project.id, archived: !project.archived })}
-                        disabled={!canManage(project)}
-                      >
-                        {project.archived ? (
-                          <>
-                            <ArchiveRestore className="mr-0.5 inline h-3 w-3" aria-hidden />
-                            恢复
-                          </>
-                        ) : (
-                          <>
-                            <Archive className="mr-0.5 inline h-3 w-3" aria-hidden />
-                            归档
-                          </>
-                        )}
-                      </LinkButton>
-                      <LinkButton
-                        tone="danger"
-                        disabled={!canManage(project) || stats.total_jobs > 0}
-                        title={stats.total_jobs > 0 ? '项目下还有任务，只能归档' : undefined}
-                        onClick={() => {
-                          if (window.confirm(`确定删除项目「${project.name}」？`)) remove.mutate(project.id)
-                        }}
-                      >
-                        <Trash2 className="mr-0.5 inline h-3 w-3" aria-hidden />
-                        删除
-                      </LinkButton>
-                    </div>
-                  </Td>
-                </Tr>
-              ))}
-            </tbody>
-          </Table>
-        )}
-      </Card>
-
-      <CreateDialog open={creating} onOpenChange={setCreating} onCreated={(id) => setProject(id)} />
       <EditDialog project={editing} onClose={() => setEditing(null)} />
     </div>
   )
 }
 
-function CreateDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  onCreated: (id: string) => void
-}) {
-  const [name, setName] = React.useState('')
-  const [description, setDescription] = React.useState('')
-  const [tags, setTags] = React.useState('')
+/* -------------------------------------------------------------------------- */
+/* 已归档：不占卡片位，用一张紧凑的表列出来就够了                                */
+/* -------------------------------------------------------------------------- */
+function ArchivedTable() {
+  const { user } = useAuth()
   const queryClient = useQueryClient()
+  const projects = useQuery({
+    queryKey: ['projects', 'archived'],
+    queryFn: () => api.projects({ include_archived: true }),
+    select: (rows) => rows.filter((row) => row.project.archived),
+  })
 
-  const create = useMutation({
-    mutationFn: () =>
-      api.createProject({
-        name: name.trim(),
-        description: description.trim(),
-        tags: tags
-          .split(/[,，\s]+/)
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-      }),
+  const restore = useMutation({
+    mutationFn: (id: string) => api.updateProject(id, { archived: false }),
     onSuccess: (project) => {
-      toast.success(`已创建项目「${project.name}」，已切换为当前项目`)
-      onCreated(project.id)
-      setName('')
-      setDescription('')
-      setTags('')
-      onOpenChange(false)
+      toast.success(`已恢复「${project.name}」`)
       queryClient.invalidateQueries({ queryKey: ['projects'] })
     },
     onError: (error: ApiError) => toast.error(error.message),
   })
 
+  const rows = projects.data ?? []
+  if (!rows.length) {
+    return <p className="mt-2 text-xs text-fg-subtle">没有已归档的项目。</p>
+  }
+
   return (
-    <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      title="新建项目"
-      description="项目是任务的归属单位；创建后会自动切换为当前项目。"
-      footer={
-        <>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            取消
-          </Button>
-          <Button
-            variant="primary"
-            loading={create.isPending}
-            disabled={!name.trim()}
-            onClick={() => create.mutate()}
-          >
-            创建
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-3">
-        <Field label="项目名称" required hint="团队内唯一，例如「Qwen3-4B 对齐」">
-          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="项目名称" />
-        </Field>
-        <Field label="描述" hint="目标、约束、负责的模型等，方便别人理解这个项目在做什么">
-          <Textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="选填"
-          />
-        </Field>
-        <Field label="标签" hint="逗号或空格分隔，用于搜索">
-          <Input value={tags} onChange={(event) => setTags(event.target.value)} placeholder="grpo, qwen3" />
-        </Field>
-      </div>
-    </Dialog>
+    <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">
+      <Table>
+        <thead>
+          <tr>
+            <Th>
+              <span className="flex items-center gap-1.5">
+                <Archive className="h-3.5 w-3.5" aria-hidden />
+                已归档项目
+              </span>
+            </Th>
+            <Th className="w-[180px]">负责人</Th>
+            <Th className="w-[100px] text-right">任务数</Th>
+            <Th className="w-[130px]">最近活动</Th>
+            <Th className="w-[90px]">操作</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ project, stats }) => (
+            <Tr key={project.id}>
+              <Td className="text-[13px]">{project.name}</Td>
+              <Td className="truncate text-xs text-fg-muted">{project.owner_email}</Td>
+              <Td className="num text-right text-xs">{stats.total_jobs}</Td>
+              <Td className="text-xs text-fg-subtle">
+                {stats.last_activity_at ? formatRelative(stats.last_activity_at) : '—'}
+              </Td>
+              <Td>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={user?.role !== 'admin' && project.owner_id !== user?.id}
+                  onClick={() => restore.mutate(project.id)}
+                >
+                  <ArchiveRestore className="h-3.5 w-3.5" aria-hidden />
+                  恢复
+                </Button>
+              </Td>
+            </Tr>
+          ))}
+        </tbody>
+      </Table>
+    </div>
   )
 }
 
+/* -------------------------------------------------------------------------- */
 function EditDialog({ project, onClose }: { project: Project | null; onClose: () => void }) {
   const [name, setName] = React.useState('')
   const [description, setDescription] = React.useState('')
@@ -338,9 +133,9 @@ function EditDialog({ project, onClose }: { project: Project | null; onClose: ()
     setOwnerId(project.owner_id)
   }, [project])
 
-  const users = useQuery({
-    queryKey: ['users'],
-    queryFn: () => api.users(),
+  const members = useQuery({
+    queryKey: ['team-members'],
+    queryFn: () => api.teamMembers(),
     enabled: Boolean(project) && user?.role === 'admin',
   })
 
@@ -383,10 +178,10 @@ function EditDialog({ project, onClose }: { project: Project | null; onClose: ()
         <Field label="项目名称" required>
           <Input value={name} onChange={(event) => setName(event.target.value)} />
         </Field>
-        <Field label="描述">
+        <Field label="描述" hint="目标、约束、负责的模型——方便别人理解这个项目在做什么">
           <Textarea value={description} onChange={(event) => setDescription(event.target.value)} />
         </Field>
-        <Field label="标签" hint="逗号或空格分隔">
+        <Field label="标签" hint="逗号或空格分隔，用于搜索">
           <Input value={tags} onChange={(event) => setTags(event.target.value)} />
         </Field>
         {user?.role === 'admin' && (
@@ -396,7 +191,7 @@ function EditDialog({ project, onClose }: { project: Project | null; onClose: ()
               onChange={(event) => setOwnerId(event.target.value)}
               className="h-9 w-full rounded-md border border-border bg-card px-3 text-sm text-fg"
             >
-              {(users.data ?? []).map((item) => (
+              {(members.data ?? []).map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.display_name}（{item.email}）
                 </option>

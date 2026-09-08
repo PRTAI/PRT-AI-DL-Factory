@@ -25,6 +25,7 @@ import type {
   Project,
   ProjectWithStats,
   SystemMetrics,
+  TeamMember,
   SystemSettings,
   TokenResponse,
   ToolchainRow,
@@ -166,8 +167,17 @@ export const api = {
 
   // ----------------------------------------------------------- projects ----
   // 项目在团队内共享：任何登录用户都能列出/搜索，改和删只有负责人与管理员能做。
-  projects: (params: { q?: string; include_archived?: boolean } = {}) =>
-    request<ProjectWithStats[]>(`/api/projects${qs(params)}`),
+  // q 同时匹配项目名与**项目内的任务名/负责人**，三个条件是联合的
+  projects: (
+    params: {
+      q?: string
+      owner_id?: string
+      job_type?: JobType
+      include_archived?: boolean
+    } = {},
+  ) => request<ProjectWithStats[]>(`/api/projects${qs(params)}`),
+  /** 负责人下拉框数据（`/api/users` 是管理员专属，普通成员用这个） */
+  teamMembers: () => request<TeamMember[]>('/api/projects/members'),
   project: (id: string) => request<ProjectWithStats>(`/api/projects/${id}`),
   projectJobs: (id: string, limit = 20) =>
     request<Job[]>(`/api/projects/${id}/jobs${qs({ limit })}`),
@@ -185,6 +195,7 @@ export const api = {
     status?: JobStatus[]
     type?: JobType[]
     project_id?: string
+    owner_id?: string
     q?: string
     limit?: number
     offset?: number

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ListChecks, RefreshCw, Search } from 'lucide-react'
+import { ListChecks, RefreshCw, Search, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth, useProject } from '@/lib/store'
@@ -43,9 +43,17 @@ export default function Jobs() {
   )
   const [type, setType] = React.useState<JobType | 'all'>((searchParams.get('type') as JobType) ?? 'all')
   const [query, setQuery] = React.useState(searchParams.get('q') ?? '')
-  const [mineOnly, setMineOnly] = React.useState(searchParams.get('mine') === '1')
+  const [ownerId, setOwnerId] = React.useState(searchParams.get('owner') ?? '')
   // 默认只看当前项目；切成「全部项目」可以横向对比别的项目在跑什么
   const [scopeToProject, setScopeToProject] = React.useState(searchParams.get('all') !== '1')
+
+  // 项目卡片上的「查看全部任务」带 ?project=<id> 过来：切过去并只看它
+  const urlProject = searchParams.get('project') ?? ''
+  React.useEffect(() => {
+    if (!urlProject) return
+    setProject(urlProject)
+    setScopeToProject(true)
+  }, [urlProject, setProject])
   const [reviewTarget, setReviewTarget] = React.useState<Job | null>(null)
   const [reviewComment, setReviewComment] = React.useState('')
 
@@ -54,24 +62,25 @@ export default function Jobs() {
     if (status !== 'all') next.set('status', status)
     if (type !== 'all') next.set('type', type)
     if (query) next.set('q', query)
-    if (mineOnly) next.set('mine', '1')
+    if (ownerId) next.set('owner', ownerId)
     if (!scopeToProject) next.set('all', '1')
     setSearchParams(next, { replace: true })
-  }, [status, type, query, mineOnly, scopeToProject, setSearchParams])
+  }, [status, type, query, ownerId, scopeToProject, setSearchParams])
 
-  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
+  const projects = useQuery({ queryKey: ['projects', '', '', 'all'], queryFn: () => api.projects() })
   const projectName = projects.data?.find((row) => row.project.id === projectId)?.project.name
+  const members = useQuery({ queryKey: ['team-members'], queryFn: () => api.teamMembers() })
 
   const effectiveProject = scopeToProject ? projectId : ''
   const jobs = useQuery({
-    queryKey: ['jobs', status, type, query, mineOnly, effectiveProject],
+    queryKey: ['jobs', status, type, query, ownerId, effectiveProject],
     queryFn: () =>
       api.jobs({
         status: status === 'all' ? undefined : [status],
         type: type === 'all' ? undefined : [type],
         project_id: effectiveProject || undefined,
+        owner_id: ownerId || undefined,
         q: query || undefined,
-        mine_only: mineOnly,
         limit: 200,
       }),
     refetchInterval: 8000,
@@ -114,7 +123,13 @@ export default function Jobs() {
   })
 
   const items = jobs.data?.items ?? []
-  const pending = items.filter((job) => job.status === 'pending_review')
+  // 待审提醒要用**全量**计数：它是在催管理员去审，不该被当前筛选条件缩小
+  const overview = useQuery({
+    queryKey: ['job-overview', ''],
+    queryFn: () => api.jobOverview(),
+    refetchInterval: 15000,
+  })
+  const pendingCount = overview.data?.pending_review ?? 0
 
   return (
     <div className="space-y-4">
@@ -145,10 +160,18 @@ export default function Jobs() {
         }
       />
 
-      {user?.role === 'admin' && pending.length > 0 && (
+      {user?.role === 'admin' && pendingCount > 0 && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-warning">
-          <span>有 {pending.length} 个任务等待审核，通过后才会进入 GPU 排队队列。</span>
-          <Button variant="outline" size="sm" onClick={() => setStatus('pending_review')}>
+          <span>全平台有 {pendingCount} 个任务等待审核，通过后才会进入 GPU 排队队列。</span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setStatus('pending_review')
+              setScopeToProject(false)
+              setOwnerId('')
+            }}
+          >
             只看待审核
           </Button>
         </div>
@@ -161,7 +184,7 @@ export default function Jobs() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索任务名 / 备注 / 提交人 / 任务 ID"
+              placeholder="搜索任务名 / 备注 / 标签 / 任务 ID"
               className="pl-8"
               aria-label="搜索任务"
             />
@@ -198,15 +221,44 @@ export default function Jobs() {
               })),
             ]}
           />
-          <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs text-fg-muted">
-            <input
-              type="checkbox"
-              checked={mineOnly}
-              onChange={(event) => setMineOnly(event.target.checked)}
-              className="h-3.5 w-3.5 accent-[var(--primary)]"
+          {/* 负责人：任务在团队内共享，所以这里默认是「全部负责人」 */}
+          <div className="relative">
+            <Users
+              className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle"
+              aria-hidden
             />
-            只看我的
-          </label>
+            <select
+              value={ownerId}
+              onChange={(event) => setOwnerId(event.target.value)}
+              aria-label="按负责人筛选"
+              className="h-9 w-40 appearance-none rounded-md border border-border bg-card pl-8 pr-6 text-sm text-fg transition-colors hover:border-border-strong focus:border-primary focus:outline-none"
+            >
+              <option value="">全部负责人</option>
+              {user && <option value={user.id}>我（{user.display_name}）</option>}
+              {(members.data ?? [])
+                .filter((member) => member.id !== user?.id)
+                .map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.display_name}
+                    {member.jobs ? ` · ${member.jobs}` : ''}
+                  </option>
+                ))}
+            </select>
+          </div>
+          {(query || status !== 'all' || type !== 'all' || ownerId) && (
+            <button
+              type="button"
+              className="link text-xs"
+              onClick={() => {
+                setQuery('')
+                setStatus('all')
+                setType('all')
+                setOwnerId('')
+              }}
+            >
+              清除筛选
+            </button>
+          )}
         </div>
 
         {items.length ? (

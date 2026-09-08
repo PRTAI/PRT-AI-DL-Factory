@@ -585,13 +585,34 @@ export interface ProjectStats {
   pending_review: number
   succeeded: number
   failed: number
+  training_jobs: number
+  verify_jobs: number
   last_activity_at?: string | null
   members: string[]
+}
+
+/** 搜索命中的任务 —— 解释「为什么这个项目出现在结果里」 */
+export interface ProjectMatch {
+  id: string
+  name: string
+  type: JobType
+  status: JobStatus
+  owner_email: string
+  updated_at: string
 }
 
 export interface ProjectWithStats {
   project: Project
   stats: ProjectStats
+  matches: ProjectMatch[]
+  matched_jobs: number
+}
+
+export interface TeamMember {
+  id: string
+  display_name: string
+  email: string
+  jobs: number
 }
 
 // ----------------------------------------------------------- 模型部署 ----
