@@ -183,13 +183,13 @@ function DeploymentList({ onShowLog }: { onShowLog: (id: string, name: string) =
       <Table>
         <thead>
           <tr>
-            <Th className="w-[240px]">服务</Th>
-            <Th className="w-[100px]">状态</Th>
-            <Th className="w-[230px]">端点 / 模型名</Th>
-            <Th className="w-[130px]">GPU / 并行</Th>
+            <Th>服务</Th>
+            <Th className="w-[96px]">状态</Th>
+            <Th className="w-[220px]">端点 / 模型名</Th>
+            <Th className="w-[110px]">GPU / 并行</Th>
             <Th className="w-[130px]">负责人</Th>
-            <Th className="w-[110px]">运行时长</Th>
-            <Th>操作</Th>
+            <Th className="w-[96px]">时长</Th>
+            <Th className="w-[150px]">操作</Th>
           </tr>
         </thead>
         <tbody>
@@ -202,9 +202,11 @@ function DeploymentList({ onShowLog }: { onShowLog: (id: string, name: string) =
             return (
               <Tr key={item.id}>
                 <Td>
-                  <div className="truncate text-[13px] font-medium text-fg">{item.name}</div>
-                  <div className="truncate text-[11px] text-fg-subtle" title={item.model_path}>
-                    {item.model_path}
+                  <div className="w-[240px] max-w-[28vw]">
+                    <div className="truncate text-[13px] font-medium text-fg">{item.name}</div>
+                    <div className="truncate text-[11px] text-fg-subtle" title={item.model_path}>
+                      {item.model_path}
+                    </div>
                   </div>
                 </Td>
                 <Td>
@@ -260,7 +262,7 @@ function DeploymentList({ onShowLog }: { onShowLog: (id: string, name: string) =
                   {uptime ?? (item.stopped_at ? formatRelative(item.stopped_at) : '—')}
                 </Td>
                 <Td>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 whitespace-nowrap">
                     <LinkButton onClick={() => onShowLog(item.id, item.name)}>
                       <ScrollText className="mr-0.5 inline h-3 w-3" aria-hidden />
                       日志
@@ -359,12 +361,12 @@ function ExportList({
       <Table>
         <thead>
           <tr>
-            <Th className="w-[220px]">导出</Th>
-            <Th className="w-[100px]">状态</Th>
-            <Th className="w-[280px]">产物目录</Th>
-            <Th className="w-[100px] text-right">大小</Th>
+            <Th>导出</Th>
+            <Th className="w-[96px]">状态</Th>
+            <Th>产物目录</Th>
+            <Th className="w-[90px] text-right">大小</Th>
             <Th className="w-[130px]">发起人</Th>
-            <Th>操作</Th>
+            <Th className="w-[150px]">操作</Th>
           </tr>
         </thead>
         <tbody>
@@ -374,9 +376,11 @@ function ExportList({
             return (
               <Tr key={item.id}>
                 <Td>
-                  <div className="truncate text-[13px] font-medium text-fg">{item.name}</div>
-                  <div className="truncate text-[11px] text-fg-subtle" title={item.adapter_path}>
-                    adapter: {item.adapter_path.split('/').slice(-2).join('/')}
+                  <div className="w-[200px] max-w-[22vw]">
+                    <div className="truncate text-[13px] font-medium text-fg">{item.name}</div>
+                    <div className="truncate text-[11px] text-fg-subtle" title={item.adapter_path}>
+                      adapter: {item.adapter_path.split('/').slice(-2).join('/')}
+                    </div>
                   </div>
                 </Td>
                 <Td>
@@ -388,7 +392,7 @@ function ExportList({
                   )}
                 </Td>
                 <Td>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex w-[280px] max-w-[30vw] items-center gap-1.5">
                     <Mono className="truncate">{item.export_dir}</Mono>
                     <button
                       type="button"
@@ -408,7 +412,7 @@ function ExportList({
                 </Td>
                 <Td className="truncate text-xs text-fg-muted">{item.owner_email}</Td>
                 <Td>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 whitespace-nowrap">
                     <LinkButton onClick={() => onShowLog(item.id, item.name)}>
                       <ScrollText className="mr-0.5 inline h-3 w-3" aria-hidden />
                       日志

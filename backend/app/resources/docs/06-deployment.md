@@ -51,6 +51,8 @@ LoRA 训练产出的是 **adapter**（`adapter_config.json` + `adapter_model.saf
 
 ## 二、vLLM 部署
 
+![模型部署](/api/handbook/assets/deployments.png)
+
 ### 启动一个服务
 
 「模型部署」页右上角「部署模型」。
