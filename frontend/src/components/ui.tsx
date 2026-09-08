@@ -248,6 +248,8 @@ export function Select({
         className={cn(
           FIELD_BASE,
           'flex h-9 items-center justify-between gap-2 data-[placeholder]:text-fg-subtle',
+          // 选中项名字长了要截断而不是换行——换行会把 h-9 的高度撑破
+          'overflow-hidden [&>span:first-child]:truncate',
           className,
         )}
       >

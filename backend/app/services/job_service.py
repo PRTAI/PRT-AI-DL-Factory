@@ -560,8 +560,14 @@ def verify_from_training(job_id: str, *, actor: User) -> dict[str, Any]:
     checkpoints = [
         str(p) for p in sorted(output_dir.glob("checkpoint-*")) if p.is_dir()
     ] if output_dir.is_dir() else []
+    # 顺带把项目带回去：评测某次训练的产物，理应落在同一个项目里，
+    # 而不是落在用户当前恰好选中的那个项目。
+    project = store.projects.get(job.project_id)
     return {
         "parent_job_id": job.id,
+        "parent_job_name": job.name,
+        "project_id": job.project_id,
+        "project_name": project.name if project else "",
         "model_path": str(output_dir),
         "checkpoints": checkpoints,
         "hint": "评测本地训练产物时，建议先用 vLLM 起一个 OpenAI 兼容服务，再选择 terminus / claude-code 等 agent。",

@@ -22,6 +22,7 @@ import { api, ApiError } from '@/lib/api'
 import { useAuth, useProject } from '@/lib/store'
 import { copyText, formatBytes, formatDuration, formatRelative } from '@/lib/utils'
 import { Mono, PageHeader, InlineHint } from '@/components/common'
+import { ProjectTag } from '@/components/ProjectTag'
 import { ModelPicker } from '@/components/pickers'
 import {
   Badge,
@@ -207,6 +208,8 @@ function DeploymentList({ onShowLog }: { onShowLog: (id: string, name: string) =
                     <div className="truncate text-[11px] text-fg-subtle" title={item.model_path}>
                       {item.model_path}
                     </div>
+                    {/* 部署是跨项目共享的推理端点，这里记的是「谁起的」 */}
+                    {item.project_id && <ProjectTag projectId={item.project_id} className="mt-0.5" />}
                   </div>
                 </Td>
                 <Td>

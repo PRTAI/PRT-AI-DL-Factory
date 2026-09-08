@@ -22,6 +22,7 @@ import type { Job } from '@/lib/types'
 import { formatBytes, formatDuration, formatNumber, formatRate, elapsedSeconds } from '@/lib/utils'
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Progress, Stat, Table, Td, Th, Tr } from '@/components/ui'
 import { JobTypeBadge, PageHeader, StatusBadge } from '@/components/common'
+import { ProjectTag } from '@/components/ProjectTag'
 import { Meter, UtilizationChart } from '@/components/charts'
 
 const timeLabel = (value: string | number) =>
@@ -353,6 +354,7 @@ export default function Dashboard() {
                   <Link to={`/jobs/${job.id}`} className="font-medium text-fg hover:text-primary">
                     {job.name}
                   </Link>
+                  <ProjectTag projectId={job.project_id} linked={false} className="mt-0.5 flex" />
                 </Td>
                 <Td>
                   <JobTypeBadge type={job.type} framework={job.framework} />
@@ -385,6 +387,7 @@ function ActiveJobRow({ job }: { job: Job }) {
       <Td>
         <Link to={`/jobs/${job.id}`} className="block min-w-0">
           <div className="truncate text-sm font-medium text-fg hover:text-primary">{job.name}</div>
+          <ProjectTag projectId={job.project_id} linked={false} className="mt-0.5" />
           <div className="mt-0.5">
             <JobTypeBadge type={job.type} framework={job.framework} />
           </div>

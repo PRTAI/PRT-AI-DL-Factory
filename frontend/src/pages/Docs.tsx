@@ -7,7 +7,7 @@ import { Link, useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ArrowLeft, BookOpen, Menu, Search } from 'lucide-react'
+import { ArrowLeft, BookOpen, ExternalLink, Menu, Search } from 'lucide-react'
 import { api, getToken } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Input, Skeleton } from '@/components/ui'
@@ -136,6 +136,7 @@ export default function Docs() {
   const [navOpen, setNavOpen] = React.useState(false)
 
   const list = useQuery({ queryKey: ['docs'], queryFn: () => api.docs() })
+  const links = useQuery({ queryKey: ['doc-links'], queryFn: () => api.docLinks() })
   const current = slug ?? list.data?.[0]?.slug
 
   const doc = useQuery({
@@ -208,8 +209,11 @@ export default function Docs() {
           {list.isLoading && <Skeleton className="h-40 w-full" />}
 
           {Object.entries(grouped).map(([category, docs]) => (
-            <div key={category} className="mb-4">
-              <div className="mb-1 px-2.5 text-[11px] text-fg-subtle">{category}</div>
+            <div key={category} className="mb-5">
+              {/* 分类是这份目录的骨架，字号要压得住下面的条目 */}
+              <h2 className="mb-1.5 px-2.5 text-[15px] font-semibold tracking-tight text-fg">
+                {category}
+              </h2>
               <ul>
                 {docs.map((item) => (
                   <li key={item.slug}>
@@ -220,7 +224,8 @@ export default function Docs() {
                         setNavOpen(false)
                       }}
                       className={cn(
-                        'relative flex w-full flex-col rounded px-2.5 py-2 text-left text-[13px] transition-colors',
+                        // 条目只给标题：摘要在正文第一段里都有，堆在目录里只会把层级压平
+                        'relative flex w-full items-center rounded px-2.5 py-1.5 text-left text-[13px] transition-colors',
                         item.slug === current
                           ? 'bg-primary-soft font-medium text-primary'
                           : 'text-fg-muted hover:bg-card-hover hover:text-fg',
@@ -229,12 +234,7 @@ export default function Docs() {
                       {item.slug === current && (
                         <span className="absolute inset-y-1 left-0 w-[3px] rounded-r bg-primary" aria-hidden />
                       )}
-                      <span>{item.title}</span>
-                      {item.summary && (
-                        <span className="mt-0.5 line-clamp-2 text-[11px] font-normal leading-snug text-fg-subtle">
-                          {item.summary}
-                        </span>
-                      )}
+                      <span className="truncate">{item.title}</span>
                     </button>
                   </li>
                 ))}
@@ -245,6 +245,40 @@ export default function Docs() {
           {!list.isLoading && !items.length && (
             <p className="px-2.5 py-6 text-center text-xs text-fg-subtle">没有匹配的文档</p>
           )}
+
+          {/* ------------------------------------------------ 相关项目 -- */}
+          {links.data?.length ? (
+            <div className="mt-6 border-t border-border pt-4">
+              <h2 className="mb-1.5 px-2.5 text-[15px] font-semibold tracking-tight text-fg">
+                相关项目链接
+              </h2>
+              <ul>
+                {links.data.map((item) => (
+                  <li key={item.key}>
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={`${item.note} — ${item.url}`}
+                      className="group flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[13px] text-fg-muted transition-colors hover:bg-card-hover hover:text-primary"
+                    >
+                      <span className="truncate">{item.label}</span>
+                      {item.version && (
+                        <span className="num shrink-0 text-[10px] text-fg-subtle">{item.version}</span>
+                      )}
+                      <ExternalLink
+                        className="ml-auto h-3 w-3 shrink-0 text-fg-subtle opacity-0 transition-opacity group-hover:opacity-100"
+                        aria-hidden
+                      />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 px-2.5 text-[10px] leading-relaxed text-fg-subtle">
+                版本号是本机实际装的那份检出。
+              </p>
+            </div>
+          ) : null}
         </aside>
 
         <main className="min-w-0 flex-1 px-6 py-6 lg:px-10">

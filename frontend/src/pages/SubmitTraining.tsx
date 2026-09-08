@@ -22,6 +22,7 @@ import {
   ToggleRow,
 } from '@/components/ui'
 import { InlineHint, PageHeader, WarnHint } from '@/components/common'
+import { ProjectBar } from '@/components/ProjectBar'
 import { CompatDocButton } from '@/components/CompatDoc'
 import { DatasetPicker, KeyValueEditor, ModelPicker } from '@/components/pickers'
 
@@ -311,6 +312,8 @@ export default function SubmitTraining() {
         description="SFT / 偏好对齐 / 强化学习，平台会按框架生成命令并在审核通过后自动排队执行"
         actions={<CompatDocButton defaultFramework={isRl ? (rl.framework as 'verl') : 'llamafactory'} />}
       />
+
+      <ProjectBar />
 
       <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
         <div className="space-y-4">

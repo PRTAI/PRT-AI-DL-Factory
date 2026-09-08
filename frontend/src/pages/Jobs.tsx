@@ -24,6 +24,7 @@ import {
   Tr,
 } from '@/components/ui'
 import { JOB_STATUS_OPTIONS, JobTypeBadge, PageHeader, StatusBadge } from '@/components/common'
+import { ProjectTag } from '@/components/ProjectTag'
 
 const TYPE_OPTIONS: { value: JobType | 'all'; label: string }[] = [
   { value: 'all', label: '全部类型' },
@@ -267,9 +268,11 @@ export default function Jobs() {
               {/* 「任务」列给固定宽度、最后一列吸收剩余空间，
                   这样类型/状态/进度等会整体左移，右侧不再挤成一团 */}
               <tr>
-                <Th className="w-[300px]">任务</Th>
-                {!scopeToProject && <Th className="w-[140px]">项目</Th>}
-                <Th className="w-[168px]">类型</Th>
+                <Th className="w-[280px]">任务</Th>
+                {/* 每个任务都属于一个项目，所以这一列常驻 —— 哪怕已经按项目筛过，
+                    看列表的人也不该靠记忆确认自己在看哪个项目 */}
+                <Th className="w-[140px]">项目</Th>
+                <Th className="w-[160px]">类型</Th>
                 <Th className="w-[88px]">状态</Th>
                 <Th className="w-[170px]">进度</Th>
                 <Th className="w-[64px]">GPU</Th>
@@ -291,11 +294,9 @@ export default function Jobs() {
                       </Link>
                       {job.note && <div className="mt-0.5 line-clamp-1 text-[11px] text-fg-muted">{job.note}</div>}
                     </Td>
-                    {!scopeToProject && (
-                      <Td className="truncate text-xs text-fg-muted">
-                        {projects.data?.find((row) => row.project.id === job.project_id)?.project.name ?? '—'}
-                      </Td>
-                    )}
+                    <Td>
+                      <ProjectTag projectId={job.project_id} className="text-xs" />
+                    </Td>
                     <Td>
                       <JobTypeBadge type={job.type} framework={job.framework} />
                     </Td>

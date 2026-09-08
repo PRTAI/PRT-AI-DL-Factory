@@ -19,6 +19,11 @@ def list_docs(_: CurrentUser) -> list[dict[str, Any]]:
     return docs_service.list_docs()
 
 
+@router.get("/links", summary="相关项目链接")
+def upstream_links(_: CurrentUser) -> list[dict[str, str]]:
+    return docs_service.upstream_links()
+
+
 @router.get("/assets/{name}", summary="文档插图")
 def doc_asset(name: str, _: CurrentUser) -> FileResponse:
     return FileResponse(docs_service.asset_path(name))

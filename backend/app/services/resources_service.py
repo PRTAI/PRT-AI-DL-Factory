@@ -208,6 +208,47 @@ def has_flash_attn(python_bin: str) -> bool:
     return available
 
 
+_VERSION_CACHE: dict[str, tuple[float, str]] = {}
+_VERSION_TTL = 300.0
+
+
+def module_version(python_bin: str, module: str) -> str:
+    """某个解释器里装的是哪个版本（拿不到就返回空串）。
+
+    用 importlib.metadata 而不是 import 那个包 —— 导入 vllm / torch 要好几秒，
+    而这只是为了在文档页展示一个版本号。
+    """
+    cache_key = f"{python_bin}|{module}"
+    cached = _VERSION_CACHE.get(cache_key)
+    now = time.time()
+    if cached and now - cached[0] < _VERSION_TTL:
+        return cached[1]
+
+    resolved = shutil.which(python_bin) or (python_bin if Path(python_bin).is_file() else None)
+    version = ""
+    if resolved is not None:
+        script = (
+            "import importlib.metadata as m;"
+            f"print(m.version({module!r}))"
+        )
+        try:
+            completed = subprocess.run(  # noqa: S603 - argv 来自配置
+                [resolved, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
+                check=False,
+            )
+            if completed.returncode == 0:
+                version = completed.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            version = ""
+
+    _VERSION_CACHE[cache_key] = (now, version)
+    return version
+
+
 def _docker_status() -> dict[str, Any]:
     """Harbor's default sandbox is Docker — check the daemon is actually reachable.
 

@@ -54,6 +54,7 @@ import {
   Tr,
 } from '@/components/ui'
 import { CopyButton, FRAMEWORK_LABEL, JobTypeBadge, Mono, PageHeader, StatusBadge } from '@/components/common'
+import { ProjectTag } from '@/components/ProjectTag'
 import { LineSeriesChart } from '@/components/charts'
 
 export default function JobDetail() {
@@ -206,14 +207,10 @@ export default function JobDetail() {
         description={
           <span className="flex flex-wrap items-center gap-2">
             <Mono>{data.id}</Mono>
-            {data.project_id && (
-              <>
-                <span>·</span>
-                <Link to="/projects" className="link">
-                  {project.data?.project.name ?? '项目'}
-                </Link>
-              </>
-            )}
+            <span>·</span>
+            <Link to={`/jobs?project=${data.project_id}`} className="link">
+              {project.data?.project.name ?? (data.project_id || '未归属项目')}
+            </Link>
             <span>·</span>
             <span>{data.owner_email}</span>
             <span>·</span>
@@ -388,6 +385,9 @@ export default function JobDetail() {
             <Card>
               <CardHeader title="运行信息" />
               <CardBody className="divide-y divide-border/50">
+                <KeyValue label="所属项目">
+                  <ProjectTag projectId={data.project_id} className="text-xs" />
+                </KeyValue>
                 <KeyValue label="框架">{FRAMEWORK_LABEL[data.framework]}</KeyValue>
                 <KeyValue label="申请 GPU">{data.resources.n_gpus} 张</KeyValue>
                 <KeyValue label="分配显卡">{data.resources.gpu_ids.join(', ') || '未分配'}</KeyValue>

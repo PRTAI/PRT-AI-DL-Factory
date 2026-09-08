@@ -22,6 +22,7 @@ import {
   ToggleRow,
 } from '@/components/ui'
 import { InlineHint, Mono, PageHeader, WarnHint } from '@/components/common'
+import { ProjectBar } from '@/components/ProjectBar'
 import { CompatDocButton } from '@/components/CompatDoc'
 import { DatasetPicker, KeyValueEditor } from '@/components/pickers'
 
@@ -121,7 +122,7 @@ const Grid = ({ children, cols = 3 }: { children: React.ReactNode; cols?: 2 | 3 
 
 export default function SubmitVerify() {
   const navigate = useNavigate()
-  const { projectId } = useProject()
+  const { projectId, setProject } = useProject()
   const [searchParams] = useSearchParams()
   const fromJobId = searchParams.get('from')
 
@@ -158,6 +159,15 @@ export default function SubmitVerify() {
       setNote(`评测训练任务 ${suggestion.data.parent_job_id} 的产物：${suggestion.data.model_path}`)
     }
   }, [suggestion.data, note])
+
+  // 从「评测该产物」进来时，跟随那次训练所属的项目——
+  // 否则评测会落在用户当前恰好选中的项目里，和被评测的训练对不上。
+  const suggestedProject = suggestion.data?.project_id
+  React.useEffect(() => {
+    if (!suggestedProject || suggestedProject === projectId) return
+    setProject(suggestedProject)
+    toast.info(`已切换到该训练任务所属的项目「${suggestion.data?.project_name ?? suggestedProject}」`)
+  }, [suggestedProject, projectId, setProject, suggestion.data?.project_name])
 
   // Pre-fill the env keys an agent typically needs so the user just pastes values.
   React.useEffect(() => {
@@ -226,6 +236,14 @@ export default function SubmitVerify() {
         title="提交评测任务"
         description="基于 Harbor framework 在沙箱中运行 agent 并按任务 verifier 打分"
         actions={<CompatDocButton defaultFramework="harbor" label="Harbor 说明" />}
+      />
+
+      <ProjectBar
+        hint={
+          fromJobId && suggestion.data?.project_name
+            ? `已跟随训练任务落在同一项目`
+            : undefined
+        }
       />
 
       {!harborReady && (

@@ -104,6 +104,70 @@ def get_doc(slug: str) -> dict[str, Any]:
     raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"未找到文档: {slug}")
 
 
+# 上游项目的仓库地址。URL 取自各检出自己的 pyproject / dist-info，
+# 不是凭印象写的；版本从 framework_support.json 读，跟着本机检出走。
+_UPSTREAM: list[dict[str, str]] = [
+    {
+        "key": "llamafactory",
+        "label": "LLaMA-Factory",
+        "url": "https://github.com/hiyouga/LLaMA-Factory",
+        "note": "SFT / DPO / KTO / ORPO / SimPO",
+    },
+    {
+        "key": "verl",
+        "label": "verl",
+        "url": "https://github.com/verl-project/verl",
+        "note": "GRPO / DAPO / PPO 等强化学习",
+    },
+    {
+        "key": "trl",
+        "label": "TRL",
+        "url": "https://github.com/huggingface/trl",
+        "note": "GRPO / GSPO，以及 Harbor 环境的 agentic RL",
+    },
+    {
+        "key": "harbor",
+        "label": "Harbor",
+        "url": "https://github.com/harbor-framework/harbor",
+        "note": "Agent 评测框架",
+    },
+    {
+        "key": "harbor-cookbook",
+        "label": "Harbor Cookbook",
+        "url": "https://github.com/harbor-framework/harbor-cookbook",
+        "note": "任务集与 adapter 示例",
+    },
+    {
+        "key": "vllm",
+        "label": "vLLM",
+        "url": "https://github.com/vllm-project/vllm",
+        "note": "模型部署与 RL rollout 的推理引擎",
+    },
+]
+
+
+def upstream_links() -> list[dict[str, str]]:
+    """相关项目链接，带上本机实际装的版本。
+
+    版本不是写死的：四个训练/评测框架从 ``framework_support.json``（跟着检出走），
+    vLLM 直接问部署用的那个解释器 —— 部署出问题时第一件事就是确认它是哪个版本。
+    Cookbook 是任务集仓库、不是 Python 包，本来就没有版本。
+    """
+    from . import resources_service
+
+    support = resources_service.framework_support()
+    rows: list[dict[str, str]] = []
+    for item in _UPSTREAM:
+        version = ""
+        info = support.get(item["key"])
+        if isinstance(info, dict):
+            version = str(info.get("version") or "")
+        elif item["key"] == "vllm":
+            version = resources_service.module_version(settings.python_for_vllm(), "vllm")
+        rows.append({**item, "version": version})
+    return rows
+
+
 def asset_path(name: str) -> Path:
     """Resolve a doc image, refusing anything outside the assets directory."""
     root = assets_dir().resolve()

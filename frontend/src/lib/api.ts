@@ -268,9 +268,16 @@ export const api = {
     request<Job>(`/api/jobs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
   resubmitJob: (id: string) => request<Job>(`/api/jobs/${id}/resubmit`, { method: 'POST' }),
   verifySuggestion: (id: string) =>
-    request<{ parent_job_id: string; model_path: string; checkpoints: string[]; hint: string }>(
-      `/api/jobs/${id}/verify-suggestion`,
-    ),
+    request<{
+      parent_job_id: string
+      parent_job_name: string
+      /** 训练任务所属项目 —— 评测应该落在同一个项目里 */
+      project_id: string
+      project_name: string
+      model_path: string
+      checkpoints: string[]
+      hint: string
+    }>(`/api/jobs/${id}/verify-suggestion`),
   deleteJob: (id: string, purgeOutputs = false) =>
     request<void>(`/api/jobs/${id}${qs({ purge_outputs: purgeOutputs })}`, { method: 'DELETE' }),
 
@@ -384,6 +391,11 @@ export const api = {
     ),
   doc: (slug: string) =>
     request<{ slug: string; title: string; category: string; summary: string; body: string }>(`/api/handbook/${slug}`),
+  /** 上游框架的仓库地址 + 本机装的版本 */
+  docLinks: () =>
+    request<{ key: string; label: string; url: string; note: string; version: string }[]>(
+      '/api/handbook/links',
+    ),
 
   // ----------------------------------------------------------- catalog ----
   algorithms: () => request<AlgorithmInfo[]>('/api/catalog/algorithms'),
