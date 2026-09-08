@@ -223,9 +223,29 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* 深色下 logo 是深蓝底白字，需要提亮才看得清 */
+  /* 深色下 logo 的深蓝会糊进背景。不要整块反白（那会丢掉品牌色），
+     而是垫一块白底，让 logo 保持原本的蓝 + 青。 */
   .theme-dark .logo-img {
-    filter: brightness(0) invert(1);
+    background: #ffffff;
+    border-radius: 4px;
+    padding: 3px 7px;
+  }
+
+  /* 产品名的艺术字：字体加载失败时退回 Inter，靠字距与渐变依然成立 */
+  .wordmark {
+    font-family: Orbitron, Inter, system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    background: linear-gradient(96deg, var(--primary) 0%, #2fc5d3 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .theme-dark .wordmark {
+    background: linear-gradient(96deg, #6aa9f0 0%, #2fc5d3 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
   }
 }
 

@@ -311,6 +311,14 @@ export const api = {
       max_upload_mb: number
     }>('/api/system/info'),
 
+  // -------------------------------------------------------------- docs ----
+  docs: () =>
+    request<{ slug: string; title: string; category: string; summary: string; order: number; updated_at: number }[]>(
+      '/api/handbook',
+    ),
+  doc: (slug: string) =>
+    request<{ slug: string; title: string; category: string; summary: string; body: string }>(`/api/handbook/${slug}`),
+
   // ----------------------------------------------------------- catalog ----
   algorithms: () => request<AlgorithmInfo[]>('/api/catalog/algorithms'),
   presets: () =>

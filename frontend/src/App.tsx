@@ -14,6 +14,7 @@ import Datasets from '@/pages/Datasets'
 import Models from '@/pages/Models'
 import Admin from '@/pages/Admin'
 import ProfileSettings from '@/pages/ProfileSettings'
+import Docs from '@/pages/Docs'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -49,6 +50,23 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      {/* 文档是独立页面（侧栏 Document 会在新标签页打开），不套控制台外壳 */}
+      <Route
+        path="/docs"
+        element={
+          <RequireAuth>
+            <Docs />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/docs/:slug"
+        element={
+          <RequireAuth>
+            <Docs />
+          </RequireAuth>
+        }
+      />
       <Route
         element={
           <RequireAuth>

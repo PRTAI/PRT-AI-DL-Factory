@@ -181,15 +181,17 @@ export default function Jobs() {
         {items.length ? (
           <Table>
             <thead>
+              {/* 「任务」列给固定宽度、最后一列吸收剩余空间，
+                  这样类型/状态/进度等会整体左移，右侧不再挤成一团 */}
               <tr>
-                <Th>任务</Th>
-                <Th className="w-44">类型</Th>
-                <Th className="w-24">状态</Th>
-                <Th className="w-44">进度</Th>
-                <Th className="w-24">GPU</Th>
-                <Th className="w-24">耗时</Th>
-                <Th className="w-36">提交</Th>
-                <Th className="w-[150px]">操作</Th>
+                <Th className="w-[300px]">任务</Th>
+                <Th className="w-[168px]">类型</Th>
+                <Th className="w-[88px]">状态</Th>
+                <Th className="w-[170px]">进度</Th>
+                <Th className="w-[64px]">GPU</Th>
+                <Th className="w-[80px]">耗时</Th>
+                <Th className="w-[120px]">提交</Th>
+                <Th>操作</Th>
               </tr>
             </thead>
             <tbody>

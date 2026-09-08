@@ -3,7 +3,9 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bell,
+  BookOpen,
   Database,
+  ExternalLink,
   FlaskConical,
   Gauge,
   GraduationCap,
@@ -93,28 +95,17 @@ export function AppShell() {
     <TooltipProvider>
       <div className="flex min-h-screen flex-col bg-bg text-fg">
         {/* ================================================== 顶部全局栏 == */}
-        <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center justify-between gap-4 border-b border-border bg-bg-elevated px-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <NavLink to="/" className="flex shrink-0 items-center gap-2.5" aria-label="返回数据大屏">
-              <img src="/logo.png" alt="PRT" className="logo-img h-6 w-auto" />
-              <span className="hidden h-4 w-px bg-border sm:block" aria-hidden />
-              <span className="hidden text-sm font-medium text-fg sm:block">AI DL Factory</span>
-            </NavLink>
-            <span className="hidden rounded border border-border bg-muted px-1.5 py-0.5 text-[11px] text-fg-muted lg:block">
-              模型后训练 · Agent 评测
-            </span>
-          </div>
+        <header className="sticky top-0 z-40 flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border bg-bg-elevated pl-7 pr-4">
+          <NavLink to="/" className="flex shrink-0 items-center gap-3.5" aria-label="返回数据大屏">
+            <img src="/logo.png" alt="PRT" className="logo-img h-9 w-auto" />
+            <span className="h-7 w-px bg-border" aria-hidden />
+            <span className="wordmark text-[22px] leading-none">AI DL Factory</span>
+          </NavLink>
 
           <div className="flex min-w-0 flex-1 items-center justify-center">
-            {settings.data?.banner ? (
+            {settings.data?.banner && (
               <p className="truncate rounded bg-warning-soft px-2.5 py-1 text-xs text-warning">
                 {settings.data.banner}
-              </p>
-            ) : (
-              <p className="hidden truncate text-xs text-fg-subtle md:block">
-                {overview.data
-                  ? `运行中 ${overview.data.running} · 排队 ${overview.data.queued} · GPU ${overview.data.gpu.busy.length}/${overview.data.gpu.total} 占用`
-                  : ''}
               </p>
             )}
           </div>
@@ -218,7 +209,7 @@ export function AppShell() {
           {/* ============================================== 左侧导航 ====== */}
           <aside
             className={cn(
-              'sticky top-12 flex h-[calc(100vh-3rem)] shrink-0 flex-col border-r border-border bg-bg transition-[width] duration-200',
+              'sticky top-16 flex h-[calc(100vh-4rem)] shrink-0 flex-col border-r border-border bg-bg transition-[width] duration-200',
               sidebarCollapsed ? 'w-[56px]' : 'w-[188px]',
             )}
           >
@@ -276,6 +267,27 @@ export function AppShell() {
                 )
               })}
             </nav>
+
+            <div className="border-t border-border p-2">
+              <a
+                href="/docs"
+                target="_blank"
+                rel="noreferrer"
+                className={cn(
+                  'flex items-center gap-2.5 rounded px-2.5 py-2 text-[13px] text-fg-muted transition-colors hover:bg-card-hover hover:text-fg',
+                  sidebarCollapsed && 'justify-center px-0',
+                )}
+                title="平台文档（新标签页打开）"
+              >
+                <BookOpen className="h-4 w-4 shrink-0" aria-hidden />
+                {!sidebarCollapsed && (
+                  <>
+                    <span className="truncate">Document</span>
+                    <ExternalLink className="ml-auto h-3 w-3 shrink-0 text-fg-subtle" aria-hidden />
+                  </>
+                )}
+              </a>
+            </div>
 
             <div className="border-t border-border p-1.5">
               <Button

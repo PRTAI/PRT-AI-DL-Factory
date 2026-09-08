@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Database, Eye, Trash2, Upload } from 'lucide-react'
+import { Database, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/store'
@@ -17,6 +17,7 @@ import {
   ErrorBox,
   Field,
   Input,
+  LinkButton,
   Progress,
   Select,
   Skeleton,
@@ -32,7 +33,6 @@ export default function Datasets() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const [uploadOpen, setUploadOpen] = React.useState(false)
-  const [specOpen, setSpecOpen] = React.useState(false)
   const [previewId, setPreviewId] = React.useState<string | null>(null)
 
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
@@ -54,10 +54,6 @@ export default function Datasets() {
         description="上传标准格式压缩包，平台自动解压、校验并登记到规范目录"
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => setSpecOpen(true)}>
-              <BookOpen className="h-3.5 w-3.5" aria-hidden />
-              格式说明
-            </Button>
             <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)}>
               <Upload className="h-3.5 w-3.5" aria-hidden />
               上传数据集
@@ -129,24 +125,19 @@ export default function Datasets() {
                     <div className="text-[11px] text-fg-subtle">{formatRelative(dataset.created_at)}</div>
                   </Td>
                   <Td>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => setPreviewId(dataset.id)}>
-                        <Eye className="h-3.5 w-3.5" aria-hidden />
-                        预览
-                      </Button>
+                    <div className="flex items-center gap-x-3">
+                      <LinkButton onClick={() => setPreviewId(dataset.id)}>预览</LinkButton>
                       {(user?.role === 'admin' || dataset.owner_id === user?.id) && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`删除数据集 ${dataset.name}`}
+                        <LinkButton
+                          tone="danger"
                           onClick={() => {
                             if (confirm(`确认删除数据集「${dataset.name}」？磁盘上的文件也会被移除。`)) {
                               remove.mutate(dataset.id)
                             }
                           }}
                         >
-                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                        </Button>
+                          删除
+                        </LinkButton>
                       )}
                     </div>
                   </Td>
@@ -174,7 +165,6 @@ export default function Datasets() {
         specs={specs.data?.specs ?? []}
         onUploaded={() => queryClient.invalidateQueries({ queryKey: ['datasets'] })}
       />
-      <SpecDialog open={specOpen} onOpenChange={setSpecOpen} specs={specs.data?.specs ?? []} />
       <PreviewDialog datasetId={previewId} onClose={() => setPreviewId(null)} />
     </div>
   )
@@ -327,56 +317,6 @@ function UploadDialog({
 
         {uploading && <Progress value={progress} showLabel tone="primary" />}
         {error && <ErrorBox message={error} />}
-      </div>
-    </Dialog>
-  )
-}
-
-/* -------------------------------------------------------------------------- */
-function SpecDialog({
-  open,
-  onOpenChange,
-  specs,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  specs: DatasetSpec[]
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange} width="max-w-3xl" title="数据集格式说明" description="平台支持的所有上传格式">
-      <div className="space-y-4">
-        {specs.map((spec) => (
-          <div key={spec.kind} className="rounded-lg border border-border p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="text-sm font-semibold">{spec.title}</h3>
-              <Badge tone="primary">{spec.kind}</Badge>
-              {spec.frameworks.map((framework) => (
-                <Badge key={framework}>{framework}</Badge>
-              ))}
-            </div>
-            <p className="mt-1 text-xs leading-relaxed text-fg-muted">{spec.summary}</p>
-            <pre className="num mt-2 overflow-x-auto rounded-lg bg-bg-elevated p-2.5 text-[11px] leading-relaxed text-fg-muted">
-              {spec.layout.join('\n')}
-            </pre>
-            {spec.example ? (
-              <details className="mt-2">
-                <summary className="cursor-pointer text-[11px] text-primary">查看示例</summary>
-                <pre className="num mt-1.5 max-h-64 overflow-auto rounded-lg bg-bg-elevated p-2.5 text-[11px] leading-relaxed">
-                  {typeof spec.example === 'string' ? spec.example : JSON.stringify(spec.example, null, 2)}
-                </pre>
-              </details>
-            ) : null}
-            {spec.notes.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {spec.notes.map((note) => (
-                  <li key={note} className="text-[11px] leading-relaxed text-fg-subtle">
-                    · {note}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
       </div>
     </Dialog>
   )

@@ -159,10 +159,19 @@ export function DatasetPicker({
   multiple?: boolean
   emptyHint?: React.ReactNode
 }) {
+  const [keyword, setKeyword] = React.useState('')
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
-  const eligible = (datasets.data ?? []).filter(
+  const matching = (datasets.data ?? []).filter(
     (dataset) => dataset.status === 'ready' && kinds.includes(dataset.kind),
   )
+  const needle = keyword.trim().toLowerCase()
+  const eligible = needle
+    ? matching.filter((dataset) =>
+        `${dataset.name} ${dataset.description} ${dataset.tags.join(' ')} ${dataset.owner_email}`
+          .toLowerCase()
+          .includes(needle),
+      )
+    : matching
 
   const toggle = (dataset: Dataset) => {
     if (multiple) {
@@ -180,9 +189,25 @@ export function DatasetPicker({
     )
   }
 
-  if (!eligible.length) {
+  const search = (
+    <div className="relative">
+      <Search
+        className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle"
+        aria-hidden
+      />
+      <Input
+        value={keyword}
+        onChange={(event) => setKeyword(event.target.value)}
+        placeholder={`按名称搜索（共 ${matching.length} 个可用数据集）`}
+        className="pl-8"
+        aria-label="搜索数据集"
+      />
+    </div>
+  )
+
+  if (!matching.length) {
     return (
-      <div className="rounded-lg border border-border">
+      <div className="rounded-md border border-border">
         <EmptyState
           icon={<Database className="h-6 w-6" aria-hidden />}
           title="没有符合该算法的数据集"
@@ -192,8 +217,21 @@ export function DatasetPicker({
     )
   }
 
+  if (!eligible.length) {
+    return (
+      <div className="space-y-2">
+        {search}
+        <div className="rounded-md border border-border py-6 text-center text-xs text-fg-subtle">
+          没有名称匹配「{keyword}」的数据集
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="max-h-64 space-y-1.5 overflow-y-auto rounded-lg border border-border p-1.5">
+    <div className="space-y-2">
+      {search}
+      <div className="max-h-64 space-y-1.5 overflow-y-auto rounded-md border border-border p-1.5">
       {eligible.map((dataset) => {
         const selected = value.includes(dataset.id)
         return (
@@ -224,10 +262,11 @@ export function DatasetPicker({
                 <p className="mt-1 text-[11px] text-warning">⚠ {dataset.stats.warnings[0]}</p>
               )}
             </div>
-            {selected && <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />}
-          </button>
-        )
-      })}
+              {selected && <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
