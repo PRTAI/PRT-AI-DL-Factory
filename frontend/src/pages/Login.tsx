@@ -47,16 +47,15 @@ export default function Login() {
         aria-hidden
       />
 
-      <div className="relative grid w-full max-w-4xl overflow-hidden rounded-2xl border border-border bg-card shadow-2xl md:grid-cols-[1.1fr_1fr]">
+      <div className="relative grid w-full max-w-4xl overflow-hidden rounded-xl border border-border bg-card shadow-[0_8px_32px_rgb(15_23_42_/_0.08)] md:grid-cols-[1.1fr_1fr]">
         {/* --------------------------------------------------- brand pane -- */}
         <div className="hidden flex-col justify-between gap-8 border-r border-border bg-bg-elevated p-8 md:flex">
           <div>
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-fg">
-                PF
-              </div>
+            <div className="flex items-center gap-3">
+              <img src="/logo.png" alt="PRT" className="logo-img h-8 w-auto" />
+              <span className="h-6 w-px bg-border" aria-hidden />
               <div>
-                <div className="text-sm font-semibold">PRT AI DL Factory</div>
+                <div className="text-sm font-semibold">AI DL Factory</div>
                 <div className="text-[11px] text-fg-subtle">模型后训练 · Agent 评测一体化平台</div>
               </div>
             </div>

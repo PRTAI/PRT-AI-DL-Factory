@@ -1,17 +1,17 @@
 @import 'tailwindcss';
 
 /* ---------------------------------------------------------------------------
-   PRT AI DL Factory — design tokens（蓝白配色）
+   PRT AI DL Factory — design tokens
 
-   主色取自 ui-ux-pro-max 的 "CRM & Client Management" 配色：
-   primary #2563EB / card #FFFFFF / background #F8FAFC / border #E4ECFC，
-   浅色为默认主题；深色主题保留为可选项，同样收敛到蓝色系（不再用紫色）。
+   视觉参考：百度智能云控制台（白色为主、极浅灰蓝底、细描边、无重投影）。
+   中性色直接取自参考图：卡片/顶栏 #FFFFFF、页面底与表头 #F7F9FC、描边 #E4E7EB。
 
-   状态色（成功绿 / 警告琥珀 / 危险红）保持语义化，不跟着变蓝——
-   任务状态是这套系统最需要一眼分辨的信息，牺牲它去凑配色不划算。
+   品牌色取自 PRT logo 本身：
+     主色   #0B51A7（logo 的深蓝）
+     点缀色 #2FC5D3（logo 右上角的青色方块）
+   这样整站配色和 logo 是同一套，而不是各说各的。
 
-   运行时换肤靠 @theme inline 把工具类转发到下面的 CSS 变量，
-   .theme-light / .theme-dark 加在 <html> 上即可整体切换。
+   浅色是唯一的主题基调；深色仅作为夜间可选项，同样收敛在这套蓝里。
 --------------------------------------------------------------------------- */
 
 @theme inline {
@@ -51,81 +51,81 @@
     sans-serif;
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace;
 
-  --radius-card: 12px;
+  --radius-card: 8px;
 }
 
-/* ---------------------------------- 浅色（默认：蓝 + 白） ---------------- */
+/* -------------------------------- 浅色（默认，白色为主） ----------------- */
 :root,
 .theme-light {
   color-scheme: light;
 
-  --bg: #f5f8fd;
+  --bg: #f7f9fc;
   --bg-elevated: #ffffff;
   --card: #ffffff;
-  --card-hover: #f1f5fd;
-  --muted: #eef3fc;
-  --border: #dde7f8;
-  --border-strong: #b7c9e6;
+  --card-hover: #f7f9fc;
+  --muted: #f2f5f9;
+  --border: #e4e7eb;
+  --border-strong: #c6ccd6;
 
-  --fg: #0f172a;
-  --fg-muted: #475569;
-  --fg-subtle: #64748b;
+  --fg: #1d2129;
+  --fg-muted: #4e5969;
+  --fg-subtle: #6b7785;
 
-  --primary: #2563eb;
+  --primary: #0b51a7; /* PRT logo 深蓝 */
   --primary-fg: #ffffff;
-  --primary-soft: rgb(37 99 235 / 0.09);
+  --primary-soft: #e8f0fb;
 
-  --success: #15803d;
-  --success-soft: rgb(21 128 61 / 0.11);
+  --success: #0e8a5a;
+  --success-soft: #e6f5ee;
   --warning: #b45309;
-  --warning-soft: rgb(180 83 9 / 0.11);
-  --danger: #dc2626;
-  --danger-soft: rgb(220 38 38 / 0.1);
-  --info: #0369a1;
-  --info-soft: rgb(3 105 161 / 0.1);
+  --warning-soft: #fdf1e3;
+  --danger: #d92d20;
+  --danger-soft: #fdecea;
+  --info: #0e7c8a; /* logo 青色压暗到可读对比度 */
+  --info-soft: #e4f5f7;
 
-  --chart-1: #2563eb;
-  --chart-2: #0891b2;
-  --chart-3: #0d9488;
-  --chart-4: #4f46e5;
+  --chart-1: #0b51a7;
+  --chart-2: #17a2b8;
+  --chart-3: #0e8a5a;
+  --chart-4: #2450ff;
   --chart-5: #b45309;
-  --chart-6: #64748b;
+  --chart-6: #6b7785;
 }
 
-/* ---------------------------------- 深色（可选，同样是蓝色系） ---------- */
+/* -------------------------------- 深色（夜间可选） ---------------------- */
 .theme-dark {
   color-scheme: dark;
 
-  --bg: #0b1220;
-  --bg-elevated: #101a2c;
-  --card: #131e33;
-  --card-hover: #1a2740;
-  --muted: #1e2b45;
-  --border: #27364f;
-  --border-strong: #41546f;
+  --bg: #0d1420;
+  --bg-elevated: #121b2b;
+  --card: #152033;
+  --card-hover: #1c2a41;
+  --muted: #1e2b40;
+  --border: #27364d;
+  --border-strong: #405370;
 
-  --fg: #f1f5f9;
-  --fg-muted: #9aabc2;
-  --fg-subtle: #7889a1;
+  --fg: #eef2f8;
+  --fg-muted: #9fb0c6;
+  --fg-subtle: #7d8ea6;
 
-  --primary: #3b82f6;
+  --primary: #3d86e0;
   --primary-fg: #ffffff;
-  --primary-soft: rgb(59 130 246 / 0.18);
+  --primary-soft: rgb(61 134 224 / 0.18);
 
-  --success: #22c55e;
-  --success-soft: rgb(34 197 94 / 0.16);
-  --warning: #f59e0b;
-  --warning-soft: rgb(245 158 11 / 0.16);
-  --danger: #ef4444;
-  --danger-soft: rgb(239 68 68 / 0.16);
-  --info: #38bdf8;
-  --info-soft: rgb(56 189 248 / 0.16);
+  --success: #2bb673;
+  --success-soft: rgb(43 182 115 / 0.16);
+  --warning: #e8963a;
+  --warning-soft: rgb(232 150 58 / 0.16);
+  --danger: #ef5350;
+  --danger-soft: rgb(239 83 80 / 0.16);
+  --info: #2fc5d3;
+  --info-soft: rgb(47 197 211 / 0.16);
 
-  --chart-1: #60a5fa;
-  --chart-2: #22d3ee;
-  --chart-3: #2dd4bf;
-  --chart-4: #818cf8;
-  --chart-5: #fbbf24;
+  --chart-1: #5b9df0;
+  --chart-2: #2fc5d3;
+  --chart-3: #35c48b;
+  --chart-4: #8fb4ff;
+  --chart-5: #e8963a;
   --chart-6: #94a3b8;
 }
 
@@ -145,7 +145,7 @@
     color: var(--fg);
     font-family: var(--font-sans);
     font-size: 14px;
-    line-height: 1.55;
+    line-height: 1.5715;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -158,8 +158,8 @@
   }
 
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
@@ -189,15 +189,21 @@
 }
 
 @layer components {
+  /* 参考图里的卡片是纯白 + 1px 浅描边 + 无投影，靠留白分层 */
   .card {
     background-color: var(--card);
     border: 1px solid var(--border);
     border-radius: var(--radius-card);
   }
 
-  /* 浅色下给卡片一点极轻的投影，避免白卡片贴在浅底上失去层次 */
-  .theme-light .card {
-    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  /* 表格内的操作用蓝色文字链接，而不是一排按钮 */
+  .link {
+    color: var(--primary);
+    transition: opacity 0.15s;
+  }
+  .link:hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .surface-grid {
@@ -205,7 +211,7 @@
       linear-gradient(var(--border) 1px, transparent 1px),
       linear-gradient(90deg, var(--border) 1px, transparent 1px);
     background-size: 32px 32px;
-    opacity: 0.5;
+    opacity: 0.6;
   }
 
   .theme-dark .surface-grid {
@@ -216,9 +222,13 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
+
+  /* 深色下 logo 是深蓝底白字，需要提亮才看得清 */
+  .theme-dark .logo-img {
+    filter: brightness(0) invert(1);
+  }
 }
 
-/* Respect the user's motion preference — required by the a11y checklist. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, ListChecks, RefreshCw, Search, Trash2, XCircle, XOctagon } from 'lucide-react'
+import { ListChecks, RefreshCw, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/store'
@@ -14,6 +14,7 @@ import {
   Dialog,
   EmptyState,
   Input,
+  LinkButton,
   Progress,
   Select,
   Table,
@@ -188,7 +189,7 @@ export default function Jobs() {
                 <Th className="w-24">GPU</Th>
                 <Th className="w-24">耗时</Th>
                 <Th className="w-36">提交</Th>
-                <Th className="w-[190px]">操作</Th>
+                <Th className="w-[150px]">操作</Th>
               </tr>
             </thead>
             <tbody>
@@ -235,48 +236,42 @@ export default function Jobs() {
                       <div className="text-[11px] text-fg-subtle">{formatRelative(job.created_at)}</div>
                     </Td>
                     <Td>
-                      <div className="flex flex-wrap items-center gap-1">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <Link to={`/jobs/${job.id}`} className="link text-xs">
+                          详情
+                        </Link>
                         {user?.role === 'admin' && job.status === 'pending_review' && (
                           <>
-                            <Button
-                              variant="success"
-                              size="sm"
+                            <LinkButton
                               onClick={() => review.mutate({ id: job.id, approve: true, comment: '' })}
-                              loading={review.isPending}
+                              disabled={review.isPending}
                             >
-                              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
                               通过
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
+                            </LinkButton>
+                            <LinkButton
                               onClick={() => {
                                 setReviewTarget(job)
                                 setReviewComment('')
                               }}
                             >
-                              <XCircle className="h-3.5 w-3.5" aria-hidden />
                               驳回
-                            </Button>
+                            </LinkButton>
                           </>
                         )}
                         {canControl && isActive && (
-                          <Button variant="outline" size="sm" onClick={() => cancel.mutate(job.id)}>
-                            <XOctagon className="h-3.5 w-3.5" aria-hidden />
+                          <LinkButton tone="danger" onClick={() => cancel.mutate(job.id)}>
                             终止
-                          </Button>
+                          </LinkButton>
                         )}
                         {canControl && !isActive && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
+                          <LinkButton
+                            tone="danger"
                             onClick={() => {
                               if (confirm(`确认删除任务「${job.name}」的记录？训练产物会保留。`)) remove.mutate(job.id)
                             }}
-                            aria-label={`删除任务 ${job.name}`}
                           >
-                            <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                          </Button>
+                            删除
+                          </LinkButton>
                         )}
                       </div>
                     </Td>

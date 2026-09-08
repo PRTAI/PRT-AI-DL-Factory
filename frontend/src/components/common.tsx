@@ -12,7 +12,7 @@ import {
   Sparkles,
   XCircle,
 } from 'lucide-react'
-import { Badge } from './ui'
+import { StatusDot } from './ui'
 import type { Framework, JobStatus, JobType } from '@/lib/types'
 import { cn, copyText } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -35,15 +35,11 @@ const STATUS_META: Record<
   cancelled: { label: '已终止', tone: 'neutral', Icon: Ban },
 }
 
+/** 状态用「圆点 + 文字」表达，与参考控制台一致：表格里不会出现一片色块。 */
 export function StatusBadge({ status, className }: { status: JobStatus; className?: string }) {
   const meta = STATUS_META[status] ?? STATUS_META.draft
-  const spinning = status === 'running' || status === 'preparing'
-  return (
-    <Badge tone={meta.tone} className={className}>
-      <meta.Icon className={cn('h-3 w-3', spinning && 'animate-spin')} aria-hidden />
-      {meta.label}
-    </Badge>
-  )
+  const live = status === 'running' || status === 'preparing'
+  return <StatusDot tone={meta.tone} label={meta.label} pulse={live} className={className} />
 }
 
 export function statusLabel(status: JobStatus): string {
@@ -66,11 +62,11 @@ const TYPE_META: Record<JobType, { label: string; Icon: typeof GraduationCap; to
 export function JobTypeBadge({ type, framework }: { type: JobType; framework?: Framework }) {
   const meta = TYPE_META[type]
   return (
-    <Badge tone={meta.tone}>
-      <meta.Icon className="h-3 w-3" aria-hidden />
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] text-fg">
+      <meta.Icon className="h-3.5 w-3.5 shrink-0 text-fg-subtle" aria-hidden />
       {meta.label}
-      {framework && <span className="text-fg-subtle">· {FRAMEWORK_LABEL[framework]}</span>}
-    </Badge>
+      {framework && <span className="text-xs text-fg-subtle">/ {FRAMEWORK_LABEL[framework]}</span>}
+    </span>
   )
 }
 
@@ -94,10 +90,7 @@ export function CopyButton({ value, label = '复制', className }: { value: stri
   return (
     <button
       type="button"
-      className={cn(
-        'rounded-md border border-border px-2 py-1 text-[11px] text-fg-muted transition-colors hover:bg-muted hover:text-fg',
-        className,
-      )}
+      className={cn('text-xs text-primary transition-colors hover:underline hover:underline-offset-2', className)}
       onClick={async () => {
         const ok = await copyText(value)
         if (ok) toast.success('已复制到剪贴板')
@@ -127,8 +120,8 @@ export function PageHeader({
   return (
     <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-lg font-semibold tracking-tight text-fg">{title}</h1>
-        {description && <p className="mt-0.5 text-xs text-fg-muted">{description}</p>}
+        <h1 className="text-xl font-semibold tracking-tight text-fg">{title}</h1>
+        {description && <p className="mt-1 text-xs text-fg-muted">{description}</p>}
         {children}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
@@ -138,7 +131,7 @@ export function PageHeader({
 
 export function InlineHint({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <p className={cn('rounded-lg border border-info/30 bg-info-soft px-3 py-2 text-xs leading-relaxed text-info', className)}>
+    <p className={cn('rounded-md border border-info/25 bg-info-soft px-3 py-2 text-xs leading-relaxed text-info', className)}>
       {children}
     </p>
   )
@@ -148,7 +141,7 @@ export function WarnHint({ children, className }: { children: React.ReactNode; c
   return (
     <p
       className={cn(
-        'rounded-lg border border-warning/30 bg-warning-soft px-3 py-2 text-xs leading-relaxed text-warning',
+        'rounded-md border border-warning/25 bg-warning-soft px-3 py-2 text-xs leading-relaxed text-warning',
         className,
       )}
     >

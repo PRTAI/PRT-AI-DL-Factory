@@ -20,9 +20,9 @@ type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 
 type ButtonSize = 'sm' | 'md' | 'lg' | 'icon'
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: 'bg-primary text-primary-fg hover:brightness-110 shadow-sm',
-  secondary: 'bg-muted text-fg hover:bg-card-hover border border-border',
-  outline: 'border border-border bg-transparent text-fg hover:bg-muted',
+  primary: 'bg-primary text-primary-fg hover:brightness-115',
+  secondary: 'border border-border bg-card text-fg hover:border-primary hover:text-primary',
+  outline: 'border border-border bg-card text-fg hover:border-primary hover:text-primary',
   ghost: 'bg-transparent text-fg-muted hover:bg-muted hover:text-fg',
   danger: 'bg-danger text-white hover:brightness-110',
   success: 'bg-success text-white hover:brightness-110',
@@ -50,7 +50,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       ref={ref}
       disabled={disabled || loading}
       className={cn(
-        'inline-flex items-center rounded-lg font-medium transition-[background-color,color,filter] duration-150',
+        'inline-flex items-center rounded-md font-medium transition-[background-color,color,border-color,filter] duration-150',
         'disabled:pointer-events-none disabled:opacity-50 whitespace-nowrap',
         BUTTON_VARIANTS[variant],
         BUTTON_SIZES[size],
@@ -108,12 +108,12 @@ export function CardBody({ className, ...props }: React.HTMLAttributes<HTMLDivEl
 type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info'
 
 const BADGE_TONES: Record<BadgeTone, string> = {
-  neutral: 'bg-muted text-fg-muted border-border',
-  primary: 'bg-primary-soft text-primary border-primary/30',
-  success: 'bg-success-soft text-success border-success/30',
-  warning: 'bg-warning-soft text-warning border-warning/30',
-  danger: 'bg-danger-soft text-danger border-danger/30',
-  info: 'bg-info-soft text-info border-info/30',
+  neutral: 'bg-muted text-fg-muted border-transparent',
+  primary: 'bg-primary-soft text-primary border-transparent',
+  success: 'bg-success-soft text-success border-transparent',
+  warning: 'bg-warning-soft text-warning border-transparent',
+  danger: 'bg-danger-soft text-danger border-transparent',
+  info: 'bg-info-soft text-info border-transparent',
 }
 
 export function Badge({
@@ -140,8 +140,8 @@ export function Badge({
 /* Inputs                                                                      */
 /* -------------------------------------------------------------------------- */
 const FIELD_BASE =
-  'w-full rounded-lg border border-border bg-bg-elevated px-3 text-sm text-fg placeholder:text-fg-subtle ' +
-  'transition-colors focus:border-primary focus:outline-none disabled:opacity-60'
+  'w-full rounded-md border border-border bg-card px-3 text-sm text-fg placeholder:text-fg-subtle ' +
+  'transition-colors hover:border-border-strong focus:border-primary focus:outline-none disabled:opacity-60'
 
 export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
   function Input({ className, ...props }, ref) {
@@ -426,7 +426,7 @@ export const Tabs = TabsPrimitive.Root
 export function TabsList({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.List>) {
   return (
     <TabsPrimitive.List
-      className={cn('inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elevated p-1', className)}
+      className={cn('flex items-center gap-5 border-b border-border', className)}
       {...props}
     />
   )
@@ -436,8 +436,8 @@ export function TabsTrigger({ className, ...props }: React.ComponentProps<typeof
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'rounded-md px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors',
-        'hover:text-fg data-[state=active]:bg-primary data-[state=active]:text-primary-fg',
+        'relative -mb-px border-b-2 border-transparent px-0.5 pb-2.5 pt-1 text-[13px] text-fg-muted transition-colors',
+        'hover:text-fg data-[state=active]:border-primary data-[state=active]:font-medium data-[state=active]:text-primary',
         className,
       )}
       {...props}
@@ -568,7 +568,7 @@ export function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCell
   return (
     <th
       className={cn(
-        'border-b border-border px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-fg-subtle',
+        'border-b border-border bg-muted px-3 py-2.5 text-left text-xs font-medium text-fg-muted',
         className,
       )}
       {...props}
@@ -577,11 +577,59 @@ export function Th({ className, ...props }: React.ThHTMLAttributes<HTMLTableCell
 }
 
 export function Td({ className, ...props }: React.TdHTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn('border-b border-border/60 px-3 py-2 align-middle text-fg', className)} {...props} />
+  return <td className={cn('border-b border-border px-3 py-2.5 align-middle text-fg', className)} {...props} />
 }
 
 export function Tr({ className, ...props }: React.HTMLAttributes<HTMLTableRowElement>) {
   return <tr className={cn('transition-colors hover:bg-card-hover', className)} {...props} />
+}
+
+/** 状态圆点 + 文字：参考控制台用它表达状态，比整块彩色底更克制。
+ *  文字本身已说明状态，颜色只是辅助，不违反「不能只靠颜色传达信息」。 */
+export function StatusDot({
+  tone = 'neutral',
+  label,
+  pulse,
+  className,
+}: {
+  tone?: BadgeTone
+  label: React.ReactNode
+  pulse?: boolean
+  className?: string
+}) {
+  const dot = {
+    neutral: 'bg-fg-subtle',
+    primary: 'bg-primary',
+    success: 'bg-success',
+    warning: 'bg-warning',
+    danger: 'bg-danger',
+    info: 'bg-info',
+  }[tone]
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap text-[13px] text-fg', className)}>
+      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', dot, pulse && 'pulse-live')} aria-hidden />
+      {label}
+    </span>
+  )
+}
+
+/** 表格里的操作项：参考图用蓝色文字链接，而不是一排按钮。 */
+export function LinkButton({
+  className,
+  tone = 'primary',
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'primary' | 'danger' }) {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'text-xs transition-colors hover:underline hover:underline-offset-2 disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline',
+        tone === 'danger' ? 'text-danger' : 'text-primary',
+        className,
+      )}
+      {...props}
+    />
+  )
 }
 
 /* -------------------------------------------------------------------------- */

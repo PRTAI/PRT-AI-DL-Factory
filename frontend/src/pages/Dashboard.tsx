@@ -93,15 +93,15 @@ export default function Dashboard() {
         <Stat
           label="运行中"
           value={counters?.running ?? '—'}
-          tone="success"
+          tone={counters?.running ? 'success' : 'neutral'}
           icon={<Activity className="h-4 w-4" aria-hidden />}
-          hint={<Link className="underline underline-offset-2" to="/jobs?status=running">查看任务</Link>}
+          hint={<Link className="link" to="/jobs?status=running">查看任务</Link>}
         />
-        <Stat label="排队中" value={counters?.queued ?? '—'} tone="info" icon={<Hourglass className="h-4 w-4" aria-hidden />} />
+        <Stat label="排队中" value={counters?.queued ?? '—'} icon={<Hourglass className="h-4 w-4" aria-hidden />} />
         <Stat
           label="待审核"
           value={counters?.pending_review ?? '—'}
-          tone="warning"
+          tone={counters?.pending_review ? 'warning' : 'neutral'}
           icon={<ShieldQuestion className="h-4 w-4" aria-hidden />}
           hint={user?.role === 'admin' ? '需要管理员处理' : '等待管理员审核'}
         />
@@ -110,7 +110,6 @@ export default function Dashboard() {
         <Stat
           label="GPU 占用"
           value={gpuSnapshot ? `${gpuSnapshot.busy.length}/${gpuSnapshot.total}` : '—'}
-          tone="primary"
           icon={<Zap className="h-4 w-4" aria-hidden />}
           hint={gpuSnapshot ? `空闲卡: ${gpuSnapshot.free.join(', ') || '无'}` : undefined}
         />
