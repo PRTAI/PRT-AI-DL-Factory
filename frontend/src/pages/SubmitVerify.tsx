@@ -1,10 +1,11 @@
 import * as React from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, ChevronDown, Database, FlaskConical, KeyRound, Settings2, Sparkles } from 'lucide-react'
+import { Bot, ChevronDown, Database, FlaskConical, KeyRound, Rocket, Settings2, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import type { Preset, VerifyConfig } from '@/lib/types'
+import type { DeploymentEndpoint, Preset, VerifyConfig } from '@/lib/types'
+import { useProject } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import {
   Badge,
@@ -57,6 +58,45 @@ const DEFAULT_VERIFY: VerifyConfig = {
   extra_args: {},
 }
 
+/** 让评测直接指向平台里跑着的 vLLM 服务，省得手抄 base_url 和模型名。 */
+function LocalEndpointPicker({ onPick }: { onPick: (endpoint: DeploymentEndpoint) => void }) {
+  const endpoints = useQuery({
+    queryKey: ['deployment-endpoints'],
+    queryFn: () => api.deploymentEndpoints(),
+    refetchInterval: 15000,
+  })
+  const serving = (endpoints.data ?? []).filter((item) => item.status === 'serving')
+
+  if (!serving.length) {
+    return (
+      <p className="text-[11px] leading-relaxed text-fg-subtle">
+        想评测本地训练出来的模型？先到「模型部署」用 vLLM 起一个服务，这里就会出现一键填充的入口。
+      </p>
+    )
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-bg-elevated px-3 py-2.5">
+      <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-fg-muted">
+        <Rocket className="h-3.5 w-3.5" aria-hidden />
+        使用本地部署的模型
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {serving.map((endpoint) => (
+          <Button key={endpoint.id} variant="outline" size="sm" onClick={() => onPick(endpoint)}>
+            {endpoint.name}
+            <span className="text-fg-subtle">· {endpoint.model}</span>
+          </Button>
+        ))}
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-fg-subtle">
+        点击会把模型填成 <Mono>hosted_vllm/&lt;模型名&gt;</Mono>，并把 <Mono>OPENAI_BASE_URL</Mono> 写进 agent
+        环境变量。地址用的是**宿主机 IP** 而不是 <Mono>127.0.0.1</Mono>——agent 跑在容器里，回环地址连不上。
+      </p>
+    </div>
+  )
+}
+
 function Advanced({ title, children }: { title: string; children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false)
   return (
@@ -81,6 +121,7 @@ const Grid = ({ children, cols = 3 }: { children: React.ReactNode; cols?: 2 | 3 
 
 export default function SubmitVerify() {
   const navigate = useNavigate()
+  const { projectId } = useProject()
   const [searchParams] = useSearchParams()
   const fromJobId = searchParams.get('from')
 
@@ -88,6 +129,8 @@ export default function SubmitVerify() {
   const environments = useQuery({ queryKey: ['harbor-envs'], queryFn: () => api.harborEnvironments() })
   const presets = useQuery({ queryKey: ['presets'], queryFn: () => api.presets() })
   const toolchain = useQuery({ queryKey: ['toolchain'], queryFn: () => api.toolchain() })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
+  const projectName = projects.data?.find((row) => row.project.id === projectId)?.project.name
   const suggestion = useQuery({
     queryKey: ['verify-suggestion', fromJobId],
     queryFn: () => api.verifySuggestion(fromJobId!),
@@ -143,6 +186,7 @@ export default function SubmitVerify() {
         name: name.trim(),
         note,
         type: 'verify',
+        project_id: projectId,
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         resources: { n_gpus: nGpus, priority: 0, env: {} },
         verify: {
@@ -286,17 +330,39 @@ export default function SubmitVerify() {
               </Field>
 
               {agentInfo?.needs_model && (
-                <Field
-                  label="模型"
-                  required
-                  hint="litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model"
-                >
-                  <Input
-                    value={config.model}
-                    onChange={(event) => patch({ model: event.target.value })}
-                    placeholder="anthropic/claude-sonnet-4-5"
+                <>
+                  <Field
+                    label="模型"
+                    required
+                    hint="litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model"
+                  >
+                    <Input
+                      value={config.model}
+                      onChange={(event) => patch({ model: event.target.value })}
+                      placeholder="anthropic/claude-sonnet-4-5"
+                    />
+                  </Field>
+
+                  <LocalEndpointPicker
+                    onPick={(endpoint) => {
+                      // litellm 用 hosted_vllm/ 前缀走 OpenAI 兼容协议。
+                      // 地址必须用 sandbox_base_url（宿主机 IP）：agent 跑在容器里，
+                      // 容器内的 127.0.0.1 是容器自己，回环地址一定连不上。
+                      // OPENAI_BASE_URL 是 Harbor 的首选键，OPENAI_API_BASE 是它的回退键，
+                      // 两个都给以兼容不同 agent。
+                      patch({
+                        model: `hosted_vllm/${endpoint.model}`,
+                        agent_env: {
+                          ...config.agent_env,
+                          OPENAI_BASE_URL: endpoint.sandbox_base_url,
+                          OPENAI_API_BASE: endpoint.sandbox_base_url,
+                          OPENAI_API_KEY: config.agent_env.OPENAI_API_KEY || 'EMPTY',
+                        },
+                      })
+                      toast.success(`已指向本地部署「${endpoint.name}」`)
+                    }}
                   />
-                </Field>
+                </>
               )}
 
               {!agentInfo?.needs_model && (
@@ -512,6 +578,10 @@ export default function SubmitVerify() {
               </div>
 
               <dl className="space-y-1.5 text-xs">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-fg-muted">项目</dt>
+                  <dd className="truncate text-right text-fg">{projectName ?? '未选择'}</dd>
+                </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-fg-muted">任务集</dt>
                   <dd className="truncate text-right text-fg">

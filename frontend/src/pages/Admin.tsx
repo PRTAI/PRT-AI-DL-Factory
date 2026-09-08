@@ -531,6 +531,16 @@ function ToolchainPanel() {
                   </Td>
                   <Td>
                     <Badge tone={tone}>{label}</Badge>
+                    {row.flash_attn === false && (
+                      <Badge tone="neutral" className="mt-1">
+                        无 flash-attn
+                      </Badge>
+                    )}
+                    {row.flash_attn === true && (
+                      <Badge tone="info" className="mt-1">
+                        flash-attn
+                      </Badge>
+                    )}
                   </Td>
                   <Td className="text-[11px] leading-relaxed text-fg-muted">{row.detail}</Td>
                 </Tr>

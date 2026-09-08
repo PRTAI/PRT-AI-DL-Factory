@@ -37,7 +37,18 @@ from .job import (
     SFTConfig,
     VerifyConfig,
 )
+from .deployment import (
+    Deployment,
+    DeploymentCreate,
+    DeploymentSource,
+    DeploymentStatus,
+    ExportCreate,
+    ExportStatus,
+    ExportTask,
+    VLLMConfig,
+)
 from .model_registry import ModelDownload, ModelDownloadRequest, ModelEntry
+from .project import Project, ProjectCreate, ProjectStats, ProjectUpdate, ProjectWithStats, slugify
 from .user import (
     LoginRequest,
     PasswordChange,
@@ -51,6 +62,20 @@ from .user import (
 
 __all__ = [
     "AuditEvent",
+    "Deployment",
+    "DeploymentCreate",
+    "DeploymentSource",
+    "DeploymentStatus",
+    "ExportCreate",
+    "ExportStatus",
+    "ExportTask",
+    "Project",
+    "ProjectCreate",
+    "ProjectStats",
+    "ProjectUpdate",
+    "ProjectWithStats",
+    "VLLMConfig",
+    "slugify",
     "Base",
     "Dataset",
     "DatasetCreate",

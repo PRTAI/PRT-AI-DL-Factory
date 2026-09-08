@@ -7,6 +7,7 @@ import {
   Download,
   FileCode2,
   FlaskConical,
+  Package,
   RefreshCw,
   Repeat,
   Terminal,
@@ -153,6 +154,31 @@ export default function JobDetail() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : '重跑失败'),
   })
 
+  const project = useQuery({
+    queryKey: ['project', job.data?.project_id],
+    queryFn: () => api.project(job.data!.project_id),
+    enabled: Boolean(job.data?.project_id),
+    retry: false,
+  })
+
+  // LoRA 训练产物要先合并回底座才能部署，所以这里问后端有没有可导出的 adapter
+  const exportable = useQuery({
+    queryKey: ['export-candidates', jobId],
+    queryFn: () => api.exportCandidates(jobId!),
+    enabled: Boolean(jobId) && job.data?.type === 'sft' && job.data?.status === 'succeeded',
+    retry: false,
+  })
+
+  const startExport = useMutation({
+    mutationFn: () => api.createExport({ job_id: jobId! }),
+    onSuccess: (task) => {
+      toast.success(`已开始合并导出「${task.name}」，完成后可在模型部署页直接部署`)
+      queryClient.invalidateQueries({ queryKey: ['exports'] })
+      navigate('/deployments')
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : '导出失败'),
+  })
+
   if (job.isLoading) {
     return (
       <div className="space-y-3">
@@ -180,6 +206,14 @@ export default function JobDetail() {
         description={
           <span className="flex flex-wrap items-center gap-2">
             <Mono>{data.id}</Mono>
+            {data.project_id && (
+              <>
+                <span>·</span>
+                <Link to="/projects" className="link">
+                  {project.data?.project.name ?? '项目'}
+                </Link>
+              </>
+            )}
             <span>·</span>
             <span>{data.owner_email}</span>
             <span>·</span>
@@ -220,6 +254,18 @@ export default function JobDetail() {
               <Button variant="secondary" size="sm" loading={resubmit.isPending} onClick={() => resubmit.mutate()}>
                 <Repeat className="h-3.5 w-3.5" aria-hidden />
                 重跑
+              </Button>
+            )}
+            {canControl && exportable.data?.exportable && (
+              <Button
+                variant="secondary"
+                size="sm"
+                loading={startExport.isPending}
+                onClick={() => startExport.mutate()}
+                title={`合并 ${exportable.data.checkpoints[0]?.label ?? 'adapter'} 到 ${exportable.data.base_model_path}`}
+              >
+                <Package className="h-3.5 w-3.5" aria-hidden />
+                合并导出
               </Button>
             )}
             {data.type !== 'verify' && data.status === 'succeeded' && (

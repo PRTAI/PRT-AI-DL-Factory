@@ -7,6 +7,10 @@ import type {
   Dataset,
   DatasetKind,
   DatasetSpec,
+  Deployment,
+  DeploymentEndpoint,
+  ExportCandidates,
+  ExportTask,
   GpuSnapshot,
   HarborAgentInfo,
   Job,
@@ -18,6 +22,8 @@ import type {
   ModelEntry,
   Notification,
   Preset,
+  Project,
+  ProjectWithStats,
   SystemMetrics,
   SystemSettings,
   TokenResponse,
@@ -158,26 +164,43 @@ export const api = {
   audit: (params: { limit?: number; action_prefix?: string; actor_id?: string; target_id?: string } = {}) =>
     request<AuditEvent[]>(`/api/audit${qs(params)}`),
 
+  // ----------------------------------------------------------- projects ----
+  // 项目在团队内共享：任何登录用户都能列出/搜索，改和删只有负责人与管理员能做。
+  projects: (params: { q?: string; include_archived?: boolean } = {}) =>
+    request<ProjectWithStats[]>(`/api/projects${qs(params)}`),
+  project: (id: string) => request<ProjectWithStats>(`/api/projects/${id}`),
+  projectJobs: (id: string, limit = 20) =>
+    request<Job[]>(`/api/projects/${id}/jobs${qs({ limit })}`),
+  createProject: (payload: { name: string; description?: string; tags?: string[] }) =>
+    request<Project>('/api/projects', { method: 'POST', body: JSON.stringify(payload) }),
+  updateProject: (
+    id: string,
+    payload: { name?: string; description?: string; tags?: string[]; archived?: boolean; owner_id?: string },
+  ) => request<Project>(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteProject: (id: string) => request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
+
   // -------------------------------------------------------------- jobs ----
   jobs: (params: {
     mine_only?: boolean
     status?: JobStatus[]
     type?: JobType[]
+    project_id?: string
     q?: string
     limit?: number
     offset?: number
   } = {}) =>
     request<{ items: Job[]; total: number; offset: number; limit: number }>(`/api/jobs${qs(params)}`),
-  jobOverview: () =>
+  jobOverview: (projectId = '') =>
     request<{
       total: number
+      mine: number
       by_status: Record<string, number>
       by_type: Record<string, number>
       pending_review: number
       running: number
       queued: number
       gpu: GpuSnapshot
-    }>('/api/jobs/overview'),
+    }>(`/api/jobs/overview${qs({ project_id: projectId })}`),
   job: (id: string) => request<Job>(`/api/jobs/${id}`),
   createJob: (payload: unknown) =>
     request<Job>('/api/jobs', { method: 'POST', body: JSON.stringify(payload) }),
@@ -288,6 +311,38 @@ export const api = {
   downloadLog: (id: string) => request<{ content: string }>(`/api/models/downloads/${id}/log`),
   cancelDownload: (id: string) =>
     request<ModelDownload>(`/api/models/downloads/${id}/cancel`, { method: 'POST' }),
+
+  // -------------------------------------------------------- deployments ----
+  deployments: (params: { active_only?: boolean; project_id?: string } = {}) =>
+    request<Deployment[]>(`/api/deployments${qs(params)}`),
+  deployment: (id: string) => request<Deployment>(`/api/deployments/${id}`),
+  deploymentEndpoints: () => request<DeploymentEndpoint[]>('/api/deployments/endpoints'),
+  createDeployment: (payload: unknown) =>
+    request<Deployment>('/api/deployments', { method: 'POST', body: JSON.stringify(payload) }),
+  deploymentLog: (id: string, offset = 0) =>
+    request<{ content: string; size: number; offset: number; eof: boolean }>(
+      `/api/deployments/${id}/log${qs({ offset })}`,
+    ),
+  stopDeployment: (id: string) =>
+    request<Deployment>(`/api/deployments/${id}/stop`, { method: 'POST' }),
+  deleteDeployment: (id: string) => request<void>(`/api/deployments/${id}`, { method: 'DELETE' }),
+
+  // ------------------------------------------------------------ exports ----
+  exports: (jobId = '') => request<ExportTask[]>(`/api/exports${qs({ job_id: jobId })}`),
+  exportCandidates: (jobId: string) =>
+    request<ExportCandidates>(`/api/exports/candidates/${jobId}`),
+  createExport: (payload: {
+    job_id: string
+    name?: string
+    adapter_path?: string
+    export_size_gb?: number
+    export_device?: string
+    export_legacy_format?: boolean
+  }) => request<ExportTask>('/api/exports', { method: 'POST', body: JSON.stringify(payload) }),
+  exportLog: (id: string) => request<{ content: string; size: number; eof: boolean }>(`/api/exports/${id}/log`),
+  cancelExport: (id: string) => request<ExportTask>(`/api/exports/${id}/cancel`, { method: 'POST' }),
+  deleteExport: (id: string, purgeFiles = false) =>
+    request<void>(`/api/exports/${id}${qs({ purge_files: purgeFiles })}`, { method: 'DELETE' }),
 
   // ------------------------------------------------------------ system ----
   systemMetrics: () => request<SystemMetrics>('/api/system/metrics'),

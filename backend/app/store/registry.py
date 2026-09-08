@@ -11,9 +11,12 @@ from ..config import settings
 from ..models import (
     AuditEvent,
     Dataset,
+    Deployment,
+    ExportTask,
     Job,
     ModelDownload,
     Notification,
+    Project,
     SystemSettings,
     User,
 )
@@ -32,6 +35,9 @@ class Store:
         self.notifications: JsonCollection[Notification] = JsonCollection(
             db / "notifications.json", Notification
         )
+        self.projects: JsonCollection[Project] = JsonCollection(db / "projects.json", Project)
+        self.deployments: JsonCollection[Deployment] = JsonCollection(db / "deployments.json", Deployment)
+        self.exports: JsonCollection[ExportTask] = JsonCollection(db / "exports.json", ExportTask)
         self.settings_doc: JsonDocument[SystemSettings] = JsonDocument(
             db / "settings.json", SystemSettings
         )

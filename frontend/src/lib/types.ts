@@ -36,6 +36,9 @@ export type DatasetKind =
   | 'raw'
 export type DatasetStatus = 'uploading' | 'extracting' | 'validating' | 'ready' | 'invalid' | 'deleted'
 export type DownloadStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type DeploymentStatus = 'starting' | 'serving' | 'failed' | 'stopped'
+export type DeploymentSource = 'model' | 'job' | 'path'
+export type ExportStatus = 'queued' | 'running' | 'succeeded' | 'failed'
 
 export interface User {
   id: string
@@ -180,7 +183,7 @@ export interface SFTConfig {
   resume_from_checkpoint?: string | null
   compute_type: 'bf16' | 'fp16' | 'fp32' | 'pure_bf16'
   quantization_bit?: number | null
-  flash_attn: 'auto' | 'disabled' | 'sdpa' | 'fa2'
+  flash_attn: 'auto' | 'disabled' | 'sdpa' | 'fa2' | 'fa3'
   gradient_checkpointing: boolean
   deepspeed_stage: 'none' | 'zero2' | 'zero3' | 'zero3_offload'
   liger_kernel: boolean
@@ -249,6 +252,7 @@ export interface RLConfig {
   overlong_penalty_factor: number
   rollout: RolloutSpec
   harbor: HarborEnvSpec
+  attn_implementation: 'auto' | 'flash_attention_2' | 'sdpa' | 'eager' | 'default'
   strategy: 'fsdp' | 'fsdp2' | 'megatron'
   param_offload: boolean
   optimizer_offload: boolean
@@ -360,6 +364,7 @@ export interface Job {
   status: JobStatus
   owner_id: string
   owner_email: string
+  project_id: string
   created_at: string
   updated_at: string
   queued_at?: string | null
@@ -488,6 +493,8 @@ export interface ToolchainRow {
   importable: boolean | null
   /** hard dependency (torch) present — null when not applicable */
   deps_ok: boolean | null
+  /** flash-attn 装了没 —— 决定注意力加速能不能选 fa2；null 表示不适用 */
+  flash_attn?: boolean | null
   status: 'ready' | 'missing_deps' | 'missing_python' | 'unknown'
   detail: string
 }
@@ -556,4 +563,127 @@ export interface CommandPreview {
   notes: string[]
   files: Record<string, string>
   output_dir: string
+}
+
+// --------------------------------------------------------------- 项目 ----
+export interface Project {
+  id: string
+  name: string
+  slug: string
+  description: string
+  tags: string[]
+  owner_id: string
+  owner_email: string
+  created_at: string
+  updated_at: string
+  archived: boolean
+}
+
+export interface ProjectStats {
+  total_jobs: number
+  running: number
+  pending_review: number
+  succeeded: number
+  failed: number
+  last_activity_at?: string | null
+  members: string[]
+}
+
+export interface ProjectWithStats {
+  project: Project
+  stats: ProjectStats
+}
+
+// ----------------------------------------------------------- 模型部署 ----
+export interface VLLMConfig {
+  tensor_parallel_size: number
+  pipeline_parallel_size: number
+  gpu_memory_utilization: number
+  max_model_len?: number | null
+  max_num_seqs: number
+  dtype: string
+  quantization: string
+  trust_remote_code: boolean
+  enable_prefix_caching: boolean
+  enforce_eager: boolean
+  api_key: string
+  chat_template: string
+  extra_args: Record<string, unknown>
+}
+
+export interface Deployment {
+  id: string
+  name: string
+  note: string
+  source: DeploymentSource
+  model_id: string
+  job_id: string
+  model_path: string
+  served_model_name: string
+  port: number
+  host: string
+  engine: string
+  config: VLLMConfig
+  owner_id: string
+  owner_email: string
+  project_id: string
+  status: DeploymentStatus
+  created_at: string
+  updated_at: string
+  started_at?: string | null
+  stopped_at?: string | null
+  ready_at?: string | null
+  gpu_ids: number[]
+  pid?: number | null
+  exit_code?: number | null
+  work_dir: string
+  log_file: string
+  command: string
+  error: string
+}
+
+export interface DeploymentEndpoint {
+  id: string
+  name: string
+  model: string
+  /** 回环地址，本机 curl / 平台探活用 */
+  base_url: string
+  /** 宿主机实际 IP —— Harbor 的 agent 在容器里跑，必须用这个 */
+  sandbox_base_url: string
+  status: DeploymentStatus
+  api_key: string
+}
+
+// --------------------------------------------------------- 合并导出 ----
+export interface ExportTask {
+  id: string
+  name: string
+  job_id: string
+  base_model_path: string
+  adapter_path: string
+  template: string
+  export_dir: string
+  export_size_gb: number
+  export_device: string
+  export_legacy_format: boolean
+  owner_id: string
+  owner_email: string
+  status: ExportStatus
+  created_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  exit_code?: number | null
+  log_file: string
+  command: string
+  error: string
+  output_bytes: number
+}
+
+export interface ExportCandidates {
+  job_id: string
+  exportable: boolean
+  reason: string
+  base_model_path: string
+  template: string
+  checkpoints: { path: string; label: string; step: number | null }[]
 }

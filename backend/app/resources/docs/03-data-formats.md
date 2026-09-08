@@ -1,7 +1,7 @@
 ---
 title: 数据格式说明
 category: 入门
-order: 2
+order: 3
 summary: 七种上传格式的目录结构、必需字段与示例
 ---
 

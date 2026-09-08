@@ -31,7 +31,7 @@ from ..builders import BuildError, build_job
 from ..config import settings
 from ..models import Job, JobStatus, utcnow
 from ..store import store
-from . import audit_service
+from . import audit_service, proc_env
 
 _PROCESSES: dict[str, subprocess.Popen] = {}
 _LOCK = threading.RLock()
@@ -120,6 +120,9 @@ def launch(job: Job) -> Job:
     env.update(job.resources.env)
     env["PRT_JOB_ID"] = job.id
     env["PYTHONUNBUFFERED"] = "1"
+    # 框架要在运行时 shell 出去调 torchrun / ray / ninja / deepspeed，
+    # 这些装在它自己的 conda 环境里，不在平台的 PATH 上。
+    proc_env.with_interpreter_on_path(env, result.command[0])
     if job.resources.gpu_ids:
         env["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in job.resources.gpu_ids)
     elif job.resources.n_gpus == 0:

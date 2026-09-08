@@ -171,6 +171,43 @@ def _probe_python(python_bin: str, module: str, pythonpath: str, dependency: str
     return result
 
 
+_FLASH_ATTN_CACHE: dict[str, tuple[float, bool]] = {}
+_FLASH_ATTN_TTL = 300.0
+
+
+def has_flash_attn(python_bin: str) -> bool:
+    """某个解释器里装了 flash-attn 吗？
+
+    这决定了 `fa2` / `flash_attention_2` 能不能用：没装却指定了它，
+    transformers 会在**加载模型时**才抛
+    ``FlashAttention2 has been toggled on, but it cannot be used``——
+    等于白排队几分钟才失败。所以在提交与生成命令两处都要先问一句。
+    """
+    cached = _FLASH_ATTN_CACHE.get(python_bin)
+    now = time.time()
+    if cached and now - cached[0] < _FLASH_ATTN_TTL:
+        return cached[1]
+
+    resolved = shutil.which(python_bin) or (python_bin if Path(python_bin).is_file() else None)
+    available = False
+    if resolved is not None:
+        try:
+            completed = subprocess.run(  # noqa: S603 - argv 来自配置
+                [resolved, "-c", "import importlib.util as u;print(int(u.find_spec('flash_attn') is not None))"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                env={"PATH": os.environ.get("PATH", ""), "HOME": os.environ.get("HOME", "")},
+                check=False,
+            )
+            available = completed.stdout.strip() == "1"
+        except (OSError, subprocess.SubprocessError):
+            available = False
+
+    _FLASH_ATTN_CACHE[python_bin] = (now, available)
+    return available
+
+
 def _docker_status() -> dict[str, Any]:
     """Harbor's default sandbox is Docker — check the daemon is actually reachable.
 
@@ -285,6 +322,15 @@ def toolchain_status() -> list[dict[str, Any]]:
         else:
             status_value, detail = "unknown", probe.get("error", "")
 
+        # 训练框架才关心 flash-attn；Harbor 是评测 CLI，不涉及
+        flash = (
+            has_flash_attn(python_bin)
+            if python_ok and key in {"llamafactory", "verl", "trl"}
+            else None
+        )
+        if status_value == "ready" and flash is False:
+            detail += "；未装 flash-attn，注意力加速请选 sdpa"
+
         rows.append(
             {
                 "key": key,
@@ -296,6 +342,7 @@ def toolchain_status() -> list[dict[str, Any]]:
                 "python_ok": python_ok,
                 "importable": probe["importable"],
                 "deps_ok": probe["deps_ok"],
+                "flash_attn": flash,
                 "status": status_value,
                 "detail": detail,
             }

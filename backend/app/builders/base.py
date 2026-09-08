@@ -63,3 +63,24 @@ def kv_flags(name: str, mapping: dict[str, str]) -> list[str]:
 def ensure_dir(path: Path) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def resolve_attn_implementation(requested: str, python_bin: str) -> tuple[str, str]:
+    """把 RL 的 ``attn_implementation`` 落到具体取值，返回 ``(取值, 说明)``。
+
+    ``auto`` 需要看目标环境里到底有没有 flash-attn：没装却发
+    ``flash_attention_2``，transformers 会在加载模型时才抛
+    ``FlashAttention2 has been toggled on, but it cannot be used``，
+    白排队几分钟才失败。``""`` 表示不下发这个参数。
+    """
+    from ..services import resources_service
+
+    if requested == "default":
+        return "", ""
+    if requested != "auto":
+        if requested == "flash_attention_2" and not resources_service.has_flash_attn(python_bin):
+            return requested, "⚠ 该环境里没有 flash-attn，flash_attention_2 会在加载模型时失败；建议改用 sdpa"
+        return requested, f"attention 实现: {requested}"
+    if resources_service.has_flash_attn(python_bin):
+        return "flash_attention_2", "attention 实现: flash_attention_2（auto 探测到 flash-attn）"
+    return "sdpa", "attention 实现: sdpa（auto 未探测到 flash-attn，已回落）"

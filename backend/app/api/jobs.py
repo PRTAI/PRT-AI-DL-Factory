@@ -21,15 +21,17 @@ def list_jobs(
     mine_only: bool = Query(default=False, description="只看自己的任务"),
     status: list[JobStatus] | None = Query(default=None),
     type: list[JobType] | None = Query(default=None),
+    project_id: str = Query(default="", description="只看某个项目的任务"),
     q: str = "",
     limit: int = Query(default=100, le=500),
     offset: int = 0,
 ) -> dict[str, Any]:
     items, total = job_service.list_jobs(
         actor=user,
-        mine_only=mine_only or not user.is_admin,
+        mine_only=mine_only,
         statuses=status,
         types=type,
+        project_id=project_id,
         query=q,
         limit=limit,
         offset=offset,
@@ -38,8 +40,8 @@ def list_jobs(
 
 
 @router.get("/overview", summary="任务统计")
-def overview(user: CurrentUser) -> dict[str, Any]:
-    payload = job_service.stats_overview(user)
+def overview(user: CurrentUser, project_id: str = Query(default="")) -> dict[str, Any]:
+    payload = job_service.stats_overview(user, project_id=project_id)
     payload["gpu"] = gpu_snapshot()
     return payload
 

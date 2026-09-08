@@ -39,3 +39,6 @@ Thumbs.db
 .env.local
 backend/.env
 *.pem
+
+# tsc -b 的增量构建缓存，机器相关，不该进仓库
+*.tsbuildinfo

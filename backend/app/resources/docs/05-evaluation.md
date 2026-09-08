@@ -1,7 +1,7 @@
 ---
 title: Agent 评测说明
 category: 评测
-order: 4
+order: 5
 summary: Harbor pass@k、并发、agent 与密钥怎么配
 ---
 
@@ -55,23 +55,19 @@ summary: Harbor pass@k、并发、agent 与密钥怎么配
 
 ## 评测自己训练出来的模型
 
-1. 用 vLLM 起一个 OpenAI 兼容服务：
+不用手敲命令了，平台里三步：
 
-```bash
-python -m vllm.entrypoints.openai.api_server \
-  --model /path/to/data/outputs/<job_id> \
-  --served-model-name local-model --port 8000
-```
+1. **（LoRA 才需要）合并导出** —— 任务详情页的「合并导出」按钮，把 adapter 并回底座
+2. **部署** —— 侧栏「模型部署」→「部署模型」，来源选「已合并导出的产物」，
+   默认用 vLLM 起一个 OpenAI 兼容服务
+3. **提交评测** —— agent 选 `terminus` / `codex` 这类需要模型的 agent，
+   「模型」输入框下面会列出所有服务中的本地部署，**点一下自动填好**
+   模型名与 `OPENAI_BASE_URL`
 
-2. 提交评测：agent 选 `terminus`，模型填 `hosted_vllm/local-model`，
-   Agent 环境变量加：
+详见 [模型部署与合并导出](/docs/deployment)。
 
-```
-OPENAI_API_BASE = http://<宿主机 IP>:8000/v1
-OPENAI_API_KEY  = EMPTY
-```
-
-> 容器内访问宿主机**不能用 `127.0.0.1`**，要用宿主机的实际 IP。
+> 容器内访问宿主机**不能用 `127.0.0.1`**，要用宿主机的实际 IP —— 一键填充用的就是
+> 宿主机 IP；手填的话别抄部署列表里那个回环地址（那个是给本机 curl 验证用的）。
 
 训练任务成功后，详情页右上角有「评测该产物」按钮，会把产物路径带过来。
 

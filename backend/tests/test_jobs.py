@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from .conftest import FAKE_MODEL_ID
+from .conftest import FAKE_MODEL_ID, project_id
 
 
 def _upload_alpaca(client, headers, make_zip, name="job-data"):
@@ -29,6 +29,7 @@ def _sft_payload(dataset_id: str, **overrides):
         "name": "pytest-sft",
         "note": "由测试创建",
         "type": "sft",
+        "project_id": project_id(),
         "resources": {"n_gpus": 0},
         "sft": {
             "stage": "sft",
@@ -92,7 +93,10 @@ def test_admin_reject_moves_to_rejected(client, admin_headers, member_headers, d
     assert body["review"]["comment"] == "batch size 太大"
 
 
-def test_other_member_cannot_view_job(client, admin_headers, member_headers, dataset_id):
+def test_jobs_are_shared_but_only_owner_can_control(
+    client, admin_headers, member_headers, dataset_id
+):
+    """Jobs are team-visible (like a wandb project); writes stay with owner+admin."""
     job = client.post("/api/jobs", headers=member_headers, json=_sft_payload(dataset_id)).json()
     client.post(
         "/api/users",
@@ -104,9 +108,26 @@ def test_other_member_cannot_view_job(client, admin_headers, member_headers, dat
         "/api/auth/login", json={"email": "outsider@prt.local", "password": "outsider-pass-1"}
     ).json()
     headers = {"Authorization": f"Bearer {login['access_token']}"}
-    assert client.get(f"/api/jobs/{job['id']}", headers=headers).status_code == 403
-    # …but an admin can
+    assert client.get(f"/api/jobs/{job['id']}", headers=headers).status_code == 200
     assert client.get(f"/api/jobs/{job['id']}", headers=admin_headers).status_code == 200
+    assert (
+        client.post(
+            f"/api/jobs/{job['id']}/cancel", headers=headers, json={"reason": "not mine"}
+        ).status_code
+        == 403
+    )
+    assert client.delete(f"/api/jobs/{job['id']}", headers=headers).status_code == 403
+
+
+def test_job_requires_a_project(client, member_headers, dataset_id):
+    payload = _sft_payload(dataset_id)
+    payload["project_id"] = ""
+    response = client.post("/api/jobs", headers=member_headers, json=payload)
+    assert response.status_code == 400
+    assert "项目" in response.json()["detail"]
+
+    payload["project_id"] = "prj_does_not_exist"
+    assert client.post("/api/jobs", headers=member_headers, json=payload).status_code == 404
 
 
 def test_unknown_model_rejected(client, member_headers, dataset_id):

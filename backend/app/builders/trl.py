@@ -22,7 +22,7 @@ from ..config import settings
 from ..models import DatasetKind, Job, RLConfig, TrainStage
 from ..services import dataset_service
 from ..store import store
-from .base import BuildError, BuildResult
+from .base import BuildError, BuildResult, resolve_attn_implementation
 
 _SUPPORTED = {
     TrainStage.GRPO,
@@ -158,6 +158,11 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     n_gpus = max(1, job.resources.n_gpus)
     use_harbor = config.harbor.enabled or dataset.kind == DatasetKind.HARBOR_TASKS
     notes: list[str] = []
+    # 必须在渲染脚本之前定下来：配置是以字面量嵌进生成脚本里的，
+    # 渲染完再改 dict 不会反映到脚本内容里。
+    attn, attn_note = resolve_attn_implementation(
+        config.attn_implementation, settings.python_for("trl")
+    )
 
     if use_harbor:
         if dataset.kind != DatasetKind.HARBOR_TASKS:
@@ -167,7 +172,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         if config.algorithm not in {TrainStage.GRPO, TrainStage.DAPO, TrainStage.GSPO}:
             raise BuildError("Harbor 环境模式目前只支持 GRPO / GSPO")
         script_name = "train_harbor_grpo.py"
-        trainer_config = _grpo_config(job, config, output_dir, agentic=True)
+        trainer_config = _grpo_config(job, config, output_dir, agentic=True, attn=attn)
         script = HARBOR_SCRIPT.format(
             job_id=job.id,
             job_name=job.name,
@@ -189,9 +194,9 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         trainer_name, config_name = _trainer_for(config.algorithm)
         data_files, eval_files = _tabular_files(dataset, config)
         trainer_config = (
-            _grpo_config(job, config, output_dir, agentic=False)
+            _grpo_config(job, config, output_dir, agentic=False, attn=attn)
             if trainer_name in {"GRPOTrainer", "RLOOTrainer"}
-            else _preference_config(job, config, output_dir)
+            else _preference_config(job, config, output_dir, attn=attn)
         )
         if trainer_name in {"GRPOTrainer", "RLOOTrainer"}:
             if config.custom_reward_function_path:
@@ -247,6 +252,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         "ACCELERATE_LOG_LEVEL": "info",
     }
     notes.insert(0, f"TRL {config.algorithm.value.upper()}，{n_gpus} GPU")
+    if attn_note:
+        notes.append(f"{attn_note}（走 model_init_kwargs）")
 
     return BuildResult(
         command=command,
@@ -288,7 +295,7 @@ def _tabular_files(dataset, config: RLConfig) -> tuple[list[str], list[str]]:
     return train, evals
 
 
-def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool) -> dict:
+def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool, attn: str) -> dict:
     n_gpus = max(1, job.resources.n_gpus)
     cfg: dict = {
         "output_dir": str(output_dir),
@@ -323,11 +330,12 @@ def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool)
     if agentic:
         cfg["max_tool_calling_iterations"] = config.harbor.max_tool_calling_iterations
         cfg["chat_template_kwargs"] = {"enable_thinking": False}
+    _apply_attn(cfg, attn)
     cfg.update(config.extra_args)
     return cfg
 
 
-def _preference_config(job: Job, config: RLConfig, output_dir: Path) -> dict:
+def _preference_config(job: Job, config: RLConfig, output_dir: Path, *, attn: str) -> dict:
     n_gpus = max(1, job.resources.n_gpus)
     cfg = {
         "output_dir": str(output_dir),
@@ -343,8 +351,18 @@ def _preference_config(job: Job, config: RLConfig, output_dir: Path) -> dict:
         "gradient_checkpointing": config.gradient_checkpointing,
         "report_to": "none",
     }
+    _apply_attn(cfg, attn)
     cfg.update(config.extra_args)
     return cfg
+
+
+def _apply_attn(cfg: dict, attn: str) -> None:
+    """TRL 没有 attention 参数，实现要走 ``model_init_kwargs`` 透传给 ``from_pretrained``。"""
+    if not attn:
+        return
+    kwargs = dict(cfg.get("model_init_kwargs") or {})
+    kwargs["attn_implementation"] = attn
+    cfg["model_init_kwargs"] = kwargs
 
 
 def _pretty(payload: dict) -> str:

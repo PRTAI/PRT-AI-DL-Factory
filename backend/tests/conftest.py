@@ -92,6 +92,28 @@ def member_headers(client, admin_headers) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------- #
+# Project
+# --------------------------------------------------------------------------- #
+_PROJECT: dict[str, str] = {}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def default_project(client, member_headers) -> str:
+    """任务必须归属项目，所以整个测试会话共用一个。"""
+    response = client.post(
+        "/api/projects", headers=member_headers, json={"name": "pytest 项目", "tags": ["test"]}
+    )
+    assert response.status_code == 201, response.text
+    _PROJECT["id"] = response.json()["id"]
+    return _PROJECT["id"]
+
+
+def project_id() -> str:
+    """给构造 payload 的模块级 helper 用（fixture 已经 autouse 跑过了）。"""
+    return _PROJECT["id"]
+
+
+# --------------------------------------------------------------------------- #
 # Archive helpers
 # --------------------------------------------------------------------------- #
 @pytest.fixture
@@ -104,6 +126,25 @@ def make_zip(tmp_path):
         return target
 
     return _make
+
+
+@pytest.fixture(scope="session")
+def dataset_id_for_projects(client, member_headers, tmp_path_factory) -> str:
+    """一个就绪的 alpaca 数据集，供不关心数据集本身的测试复用。"""
+    tmp = tmp_path_factory.mktemp("shared-ds")
+    archive = tmp / "shared.zip"
+    records = [{"instruction": f"q{i}", "input": "", "output": f"a{i}"} for i in range(4)]
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr("train.json", json.dumps(records))
+    with archive.open("rb") as handle:
+        response = client.post(
+            "/api/datasets",
+            headers=member_headers,
+            files={"file": ("shared.zip", handle, "application/zip")},
+            data={"name": "shared-data", "kind": "sft_alpaca"},
+        )
+    assert response.status_code == 201, response.text
+    return response.json()["id"]
 
 
 @pytest.fixture

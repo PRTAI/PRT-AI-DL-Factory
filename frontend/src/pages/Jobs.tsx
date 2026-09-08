@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ListChecks, RefreshCw, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import { useAuth } from '@/lib/store'
+import { useAuth, useProject } from '@/lib/store'
 import type { Job, JobStatus, JobType } from '@/lib/types'
 import { elapsedSeconds, formatDuration, formatRelative } from '@/lib/utils'
 import {
@@ -34,6 +34,7 @@ const TYPE_OPTIONS: { value: JobType | 'all'; label: string }[] = [
 
 export default function Jobs() {
   const { user } = useAuth()
+  const { projectId, setProject } = useProject()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -43,6 +44,8 @@ export default function Jobs() {
   const [type, setType] = React.useState<JobType | 'all'>((searchParams.get('type') as JobType) ?? 'all')
   const [query, setQuery] = React.useState(searchParams.get('q') ?? '')
   const [mineOnly, setMineOnly] = React.useState(searchParams.get('mine') === '1')
+  // 默认只看当前项目；切成「全部项目」可以横向对比别的项目在跑什么
+  const [scopeToProject, setScopeToProject] = React.useState(searchParams.get('all') !== '1')
   const [reviewTarget, setReviewTarget] = React.useState<Job | null>(null)
   const [reviewComment, setReviewComment] = React.useState('')
 
@@ -52,15 +55,21 @@ export default function Jobs() {
     if (type !== 'all') next.set('type', type)
     if (query) next.set('q', query)
     if (mineOnly) next.set('mine', '1')
+    if (!scopeToProject) next.set('all', '1')
     setSearchParams(next, { replace: true })
-  }, [status, type, query, mineOnly, setSearchParams])
+  }, [status, type, query, mineOnly, scopeToProject, setSearchParams])
 
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
+  const projectName = projects.data?.find((row) => row.project.id === projectId)?.project.name
+
+  const effectiveProject = scopeToProject ? projectId : ''
   const jobs = useQuery({
-    queryKey: ['jobs', status, type, query, mineOnly],
+    queryKey: ['jobs', status, type, query, mineOnly, effectiveProject],
     queryFn: () =>
       api.jobs({
         status: status === 'all' ? undefined : [status],
         type: type === 'all' ? undefined : [type],
+        project_id: effectiveProject || undefined,
         q: query || undefined,
         mine_only: mineOnly,
         limit: 200,
@@ -111,7 +120,11 @@ export default function Jobs() {
     <div className="space-y-4">
       <PageHeader
         title="任务列表"
-        description="训练与评测任务的提交、审核与运行状态"
+        description={
+          scopeToProject && projectId
+            ? `当前项目：${projectName ?? projectId}。任务在团队内共享，写操作仍限于负责人与管理员。`
+            : '全部项目的训练与评测任务，团队内共享可见'
+        }
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => jobs.refetch()}>
@@ -165,17 +178,35 @@ export default function Jobs() {
             className="w-36"
             options={TYPE_OPTIONS}
           />
-          {user?.role === 'admin' && (
-            <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs text-fg-muted">
-              <input
-                type="checkbox"
-                checked={mineOnly}
-                onChange={(event) => setMineOnly(event.target.checked)}
-                className="h-3.5 w-3.5 accent-[var(--primary)]"
-              />
-              只看我的
-            </label>
-          )}
+          <Select
+            value={scopeToProject ? projectId || 'all' : 'all'}
+            onValueChange={(value) => {
+              if (value === 'all') {
+                setScopeToProject(false)
+              } else {
+                setProject(value)
+                setScopeToProject(true)
+              }
+            }}
+            className="w-44"
+            options={[
+              { value: 'all', label: '全部项目' },
+              ...(projects.data ?? []).map((row) => ({
+                value: row.project.id,
+                label: row.project.name,
+                description: `${row.stats.total_jobs} 个任务`,
+              })),
+            ]}
+          />
+          <label className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs text-fg-muted">
+            <input
+              type="checkbox"
+              checked={mineOnly}
+              onChange={(event) => setMineOnly(event.target.checked)}
+              className="h-3.5 w-3.5 accent-[var(--primary)]"
+            />
+            只看我的
+          </label>
         </div>
 
         {items.length ? (
@@ -185,6 +216,7 @@ export default function Jobs() {
                   这样类型/状态/进度等会整体左移，右侧不再挤成一团 */}
               <tr>
                 <Th className="w-[300px]">任务</Th>
+                {!scopeToProject && <Th className="w-[140px]">项目</Th>}
                 <Th className="w-[168px]">类型</Th>
                 <Th className="w-[88px]">状态</Th>
                 <Th className="w-[170px]">进度</Th>
@@ -207,6 +239,11 @@ export default function Jobs() {
                       </Link>
                       {job.note && <div className="mt-0.5 line-clamp-1 text-[11px] text-fg-muted">{job.note}</div>}
                     </Td>
+                    {!scopeToProject && (
+                      <Td className="truncate text-xs text-fg-muted">
+                        {projects.data?.find((row) => row.project.id === job.project_id)?.project.name ?? '—'}
+                      </Td>
+                    )}
                     <Td>
                       <JobTypeBadge type={job.type} framework={job.framework} />
                     </Td>

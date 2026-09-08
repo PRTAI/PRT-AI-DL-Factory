@@ -5,6 +5,7 @@ import { ChevronDown, Cpu, Database, Rocket, Server, Settings2, Sparkles } from 
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { AlgorithmInfo, DatasetKind, ModelEntry, Preset, RLConfig, SFTConfig, TrainStage } from '@/lib/types'
+import { useProject } from '@/lib/store'
 import { cn, deepMerge } from '@/lib/utils'
 import {
   Badge,
@@ -123,6 +124,7 @@ const DEFAULT_RL: RLConfig = {
     max_tool_calling_iterations: 25,
     include_metadata: true,
   },
+  attn_implementation: 'auto',
   strategy: 'fsdp2',
   param_offload: false,
   optimizer_offload: false,
@@ -194,11 +196,14 @@ const Grid = ({ children, cols = 3 }: { children: React.ReactNode; cols?: 2 | 3 
 /* -------------------------------------------------------------------------- */
 export default function SubmitTraining() {
   const navigate = useNavigate()
+  const { projectId } = useProject()
 
   const algorithms = useQuery({ queryKey: ['algorithms'], queryFn: () => api.algorithms() })
   const presets = useQuery({ queryKey: ['presets'], queryFn: () => api.presets() })
   const templates = useQuery({ queryKey: ['templates'], queryFn: () => api.templates() })
   const info = useQuery({ queryKey: ['info'], queryFn: () => api.info() })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
+  const projectName = projects.data?.find((row) => row.project.id === projectId)?.project.name
 
   const [name, setName] = React.useState('')
   const [note, setNote] = React.useState('')
@@ -265,6 +270,7 @@ export default function SubmitTraining() {
         name: name.trim(),
         note,
         type: jobType,
+        project_id: projectId,
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         resources: { n_gpus: nGpus, priority, env: cleanKv(envVars) },
         sft: isRl ? null : sft,
@@ -570,6 +576,7 @@ export default function SubmitTraining() {
             <CardHeader title="提交摘要" />
             <CardBody className="space-y-3">
               <dl className="space-y-1.5 text-xs">
+                <SummaryRow label="项目" value={projectName ?? '未选择'} />
                 <SummaryRow label="任务类型" value={isRl ? '强化学习' : '监督 / 偏好训练'} />
                 <SummaryRow label="算法" value={current?.label ?? algorithm} />
                 <SummaryRow label="框架" value={isRl ? rl.framework : 'LLaMA-Factory'} />
@@ -638,9 +645,34 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* 注意力加速：取值对应 LLaMA-Factory 的 AttentionFunction 枚举                 */
+/* -------------------------------------------------------------------------- */
+const FLASH_ATTN_OPTIONS = [
+  { value: 'auto', label: 'auto（自动探测）', description: '装了 flash-attn 就用 FA2，否则回落' },
+  { value: 'fa2', label: 'FlashAttention-2', description: '需要 flash-attn，长序列提速最明显' },
+  { value: 'fa3', label: 'FlashAttention-3', description: '仅 Hopper (H100/H800) 及更新架构' },
+  { value: 'sdpa', label: 'SDPA', description: 'PyTorch 自带，无需额外依赖' },
+  { value: 'disabled', label: '关闭（eager）', description: '最慢，调试用' },
+]
+
+const FLASH_ATTN_HINT: Record<SFTConfig['flash_attn'], string> = {
+  auto: '让框架自己选：有 flash-attn 用 FA2，没有则退回 SDPA',
+  fa2: 'FlashAttention-2：显存更省、长上下文更快；环境里没装 flash-attn 会启动失败',
+  fa3: 'FlashAttention-3 只支持 Hopper 及更新的卡，老卡请选 FA2',
+  sdpa: 'PyTorch 原生高效实现，不需要 flash-attn，兼容性最好',
+  disabled: '退回 eager 实现，只在排查数值问题时用',
+}
+
 function SftParams({ sft, setSft }: { sft: SFTConfig; setSft: React.Dispatch<React.SetStateAction<SFTConfig>> }) {
   const patch = (values: Partial<SFTConfig>) => setSft((previous) => ({ ...previous, ...values }))
   const isPreference = ['dpo', 'orpo', 'simpo', 'kto'].includes(sft.stage)
+  // 环境里没装 flash-attn 却选了 fa2/fa3，会在加载模型时才失败——提交前就说清楚
+  const toolchain = useQuery({ queryKey: ['toolchain'], queryFn: () => api.toolchain() })
+  const noFlashAttn = toolchain.data?.find((row) => row.key === 'llamafactory')?.flash_attn === false
+  const flashAttnWarning =
+    noFlashAttn && (sft.flash_attn === 'fa2' || sft.flash_attn === 'fa3')
+      ? 'LLaMA-Factory 环境里没有装 flash-attn，该选项会在加载模型时失败；请改用 sdpa 或 auto'
+      : null
 
   return (
     <div className="space-y-4">
@@ -677,6 +709,18 @@ function SftParams({ sft, setSft }: { sft: SFTConfig; setSft: React.Dispatch<Rea
             value={sft.gradient_accumulation_steps}
             min={1}
             onChange={(value) => patch({ gradient_accumulation_steps: value ?? 1 })}
+          />
+        </Field>
+        <Field
+          label="加速 flash_attn"
+          hint={FLASH_ATTN_HINT[sft.flash_attn]}
+          error={flashAttnWarning}
+          className="sm:col-span-2 lg:col-span-1"
+        >
+          <Select
+            value={sft.flash_attn}
+            onValueChange={(value) => patch({ flash_attn: value as SFTConfig['flash_attn'] })}
+            options={FLASH_ATTN_OPTIONS}
           />
         </Field>
       </Grid>
@@ -790,18 +834,6 @@ function SftParams({ sft, setSft }: { sft: SFTConfig; setSft: React.Dispatch<Rea
               ]}
             />
           </Field>
-          <Field label="注意力实现">
-            <Select
-              value={sft.flash_attn}
-              onValueChange={(value) => patch({ flash_attn: value as SFTConfig['flash_attn'] })}
-              options={[
-                { value: 'auto', label: 'auto' },
-                { value: 'fa2', label: 'FlashAttention-2' },
-                { value: 'sdpa', label: 'SDPA' },
-                { value: 'disabled', label: '关闭' },
-              ]}
-            />
-          </Field>
           <Field label="日志间隔 logging_steps">
             <NumberInput value={sft.logging_steps} min={1} onChange={(value) => patch({ logging_steps: value ?? 10 })} />
           </Field>
@@ -864,8 +896,40 @@ function SftParams({ sft, setSft }: { sft: SFTConfig; setSft: React.Dispatch<Rea
 }
 
 /* -------------------------------------------------------------------------- */
+/* verl 走 model.override_config.attn_implementation，TRL 走 model_init_kwargs   */
+/* -------------------------------------------------------------------------- */
+const RL_ATTN_OPTIONS = [
+  {
+    value: 'auto',
+    label: 'auto（推荐）',
+    description: '装了 flash-attn 就用 FA2，否则回落到 SDPA',
+  },
+  {
+    value: 'flash_attention_2',
+    label: 'FlashAttention-2',
+    description: '需要环境里装了 flash-attn',
+  },
+  { value: 'sdpa', label: 'SDPA', description: 'PyTorch 自带，无需额外依赖' },
+  { value: 'eager', label: 'eager', description: '最慢，调试用' },
+  { value: 'default', label: '不指定', description: '交给框架自己的默认值' },
+]
+
+const RL_ATTN_HINT: Record<RLConfig['attn_implementation'], string> = {
+  auto: '提交时探测目标环境：有 flash-attn 用 FA2，没有则回落到 SDPA',
+  flash_attention_2: 'FlashAttention-2：长 response 的 RL 提速最明显；环境里没装 flash-attn 会在加载模型时失败',
+  sdpa: 'PyTorch 原生高效实现，兼容性最好',
+  eager: '退回逐步实现，只在排查数值问题时用',
+  default: '平台不下发这个参数，用框架自己的默认值',
+}
+
 function RlParams({ rl, setRl }: { rl: RLConfig; setRl: React.Dispatch<React.SetStateAction<RLConfig>> }) {
   const patch = (values: Partial<RLConfig>) => setRl((previous) => ({ ...previous, ...values }))
+  const toolchain = useQuery({ queryKey: ['toolchain'], queryFn: () => api.toolchain() })
+  const noFlashAttn = toolchain.data?.find((row) => row.key === rl.framework)?.flash_attn === false
+  const attnWarning =
+    noFlashAttn && rl.attn_implementation === 'flash_attention_2'
+      ? `${rl.framework} 环境里没有装 flash-attn，该选项会在加载模型时失败；请改用 auto 或 sdpa`
+      : null
   const patchRollout = (values: Partial<RLConfig['rollout']>) =>
     setRl((previous) => ({ ...previous, rollout: { ...previous.rollout, ...values } }))
   const isGroupAlgo = ['grpo', 'dapo', 'gspo'].includes(rl.algorithm)
@@ -894,6 +958,21 @@ function RlParams({ rl, setRl }: { rl: RLConfig; setRl: React.Dispatch<React.Set
         </Field>
         <Field label="训练轮数 epochs">
           <NumberInput value={rl.total_epochs} min={1} onChange={(value) => patch({ total_epochs: value ?? 1 })} />
+        </Field>
+        <Field
+          label="加速 attn_implementation"
+          hint={
+            rl.framework === 'verl'
+              ? RL_ATTN_HINT[rl.attn_implementation]
+              : `${RL_ATTN_HINT[rl.attn_implementation]}（TRL 通过 model_init_kwargs 透传）`
+          }
+          error={attnWarning}
+        >
+          <Select
+            value={rl.attn_implementation}
+            onValueChange={(value) => patch({ attn_implementation: value as RLConfig['attn_implementation'] })}
+            options={RL_ATTN_OPTIONS}
+          />
         </Field>
       </Grid>
 

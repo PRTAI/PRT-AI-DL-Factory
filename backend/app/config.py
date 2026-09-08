@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     harbor_python: str = ""
     harbor_bin: str = "harbor"
     modelscope_bin: str = "modelscope"
+    # 模型部署用的解释器（需要装 vllm）；留空则依次回落到 verl / trl / 默认解释器
+    vllm_python: str = ""
+    deploy_port_start: int = 8100
+    deploy_port_end: int = 8199
 
     # ---------------------------------------------------------- scheduling ---
     max_concurrent_jobs: int = 2
@@ -117,6 +121,14 @@ class Settings(BaseSettings):
         return self.data_root / "audit"
 
     @property
+    def deployments_dir(self) -> Path:
+        return self.data_root / "deployments"
+
+    @property
+    def exports_dir(self) -> Path:
+        return self.data_root / "exports"
+
+    @property
     def resources_dir(self) -> Path:
         return Path(__file__).resolve().parent / "resources"
 
@@ -130,6 +142,8 @@ class Settings(BaseSettings):
             self.outputs_dir,
             self.downloads_dir,
             self.audit_dir,
+            self.deployments_dir,
+            self.exports_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
@@ -141,6 +155,10 @@ class Settings(BaseSettings):
             "harbor": self.harbor_python,
         }
         return mapping.get(framework) or self.python_default
+
+    def python_for_vllm(self) -> str:
+        """vLLM 装在哪个环境里：显式配置 > verl > trl > 默认解释器。"""
+        return self.vllm_python or self.verl_python or self.trl_python or self.python_default
 
     def root_for(self, framework: str) -> Path | None:
         mapping = {

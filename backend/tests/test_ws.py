@@ -8,7 +8,7 @@ import zipfile
 
 import pytest
 
-from .conftest import FAKE_MODEL_ID
+from .conftest import FAKE_MODEL_ID, project_id
 
 
 def _token(client, email: str, password: str) -> str:
@@ -68,6 +68,7 @@ def running_job(client, admin_headers, member_headers, tmp_path, monkeypatch):
         json={
             "name": "ws-stream-job",
             "type": "sft",
+            "project_id": project_id(),
             "resources": {"n_gpus": 0},
             "sft": {
                 "stage": "sft",

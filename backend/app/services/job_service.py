@@ -23,7 +23,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from . import audit_service, metrics_parser, model_service, runner
+from . import audit_service, metrics_parser, model_service, project_service, runner
 from .scheduler import refresh_metrics, scheduler
 
 # Which dataset kinds each algorithm can actually consume.
@@ -48,6 +48,7 @@ _ALLOWED_DATASETS: dict[TrainStage, set[DatasetKind]] = {
 # --------------------------------------------------------------------------- #
 def create_job(payload: JobCreate, *, owner: User) -> Job:
     framework = _framework_for(payload)
+    project = project_service.assert_usable(payload.project_id)
     _validate_resources(payload, owner)
 
     if payload.type == JobType.SFT:
@@ -69,6 +70,7 @@ def create_job(payload: JobCreate, *, owner: User) -> Job:
         status=initial_status,
         owner_id=owner.id,
         owner_email=owner.email,
+        project_id=project.id,
         tags=payload.tags,
         resources=payload.resources,
         sft=payload.sft,
@@ -81,13 +83,14 @@ def create_job(payload: JobCreate, *, owner: User) -> Job:
         job.queued_at = utcnow()
 
     store.jobs.put(job)
+    project_service.touch(project.id)
     audit_service.record(
         "job.create",
         actor=owner,
         target_type="job",
         target_id=job.id,
-        summary=f"提交{_TYPE_TEXT[job.type]}任务「{job.name}」({framework.value})",
-        detail={"gpus": job.resources.n_gpus},
+        summary=f"在项目「{project.name}」提交{_TYPE_TEXT[job.type]}任务「{job.name}」({framework.value})",
+        detail={"gpus": job.resources.n_gpus, "project_id": project.id},
     )
     if require_approval:
         audit_service.notify_admins(
@@ -295,6 +298,7 @@ def resubmit_job(job_id: str, *, actor: User) -> Job:
         name=f"{source.name} (重跑)",
         note=source.note,
         type=source.type,
+        project_id=source.project_id,
         tags=source.tags,
         resources=source.resources.model_copy(update={"gpu_ids": []}),
         sft=source.sft,
@@ -352,12 +356,15 @@ def list_jobs(
     mine_only: bool = False,
     statuses: list[JobStatus] | None = None,
     types: list[JobType] | None = None,
+    project_id: str = "",
     query: str = "",
     limit: int = 200,
     offset: int = 0,
 ) -> tuple[list[Job], int]:
     def keep(job: Job) -> bool:
         if mine_only and job.owner_id != actor.id:
+            return False
+        if project_id and job.project_id != project_id:
             return False
         if statuses and job.status not in statuses:
             return False
@@ -560,9 +567,11 @@ def verify_from_training(job_id: str, *, actor: User) -> dict[str, Any]:
 
 # --------------------------------------------------------------------------- #
 def _assert_can_view(job: Job, actor: User) -> None:
-    if actor.is_admin or job.owner_id == actor.id:
-        return
-    raise HTTPException(status.HTTP_403_FORBIDDEN, detail="无权查看该任务")
+    """任务在团队内是共享的（像 wandb 的项目一样），登录即可查看。
+
+    写操作仍然收在 :func:`_assert_can_control`。
+    """
+    del job, actor
 
 
 def _assert_can_control(job: Job, actor: User) -> None:
@@ -571,9 +580,12 @@ def _assert_can_control(job: Job, actor: User) -> None:
     raise HTTPException(status.HTTP_403_FORBIDDEN, detail="无权操作该任务")
 
 
-def stats_overview(actor: User) -> dict[str, Any]:
+def stats_overview(actor: User, *, project_id: str = "") -> dict[str, Any]:
     jobs = store.jobs.all()
-    visible = jobs if actor.is_admin else [j for j in jobs if j.owner_id == actor.id]
+    if project_id:
+        jobs = [j for j in jobs if j.project_id == project_id]
+    # 任务在团队内共享，所以看板统计的是全量；"我的" 单独给一个计数。
+    visible = jobs
     by_status: dict[str, int] = {}
     by_type: dict[str, int] = {}
     for job in visible:
@@ -581,6 +593,7 @@ def stats_overview(actor: User) -> dict[str, Any]:
         by_type[job.type.value] = by_type.get(job.type.value, 0) + 1
     return {
         "total": len(visible),
+        "mine": sum(1 for j in visible if j.owner_id == actor.id),
         "by_status": by_status,
         "by_type": by_type,
         "pending_review": sum(1 for j in jobs if j.status == JobStatus.PENDING_REVIEW),

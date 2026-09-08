@@ -7,6 +7,7 @@ import {
   Database,
   ExternalLink,
   FlaskConical,
+  FolderKanban,
   Gauge,
   GraduationCap,
   ListChecks,
@@ -14,6 +15,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Rocket,
   Server,
   Settings,
   ShieldCheck,
@@ -21,8 +23,9 @@ import {
   UserCog,
 } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useAuth, useUi } from '@/lib/store'
+import { useAuth, useProject, useUi } from '@/lib/store'
 import { cn, formatRelative } from '@/lib/utils'
+import { ProjectSwitcher } from './ProjectSwitcher'
 import { Button, Tooltip, TooltipProvider } from './ui'
 
 interface NavItem {
@@ -36,7 +39,10 @@ interface NavItem {
 const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: '总览',
-    items: [{ to: '/', label: '数据大屏', Icon: Gauge, end: true }],
+    items: [
+      { to: '/', label: '数据大屏', Icon: Gauge, end: true },
+      { to: '/projects', label: '项目', Icon: FolderKanban },
+    ],
   },
   {
     section: '任务',
@@ -51,6 +57,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     items: [
       { to: '/datasets', label: '数据集', Icon: Database },
       { to: '/models', label: '模型仓库', Icon: Server },
+      { to: '/deployments', label: '模型部署', Icon: Rocket },
     ],
   },
   {
@@ -64,6 +71,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
 
 export function AppShell() {
   const { user, logout } = useAuth()
+  const { projectId } = useProject()
   const { theme, toggleTheme, sidebarCollapsed, toggleSidebar } = useUi()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -75,9 +83,15 @@ export function AppShell() {
   })
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.settings() })
   const overview = useQuery({
-    queryKey: ['job-overview'],
-    queryFn: () => api.jobOverview(),
+    queryKey: ['job-overview', projectId],
+    queryFn: () => api.jobOverview(projectId),
     refetchInterval: 15000,
+  })
+  // 常驻的 vLLM 服务在侧栏挂个计数，避免忘了它们还占着显卡
+  const deployments = useQuery({
+    queryKey: ['deployments', 'active'],
+    queryFn: () => api.deployments({ active_only: true }),
+    refetchInterval: 20000,
   })
 
   const unread = (notifications.data ?? []).filter((item) => !item.read)
@@ -101,6 +115,11 @@ export function AppShell() {
             <span className="h-7 w-px bg-border" aria-hidden />
             <span className="wordmark text-[22px] leading-none">AI DL Factory</span>
           </NavLink>
+
+          <span className="ml-2 hidden h-7 w-px bg-border md:block" aria-hidden />
+          <div className="hidden md:block">
+            <ProjectSwitcher />
+          </div>
 
           <div className="flex min-w-0 flex-1 items-center justify-center">
             {settings.data?.banner && (
@@ -255,6 +274,13 @@ export function AppShell() {
                                   (overview.data?.pending_review ?? 0) > 0 && (
                                     <span className="ml-auto rounded-full bg-danger px-1.5 text-[10px] font-semibold leading-4 text-white">
                                       {overview.data?.pending_review}
+                                    </span>
+                                  )}
+                                {!sidebarCollapsed &&
+                                  item.to === '/deployments' &&
+                                  (deployments.data?.length ?? 0) > 0 && (
+                                    <span className="ml-auto rounded-full bg-success-soft px-1.5 text-[10px] font-semibold leading-4 text-success">
+                                      {deployments.data?.length}
                                     </span>
                                   )}
                               </>

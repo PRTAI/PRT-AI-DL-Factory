@@ -157,6 +157,175 @@ def test_llamafactory_yaml_keys_are_known(tmp_path, sft_dataset):
     assert not unknown, f"LLaMA-Factory 不认识这些配置键: {unknown}"
 
 
+def test_llamafactory_export_keys_are_known():
+    """合并导出的 YAML 键必须真的存在于 ExportArguments / ModelArguments。"""
+    from backend.app.models import ExportTask
+    from backend.app.services import export_service
+
+    known = _llamafactory_known_keys() | _TRANSFORMERS_KEYS
+    task = ExportTask(
+        name="merge",
+        job_id="job_x",
+        base_model_path="/models/qwen",
+        adapter_path="/outputs/job_x",
+        template="qwen3_nothink",
+        export_dir="/exports/exp_x/model",
+        owner_id="usr_keys",
+    )
+    emitted = set(export_service.build_config(task))
+    unknown = sorted(emitted - known)
+    assert not unknown, f"LLaMA-Factory 不认识这些导出键: {unknown}"
+    # 少了任何一个，导出的就不是合并后的完整权重
+    assert {"model_name_or_path", "adapter_name_or_path", "export_dir", "template"} <= emitted
+
+
+def test_llamafactory_flash_attn_values_are_accepted(tmp_path, sft_dataset):
+    """flash_attn 的取值来自 extras.constants.AttentionFunction 枚举。"""
+    path = settings.llamafactory_root / "src" / "llamafactory" / "extras" / "constants.py"
+    if not path.is_file():
+        pytest.skip("LLaMA-Factory 源码不可用")
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    allowed: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == "AttentionFunction":
+            allowed = {
+                item.value.value
+                for item in node.body
+                if isinstance(item, ast.Assign)
+                and isinstance(item.value, ast.Constant)
+                and isinstance(item.value.value, str)
+            }
+    assert allowed, "没能从 constants.py 里解析出 AttentionFunction 的取值"
+
+    # 平台暴露的每一个选项都必须是框架认识的
+    offered = set(SFTConfig.model_fields["flash_attn"].annotation.__args__)
+    assert offered <= allowed, f"平台提供了框架不认识的 flash_attn 取值: {sorted(offered - allowed)}"
+
+    for value in sorted(offered - {"auto"}):
+        config = SFTConfig(
+            model_path="/tmp/model",
+            dataset_ids=[sft_dataset.id],
+            flash_attn=value,
+        )
+        job = Job(
+            name="attn",
+            type=JobType.SFT,
+            framework=Framework.LLAMAFACTORY,
+            owner_id="usr_keys",
+            resources=ResourceSpec(n_gpus=1),
+            sft=config,
+        )
+        result = lf_builder.build(job, tmp_path / f"attn-{value}", tmp_path / "o")
+        emitted = yaml.safe_load(result.files["train_config.yaml"])["flash_attn"]
+        assert emitted == value
+        assert emitted in allowed, f"LLaMA-Factory 不接受 flash_attn={emitted}"
+
+    # auto 表示交给框架自己判断，不该出现在配置里
+    config = SFTConfig(model_path="/tmp/model", dataset_ids=[sft_dataset.id], flash_attn="auto")
+    job = Job(
+        name="attn-auto",
+        type=JobType.SFT,
+        framework=Framework.LLAMAFACTORY,
+        owner_id="usr_keys",
+        resources=ResourceSpec(n_gpus=1),
+        sft=config,
+    )
+    result = lf_builder.build(job, tmp_path / "attn-auto", tmp_path / "o")
+    assert "flash_attn" not in yaml.safe_load(result.files["train_config.yaml"])
+
+
+def test_rl_attn_auto_falls_back_when_flash_attn_missing(tmp_path, parquet_dataset, monkeypatch):
+    """auto 必须问过环境。
+
+    发 ``flash_attention_2`` 到没装 flash-attn 的环境里，transformers 是在**加载模型时**
+    才抛 `FlashAttention2 has been toggled on, but it cannot be used`——
+    任务会先白排队几分钟。所以 auto 要在生成命令时就探测并回落。
+    """
+    from backend.app.builders import trl as trl_builder
+    from backend.app.builders.base import resolve_attn_implementation
+    from backend.app.services import resources_service
+
+    def make_job(framework: Framework, attn: str) -> Job:
+        return Job(
+            name="attn-auto",
+            type=JobType.RL,
+            framework=framework,
+            owner_id="usr_keys",
+            resources=ResourceSpec(n_gpus=1),
+            rl=RLConfig(
+                framework=framework,
+                algorithm=TrainStage.GRPO,
+                model_path="/tmp/model",
+                dataset_id=parquet_dataset.id,
+                attn_implementation=attn,
+            ),
+        )
+
+    for available, expected in ((False, "sdpa"), (True, "flash_attention_2")):
+        monkeypatch.setattr(resources_service, "has_flash_attn", lambda _bin, v=available: v)
+
+        resolved, note = resolve_attn_implementation("auto", "/fake/python")
+        assert resolved == expected, note
+
+        verl_result = verl_builder.build(
+            make_job(Framework.VERL, "auto"), tmp_path / f"verl-auto-{expected}", tmp_path / "o"
+        )
+        assert (
+            f"+actor_rollout_ref.model.override_config.attn_implementation={expected}"
+            in verl_result.command
+        )
+
+        trl_result = trl_builder.build(
+            make_job(Framework.TRL, "auto"), tmp_path / f"trl-auto-{expected}", tmp_path / "o"
+        )
+        body = next(iter(trl_result.files.values()))
+        assert f'"attn_implementation": "{expected}"' in body
+
+    # "default" 表示完全不下发
+    monkeypatch.setattr(resources_service, "has_flash_attn", lambda _bin: False)
+    assert resolve_attn_implementation("default", "/fake/python") == ("", "")
+    verl_result = verl_builder.build(
+        make_job(Framework.VERL, "default"), tmp_path / "verl-default", tmp_path / "o"
+    )
+    assert not any("attn_implementation" in part for part in verl_result.command)
+
+    # 显式指定就照发，但要在 notes 里警告环境不匹配
+    resolved, note = resolve_attn_implementation("flash_attention_2", "/fake/python")
+    assert resolved == "flash_attention_2"
+    assert "flash-attn" in note
+
+
+def test_trl_attn_implementation_goes_through_model_init_kwargs(tmp_path, parquet_dataset):
+    """TRL 没有 attn_implementation 参数，只能塞进 model_init_kwargs。"""
+    from backend.app.builders import trl as trl_builder
+
+    config = RLConfig(
+        framework=Framework.TRL,
+        algorithm=TrainStage.GRPO,
+        model_path="/tmp/model",
+        dataset_id=parquet_dataset.id,
+        attn_implementation="flash_attention_2",
+    )
+    job = Job(
+        name="trl-attn",
+        type=JobType.RL,
+        framework=Framework.TRL,
+        owner_id="usr_keys",
+        resources=ResourceSpec(n_gpus=1),
+        rl=config,
+    )
+    script = trl_builder.build(job, tmp_path / "trl-attn", tmp_path / "o")
+    body = next(iter(script.files.values()))
+    assert '"model_init_kwargs"' in body
+    assert '"attn_implementation": "flash_attention_2"' in body
+
+    grpo_config = settings.trl_root / "trl" / "trainer" / "grpo_config.py"
+    if grpo_config.is_file():
+        source = grpo_config.read_text(encoding="utf-8")
+        assert "model_init_kwargs" in source
+        assert "attn_implementation:" not in source  # 确认它不是一个顶层字段
+
+
 def _flatten(node, prefix: str = "") -> set[str]:
     keys: set[str] = set()
     if isinstance(node, dict):
@@ -167,11 +336,32 @@ def _flatten(node, prefix: str = "") -> set[str]:
     return keys
 
 
+def _open_dicts(node, prefix: str = "") -> set[str]:
+    """Config nodes that are declared as an empty mapping.
+
+    verl leaves a few of these (``model.override_config``) as free-form dicts the
+    user is meant to fill in, so a ``+parent.child=value`` override is legitimate
+    even though ``child`` is nowhere in the config tree.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if isinstance(value, dict):
+                if not value:
+                    found.add(path)
+                else:
+                    found |= _open_dicts(value, path)
+    return found
+
+
 def test_verl_override_paths_exist(tmp_path, parquet_dataset):
     generated = settings.verl_root / "verl" / "trainer" / "config" / "_generated_ppo_trainer.yaml"
     if not generated.is_file():
         pytest.skip("verl 源码不可用")
-    known = _flatten(yaml.safe_load(generated.read_text(encoding="utf-8")))
+    tree = yaml.safe_load(generated.read_text(encoding="utf-8"))
+    known = _flatten(tree)
+    free_form = _open_dicts(tree)
 
     emitted: set[str] = set()
     for algorithm in (TrainStage.GRPO, TrainStage.DAPO, TrainStage.PPO, TrainStage.RLOO):
@@ -183,6 +373,7 @@ def test_verl_override_paths_exist(tmp_path, parquet_dataset):
             use_kl_loss=True,
             filter_groups_enable=True,
             total_training_steps=100,
+            attn_implementation="sdpa",
             custom_reward_function_path="/tmp/reward.py",
             custom_reward_function_name="compute_score",
         )
@@ -198,8 +389,20 @@ def test_verl_override_paths_exist(tmp_path, parquet_dataset):
         for part in result.command[3:]:
             emitted.add(part.split("=", 1)[0])
 
-    unknown = sorted(key for key in emitted if key not in known)
+    unknown = sorted(key for key in emitted if not _known_override(key, known, free_form))
     assert not unknown, f"verl 配置树里不存在这些 Hydra 覆盖路径: {unknown}"
+    # attn_implementation 只能靠 "+" 塞进 override_config，退化成普通覆盖会直接报错
+    assert any(
+        key == "+actor_rollout_ref.model.override_config.attn_implementation" for key in emitted
+    )
+
+
+def _known_override(key: str, known: set[str], free_form: set[str]) -> bool:
+    if key.startswith("+"):
+        path = key[1:]
+        parent = path.rsplit(".", 1)[0]
+        return parent in free_form
+    return key in known
 
 
 def _harbor_run_flags() -> set[str]:

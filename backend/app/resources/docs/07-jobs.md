@@ -1,7 +1,7 @@
 ---
 title: 任务状态与排查
 category: 训练
-order: 5
+order: 7
 summary: 状态机、任务为什么不跑、失败了怎么定位
 ---
 

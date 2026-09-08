@@ -102,12 +102,18 @@ class Scheduler:
             refresh_metrics(job)
 
     # -------------------------------------------------------------- dispatch
-    def busy_gpu_ids(self) -> set[int]:
+    def busy_gpu_ids(self, *, include_deployments: bool = True) -> set[int]:
         busy: set[int] = set()
         for job in store.jobs.find(
             lambda j: j.status in {JobStatus.RUNNING, JobStatus.PREPARING}
         ):
             busy.update(job.resources.gpu_ids)
+        if include_deployments:
+            # 常驻的 vLLM 服务同样占着显存，不能把卡再分给训练。
+            # 延迟导入：deployment_service 反过来要问 scheduler 要总卡数。
+            from . import deployment_service
+
+            busy.update(deployment_service.busy_gpu_ids())
         return busy
 
     def free_gpu_ids(self) -> list[int]:
@@ -227,11 +233,16 @@ def refresh_metrics(job: Job) -> Job:
 
 
 def gpu_snapshot() -> dict:
+    from . import deployment_service
+
     busy = scheduler.busy_gpu_ids()
     assignments: dict[int, str] = {}
     for job in store.jobs.find(lambda j: j.status in {JobStatus.RUNNING, JobStatus.PREPARING}):
         for gpu_id in job.resources.gpu_ids:
             assignments[gpu_id] = job.id
+    for deployment in deployment_service.list_deployments(active_only=True):
+        for gpu_id in deployment.gpu_ids:
+            assignments[gpu_id] = deployment.id
     return {
         "total": scheduler.total_gpus,
         "busy": sorted(busy),

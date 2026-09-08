@@ -89,7 +89,10 @@ class SFTConfig(Base):
     # precision / memory
     compute_type: Literal["bf16", "fp16", "fp32", "pure_bf16"] = "bf16"
     quantization_bit: int | None = None
-    flash_attn: Literal["auto", "disabled", "sdpa", "fa2"] = "auto"
+    # 取值对应 LLaMA-Factory 的 AttentionFunction 枚举：auto 交给框架自己探测，
+    # fa2/fa3 需要装 flash-attn（fa3 只在 Hopper 及更新的卡上可用），
+    # sdpa 是 PyTorch 自带的高效实现，没装 flash-attn 也能提速。
+    flash_attn: Literal["auto", "disabled", "sdpa", "fa2", "fa3"] = "auto"
     gradient_checkpointing: bool = True
     deepspeed_stage: Literal["none", "zero2", "zero3", "zero3_offload"] = "none"
     liger_kernel: bool = False
@@ -180,6 +183,10 @@ class RLConfig(Base):
     harbor: HarborEnvSpec = Field(default_factory=HarborEnvSpec)
 
     # engine / parallelism
+    # auto（默认）：装了 flash-attn 就用 flash_attention_2，否则回落到 sdpa ——
+    # 直接把 flash_attention_2 当默认值会在没装 flash-attn 的机器上，
+    # 白排队几分钟才在加载模型时报错。default 表示平台不下发这个参数。
+    attn_implementation: Literal["auto", "flash_attention_2", "sdpa", "eager", "default"] = "auto"
     strategy: Literal["fsdp", "fsdp2", "megatron"] = "fsdp2"
     param_offload: bool = False
     optimizer_offload: bool = False
@@ -331,6 +338,7 @@ class Job(Base):
 
     owner_id: str
     owner_email: str = ""
+    project_id: str = ""  # 任务必须归属一个项目
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
     queued_at: datetime | None = None
@@ -369,6 +377,7 @@ class JobCreate(Base):
     name: str = Field(min_length=1, max_length=120)
     note: str = ""
     type: JobType
+    project_id: str = ""
     tags: list[str] = Field(default_factory=list)
     resources: ResourceSpec = Field(default_factory=ResourceSpec)
     sft: SFTConfig | None = None

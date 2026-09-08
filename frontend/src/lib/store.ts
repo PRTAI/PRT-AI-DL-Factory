@@ -47,6 +47,31 @@ export const useAuth = create<AuthState>((set) => ({
   },
 }))
 
+// --------------------------------------------------------------------------- //
+// 当前项目：像 wandb / swanlab 一样，先选项目再干活。
+// 只存 id，项目详情交给 react-query 缓存，避免两份数据不一致。
+// --------------------------------------------------------------------------- //
+const PROJECT_KEY = 'prt.project'
+
+interface ProjectState {
+  projectId: string
+  setProject: (id: string) => void
+  clearProject: () => void
+}
+
+export const useProject = create<ProjectState>((set) => ({
+  projectId: localStorage.getItem(PROJECT_KEY) ?? '',
+  setProject: (id) => {
+    if (id) localStorage.setItem(PROJECT_KEY, id)
+    else localStorage.removeItem(PROJECT_KEY)
+    set({ projectId: id })
+  },
+  clearProject: () => {
+    localStorage.removeItem(PROJECT_KEY)
+    set({ projectId: '' })
+  },
+}))
+
 interface UiState {
   theme: Theme
   sidebarCollapsed: boolean

@@ -15,7 +15,7 @@ from ..config import settings
 from ..models import DatasetKind, Job, RLConfig, TrainStage
 from ..services import dataset_service
 from ..store import store
-from .base import BuildError, BuildResult
+from .base import BuildError, BuildResult, resolve_attn_implementation
 
 # our algorithm name -> verl algorithm.adv_estimator
 _ADV_ESTIMATOR = {
@@ -70,6 +70,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         val_files = train_files[:1]
 
     n_gpus = max(1, job.resources.n_gpus)
+    python_bin = settings.python_for("verl")
     notes: list[str] = []
     is_dapo = config.algorithm == TrainStage.DAPO
 
@@ -125,6 +126,14 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         f"trainer.default_local_dir={output_dir}",
     ]
 
+    # HFModelConfig 读的是 override_config["attn_implementation"]（它自己默认 flash_attention_2），
+    # override_config 在 yaml 里是空字典，所以只能用 Hydra 的 "+" 新增键。
+    attn, attn_note = resolve_attn_implementation(config.attn_implementation, python_bin)
+    if attn:
+        overrides.append(f"+actor_rollout_ref.model.override_config.attn_implementation={attn}")
+    if attn_note:
+        notes.append(attn_note)
+
     if config.total_training_steps:
         overrides.append(f"trainer.total_training_steps={config.total_training_steps}")
 
@@ -159,10 +168,12 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     for key, value in config.extra_args.items():
         overrides.append(f"{key}={value}")
 
-    python_bin = settings.python_for("verl")
+    # 不设 VLLM_ATTENTION_BACKEND：这个变量在本机装的 vLLM 0.28 里已经不存在
+    # （`vllm.envs.environment_variables` 里查不到），设了只会被当成无法识别的
+    # VLLM_ 变量并告警。rollout 用的是 vLLM 自带的 vllm_flash_attn，
+    # 和训练侧的 flash-attn 是两回事，不需要我们指定。
     env = {
         "PYTHONPATH": str(root),
-        "VLLM_ATTENTION_BACKEND": "FLASH_ATTN",
         "TOKENIZERS_PARALLELISM": "false",
         "RAY_TMPDIR": str(work_dir / "ray_tmp"),
         "HYDRA_FULL_ERROR": "1",

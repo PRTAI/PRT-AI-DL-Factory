@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { setUnauthorizedHandler, setToken } from '@/lib/api'
 import { useAuth } from '@/lib/store'
 import { AppShell } from '@/components/AppShell'
+import { ProjectGate } from '@/components/ProjectGate'
 import { Spinner } from '@/components/ui'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
@@ -12,6 +13,8 @@ import SubmitTraining from '@/pages/SubmitTraining'
 import SubmitVerify from '@/pages/SubmitVerify'
 import Datasets from '@/pages/Datasets'
 import Models from '@/pages/Models'
+import Projects from '@/pages/Projects'
+import Deployments from '@/pages/Deployments'
 import Admin from '@/pages/Admin'
 import ProfileSettings from '@/pages/ProfileSettings'
 import Docs from '@/pages/Docs'
@@ -75,12 +78,29 @@ export default function App() {
         }
       >
         <Route path="/" element={<Dashboard />} />
+        <Route path="/projects" element={<Projects />} />
         <Route path="/jobs" element={<Jobs />} />
         <Route path="/jobs/:jobId" element={<JobDetail />} />
-        <Route path="/submit/train" element={<SubmitTraining />} />
-        <Route path="/submit/verify" element={<SubmitVerify />} />
+        {/* 任务必须归属项目，所以提交页先过项目闸门 */}
+        <Route
+          path="/submit/train"
+          element={
+            <ProjectGate>
+              <SubmitTraining />
+            </ProjectGate>
+          }
+        />
+        <Route
+          path="/submit/verify"
+          element={
+            <ProjectGate>
+              <SubmitVerify />
+            </ProjectGate>
+          }
+        />
         <Route path="/datasets" element={<Datasets />} />
         <Route path="/models" element={<Models />} />
+        <Route path="/deployments" element={<Deployments />} />
         <Route
           path="/admin"
           element={

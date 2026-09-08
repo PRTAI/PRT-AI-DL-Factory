@@ -1,7 +1,7 @@
 ---
 title: 管理员指南
 category: 管理
-order: 6
+order: 8
 summary: 建账号、审核任务、配额与工具链健康
 ---
 

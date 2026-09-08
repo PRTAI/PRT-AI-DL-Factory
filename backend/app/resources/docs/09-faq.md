@@ -1,7 +1,7 @@
 ---
 title: 常见问题
 category: 管理
-order: 7
+order: 9
 summary: 登录、上传、训练、评测里最常踩的坑
 ---
 
