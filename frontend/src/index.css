@@ -1,16 +1,17 @@
 @import 'tailwindcss';
 
 /* ---------------------------------------------------------------------------
-   PRT AI DL Factory — design tokens
+   PRT AI DL Factory — design tokens（蓝白配色）
 
-   Direction from ui-ux-pro-max: "Developer Tool / IDE" dark surface
-   (#0F172A base, #1B2336 cards) + AI-native violet (#7C3AED) as the brand
-   colour and run-green (#22C55E) for healthy/running states.
-   Density dial 8/10 → compact 4/8/12/16/24 spacing rhythm.
+   主色取自 ui-ux-pro-max 的 "CRM & Client Management" 配色：
+   primary #2563EB / card #FFFFFF / background #F8FAFC / border #E4ECFC，
+   浅色为默认主题；深色主题保留为可选项，同样收敛到蓝色系（不再用紫色）。
 
-   Runtime theme switching works because @theme inline forwards the utilities
-   to the plain CSS variables below, which the .theme-dark / .theme-light
-   classes on <html> redefine.
+   状态色（成功绿 / 警告琥珀 / 危险红）保持语义化，不跟着变蓝——
+   任务状态是这套系统最需要一眼分辨的信息，牺牲它去凑配色不划算。
+
+   运行时换肤靠 @theme inline 把工具类转发到下面的 CSS 变量，
+   .theme-light / .theme-dark 加在 <html> 上即可整体切换。
 --------------------------------------------------------------------------- */
 
 @theme inline {
@@ -53,25 +54,63 @@
   --radius-card: 12px;
 }
 
+/* ---------------------------------- 浅色（默认：蓝 + 白） ---------------- */
 :root,
+.theme-light {
+  color-scheme: light;
+
+  --bg: #f5f8fd;
+  --bg-elevated: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f1f5fd;
+  --muted: #eef3fc;
+  --border: #dde7f8;
+  --border-strong: #b7c9e6;
+
+  --fg: #0f172a;
+  --fg-muted: #475569;
+  --fg-subtle: #64748b;
+
+  --primary: #2563eb;
+  --primary-fg: #ffffff;
+  --primary-soft: rgb(37 99 235 / 0.09);
+
+  --success: #15803d;
+  --success-soft: rgb(21 128 61 / 0.11);
+  --warning: #b45309;
+  --warning-soft: rgb(180 83 9 / 0.11);
+  --danger: #dc2626;
+  --danger-soft: rgb(220 38 38 / 0.1);
+  --info: #0369a1;
+  --info-soft: rgb(3 105 161 / 0.1);
+
+  --chart-1: #2563eb;
+  --chart-2: #0891b2;
+  --chart-3: #0d9488;
+  --chart-4: #4f46e5;
+  --chart-5: #b45309;
+  --chart-6: #64748b;
+}
+
+/* ---------------------------------- 深色（可选，同样是蓝色系） ---------- */
 .theme-dark {
   color-scheme: dark;
 
-  --bg: #0f172a;
-  --bg-elevated: #131c2f;
-  --card: #1b2336;
-  --card-hover: #212b42;
-  --muted: #272f42;
-  --border: #2f3d55;
-  --border-strong: #475569;
+  --bg: #0b1220;
+  --bg-elevated: #101a2c;
+  --card: #131e33;
+  --card-hover: #1a2740;
+  --muted: #1e2b45;
+  --border: #27364f;
+  --border-strong: #41546f;
 
-  --fg: #f8fafc;
-  --fg-muted: #94a3b8;
-  --fg-subtle: #64748b;
+  --fg: #f1f5f9;
+  --fg-muted: #9aabc2;
+  --fg-subtle: #7889a1;
 
-  --primary: #8b5cf6;
+  --primary: #3b82f6;
   --primary-fg: #ffffff;
-  --primary-soft: rgb(139 92 246 / 0.16);
+  --primary-soft: rgb(59 130 246 / 0.18);
 
   --success: #22c55e;
   --success-soft: rgb(34 197 94 / 0.16);
@@ -82,48 +121,12 @@
   --info: #38bdf8;
   --info-soft: rgb(56 189 248 / 0.16);
 
-  --chart-1: #8b5cf6;
+  --chart-1: #60a5fa;
   --chart-2: #22d3ee;
-  --chart-3: #34d399;
-  --chart-4: #fbbf24;
-  --chart-5: #fb7185;
-  --chart-6: #60a5fa;
-}
-
-.theme-light {
-  color-scheme: light;
-
-  --bg: #f4f6fb;
-  --bg-elevated: #ffffff;
-  --card: #ffffff;
-  --card-hover: #f1f5f9;
-  --muted: #eef2f8;
-  --border: #dbe2ec;
-  --border-strong: #b9c4d4;
-
-  --fg: #0f172a;
-  --fg-muted: #52627a;
-  --fg-subtle: #7a8798;
-
-  --primary: #6d28d9;
-  --primary-fg: #ffffff;
-  --primary-soft: rgb(109 40 217 / 0.1);
-
-  --success: #15803d;
-  --success-soft: rgb(21 128 61 / 0.12);
-  --warning: #b45309;
-  --warning-soft: rgb(180 83 9 / 0.12);
-  --danger: #dc2626;
-  --danger-soft: rgb(220 38 38 / 0.12);
-  --info: #0369a1;
-  --info-soft: rgb(3 105 161 / 0.12);
-
-  --chart-1: #6d28d9;
-  --chart-2: #0891b2;
-  --chart-3: #059669;
-  --chart-4: #b45309;
-  --chart-5: #be123c;
-  --chart-6: #1d4ed8;
+  --chart-3: #2dd4bf;
+  --chart-4: #818cf8;
+  --chart-5: #fbbf24;
+  --chart-6: #94a3b8;
 }
 
 @layer base {
@@ -162,13 +165,13 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--border);
+    background: var(--border-strong);
     border-radius: 999px;
     border: 2px solid transparent;
     background-clip: content-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--border-strong);
+    background: var(--fg-subtle);
     background-clip: content-box;
   }
 
@@ -192,11 +195,20 @@
     border-radius: var(--radius-card);
   }
 
+  /* 浅色下给卡片一点极轻的投影，避免白卡片贴在浅底上失去层次 */
+  .theme-light .card {
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  }
+
   .surface-grid {
     background-image:
       linear-gradient(var(--border) 1px, transparent 1px),
       linear-gradient(90deg, var(--border) 1px, transparent 1px);
     background-size: 32px 32px;
+    opacity: 0.5;
+  }
+
+  .theme-dark .surface-grid {
     opacity: 0.25;
   }
 

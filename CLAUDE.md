@@ -40,8 +40,9 @@ python scripts/gen_framework_support.py
 - 解析框架日志的代码（`services/metrics_parser.py`）必须是防御式的：
   任何异常都返回空结果，绝不能影响正在运行的任务。
 - 前端设计令牌集中在 `frontend/src/index.css`（`@theme inline` + CSS 变量），
-  组件里不要写死颜色，用 `bg-card` / `text-fg-muted` 这类语义类名，
-  否则浅色主题会失效。
+  组件里不要写死颜色，用 `bg-card` / `text-fg-muted` / `bg-primary` 这类语义类名，
+  否则换肤会失效。配色是**蓝白**：primary `#2563EB`，浅色为默认主题，
+  深色主题同样收敛在蓝色系；状态色（成功绿/警告琥珀/危险红）保持语义化不跟着变蓝。
 
 ## 本机环境（已装好，勿重复安装）
 

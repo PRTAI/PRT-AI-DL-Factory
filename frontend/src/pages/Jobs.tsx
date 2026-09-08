@@ -182,7 +182,7 @@ export default function Jobs() {
             <thead>
               <tr>
                 <Th>任务</Th>
-                <Th className="w-36">类型</Th>
+                <Th className="w-44">类型</Th>
                 <Th className="w-24">状态</Th>
                 <Th className="w-44">进度</Th>
                 <Th className="w-24">GPU</Th>

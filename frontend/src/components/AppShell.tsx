@@ -21,7 +21,7 @@ import {
 import { api } from '@/lib/api'
 import { useAuth, useUi } from '@/lib/store'
 import { cn, formatRelative } from '@/lib/utils'
-import { Badge, Button, Separator, Tooltip, TooltipProvider } from './ui'
+import { Button, Separator, Tooltip, TooltipProvider } from './ui'
 
 interface NavItem {
   to: string
@@ -133,7 +133,7 @@ export function AppShell() {
                               'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
                               sidebarCollapsed && 'justify-center px-0',
                               isActive
-                                ? 'bg-primary-soft font-medium text-primary'
+                                ? 'bg-primary font-medium text-primary-fg shadow-sm'
                                 : 'text-fg-muted hover:bg-muted hover:text-fg',
                             )
                           }
@@ -145,9 +145,9 @@ export function AppShell() {
                             item.to === '/jobs' &&
                             user.role === 'admin' &&
                             (overview.data?.pending_review ?? 0) > 0 && (
-                              <Badge tone="warning" className="ml-auto">
+                              <span className="ml-auto rounded-md bg-warning px-1.5 py-0.5 text-[10px] font-semibold leading-4 text-white">
                                 {overview.data?.pending_review}
-                              </Badge>
+                              </span>
                             )}
                         </NavLink>
                       </li>

@@ -4,7 +4,7 @@
 训练与 Harbor Agent 评测，平台负责生成框架命令、审核排队、分配 GPU、回传日志与指标。
 
 - **后端** FastAPI（Python 3.12），文件存储，可平滑迁移到 MySQL
-- **前端** React 19 + Vite + Tailwind v4 + Radix，深色优先，实时折线图
+- **前端** React 19 + Vite + Tailwind v4 + Radix，蓝白配色（浅色默认，可一键切深色），实时折线图
 - **训练框架** LLaMA-Factory（SFT/DPO/KTO/ORPO/SimPO）、verl（GRPO/DAPO/PPO/RLOO/…）、TRL（GRPO/GSPO + Harbor agentic RL）
 - **评测框架** Harbor（pass@k、并发、任意 agent、reward-kit judge）
 

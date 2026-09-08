@@ -63,7 +63,9 @@ function applyTheme(theme: Theme) {
   localStorage.setItem(THEME_KEY, theme)
 }
 
-const initialTheme: Theme = (localStorage.getItem(THEME_KEY) as Theme) || 'dark'
+// 蓝白配色：默认浅色；用户切换过的话尊重其选择
+const stored = localStorage.getItem(THEME_KEY) as Theme | null
+const initialTheme: Theme = stored === 'dark' || stored === 'light' ? stored : 'light'
 applyTheme(initialTheme)
 
 export const useUi = create<UiState>((set, get) => ({
