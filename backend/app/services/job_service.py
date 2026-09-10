@@ -154,9 +154,24 @@ def _check_kind(dataset, stage: TrainStage) -> None:
         )
 
 
+def _check_learning_rate(value: float, *, upper: float, label: str) -> None:
+    """离谱的学习率在提交时就拦下。
+
+    真机回归：数字框把 1e-6 显示成 0.000001，用户一编辑就提交成了 1.000001 ——
+    这种值 RL 一步就把模型训炸，排队几分钟后才发现太浪费。
+    """
+    if not (0 < value <= upper):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"{label}学习率 {value:g} 不合理（应在 0 到 {upper:g} 之间，常用量级 1e-6 ~ 1e-4）。"
+            "输入框支持科学计数法，直接输 1e-6 即可。",
+        )
+
+
 def _validate_sft(payload: JobCreate) -> None:
     config = payload.sft
     assert config is not None
+    _check_learning_rate(config.learning_rate, upper=0.1, label="SFT ")
     config.model_path = model_service.resolve_model_path(config.model_id, config.model_path)
     if not config.dataset_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请至少选择一个训练数据集")
@@ -176,6 +191,7 @@ def _validate_sft(payload: JobCreate) -> None:
 def _validate_rl(payload: JobCreate) -> None:
     config = payload.rl
     assert config is not None
+    _check_learning_rate(config.learning_rate, upper=0.01, label="RL ")
     config.model_path = model_service.resolve_model_path(config.model_id, config.model_path)
     if not config.dataset_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择训练数据集")

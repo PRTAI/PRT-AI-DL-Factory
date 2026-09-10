@@ -17,6 +17,7 @@ import {
   Field,
   Input,
   NumberInput,
+  ScientificInput,
   Select,
   Textarea,
   ToggleRow,
@@ -655,7 +656,7 @@ function SftParams({ sft, setSft }: { sft: SFTConfig; setSft: React.Dispatch<Rea
           />
         </Field>
         <Field label="学习率" hint={isPreference ? '偏好对齐建议 5e-6 量级' : 'LoRA 1e-4，全参 1e-5'}>
-          <NumberInput value={sft.learning_rate} onChange={(value) => patch({ learning_rate: value ?? 0 })} />
+          <ScientificInput value={sft.learning_rate} onChange={(value) => patch({ learning_rate: value ?? 0 })} placeholder="1e-4" />
         </Field>
         <Field label="训练轮数 epochs">
           <NumberInput value={sft.num_train_epochs} step="0.5" onChange={(value) => patch({ num_train_epochs: value ?? 1 })} />
@@ -903,8 +904,8 @@ function RlParams({ rl, setRl }: { rl: RLConfig; setRl: React.Dispatch<React.Set
   return (
     <div className="space-y-4">
       <Grid cols={3}>
-        <Field label="学习率" hint="RL 学习率远小于 SFT，常用 1e-6">
-          <NumberInput value={rl.learning_rate} onChange={(value) => patch({ learning_rate: value ?? 1e-6 })} />
+        <Field label="学习率" hint="RL 学习率远小于 SFT，常用 1e-6；可以直接输 1e-6">
+          <ScientificInput value={rl.learning_rate} onChange={(value) => patch({ learning_rate: value ?? 1e-6 })} placeholder="1e-6" />
         </Field>
         <Field label="训练 batch size" hint="每次迭代采样的 prompt 数">
           <NumberInput value={rl.train_batch_size} min={1} onChange={(value) => patch({ train_batch_size: value ?? 64 })} />

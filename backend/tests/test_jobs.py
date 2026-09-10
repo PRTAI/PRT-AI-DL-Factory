@@ -309,3 +309,18 @@ def test_trials_endpoint_rejects_training_jobs(client, member_headers, dataset_i
     job = client.post("/api/jobs", headers=member_headers, json=_sft_payload(dataset_id)).json()
     response = client.get(f"/api/jobs/{job['id']}/trials", headers=member_headers)
     assert response.status_code == 400
+
+
+def test_absurd_learning_rate_is_rejected(client, member_headers, dataset_id):
+    """真机回归：学习率被数字框改成 1.000001 提交了进去。"""
+    payload = _sft_payload(dataset_id)
+    payload["sft"]["learning_rate"] = 1.000001
+    response = client.post("/api/jobs", headers=member_headers, json=payload)
+    assert response.status_code == 400
+    assert "学习率" in response.json()["detail"] and "1e-6" in response.json()["detail"]
+
+    payload["sft"]["learning_rate"] = 0
+    assert client.post("/api/jobs", headers=member_headers, json=payload).status_code == 400
+
+    payload["sft"]["learning_rate"] = 1e-4
+    assert client.post("/api/jobs", headers=member_headers, json=payload).status_code == 201

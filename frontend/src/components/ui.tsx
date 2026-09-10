@@ -181,6 +181,55 @@ export function NumberInput({
   )
 }
 
+/**
+ * 能直接输 `1e-6` 的数字框，给学习率这种量级很小的参数用。
+ *
+ * 原生 <input type="number"> 会把 1e-6 渲染成 0.000001，光标一进去随便敲一下就变成
+ * 1.000001 —— 真机上一次 GRPO 就是这么把学习率提交成 1.0 的。
+ */
+export function ScientificInput({
+  value,
+  onChange,
+  className,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
+  value: number | null | undefined
+  onChange: (value: number | null) => void
+}) {
+  const format = (v: number | null | undefined) =>
+    v === null || v === undefined ? '' : Math.abs(v) < 1e-3 && v !== 0 ? v.toExponential().replace('e-', 'e-').replace('+', '') : String(v)
+  const [text, setText] = React.useState(() => format(value))
+  const [invalid, setInvalid] = React.useState(false)
+  // 外部值变了（比如切换算法重置默认值）就同步显示；自己正在输入时不打断
+  React.useEffect(() => {
+    if (!invalid && Number(text) !== value) setText(format(value))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={text}
+      onChange={(event) => {
+        const raw = event.target.value.trim()
+        setText(event.target.value)
+        if (raw === '') {
+          setInvalid(false)
+          onChange(null)
+          return
+        }
+        const parsed = Number(raw)
+        const ok = Number.isFinite(parsed)
+        setInvalid(!ok)
+        if (ok) onChange(parsed)
+      }}
+      aria-invalid={invalid || undefined}
+      className={cn(FIELD_BASE, 'num h-9', invalid && 'border-danger focus:border-danger', className)}
+      {...props}
+    />
+  )
+}
+
 export function Field({
   label,
   hint,
