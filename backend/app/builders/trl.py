@@ -15,6 +15,7 @@ is reproducible from the job work dir.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from ..config import settings
@@ -160,6 +161,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     n_gpus = max(1, job.resources.n_gpus)
     use_harbor = config.harbor.enabled or dataset.kind == DatasetKind.HARBOR_TASKS
     notes: list[str] = []
+    extra_files: dict[str, str] = {}
+    harbor_pythonpath: list[str] = []
     # 必须在渲染脚本之前定下来：配置是以字面量嵌进生成脚本里的，
     # 渲染完再改 dict 不会反映到脚本内容里。
     attn, attn_note = resolve_attn_implementation(
@@ -174,6 +177,9 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         if config.algorithm not in {TrainStage.GRPO, TrainStage.DAPO, TrainStage.GSPO}:
             raise BuildError("Harbor 环境模式目前只支持 GRPO / GSPO")
         script_name = "train_harbor_grpo.py"
+        harbor_files, harbor_meta_dir = _harbor_import_files(notes)
+        extra_files.update(harbor_files)
+        harbor_pythonpath = [str(work_dir / harbor_meta_dir), str(settings.harbor_root / "src")]
         trainer_config = _drop_unknown_keys(
             _grpo_config(job, config, output_dir, agentic=True, attn=attn), "GRPOConfig", notes
         )
@@ -252,8 +258,10 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     else:
         command = [python_bin, script_name]
 
+    # trl 检出放最前面，保证跑的是团队那份代码；harbor 的两条只提供 harbor 包与它的元数据，
+    # 不含其他包，不会遮蔽 trl 环境里已装好的依赖。
     env = {
-        "PYTHONPATH": str(root),
+        "PYTHONPATH": os.pathsep.join([str(root), *harbor_pythonpath]),
         "TOKENIZERS_PARALLELISM": "false",
         "ACCELERATE_LOG_LEVEL": "info",
     }
@@ -273,7 +281,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         command=command,
         cwd=str(work_dir),
         env=env,
-        files={script_name: script},
+        files={script_name: script, **extra_files},
         output_dir=str(output_dir),
         notes=notes,
     )
@@ -307,6 +315,50 @@ def _tabular_files(dataset, config: RLConfig) -> tuple[list[str], list[str]]:
         if eval_dataset is not None:
             evals = [str(Path(eval_dataset.root_path) / f.path) for f in eval_dataset.files]
     return train, evals
+
+
+def _harbor_import_files(notes: list[str]) -> tuple[dict[str, str], str]:
+    """让 trl 环境能 ``import harbor``。
+
+    Harbor agentic RL 是在**训练进程内**起沙箱的（``HarborSpec`` →
+    ``harbor.environments.factory``），所以 harbor 必须能被 trl 那个解释器导入。
+    但不能往 trl 环境里 pip install harbor：它会把 openai 3.8 降到 2.54、
+    websockets 17 降到 15，而 vllm 依赖这两个。
+
+    所以照平台一贯的做法——代码走 PYTHONPATH 指向团队检出。唯一的坎是
+    ``harbor/__init__.py`` 会 ``importlib.metadata.version("harbor")``，光有代码会
+    ``PackageNotFoundError``；这里顺手在工作目录里生成一份最小的 ``.dist-info``，
+    版本号取自检出自己的 pyproject。
+
+    返回 ``(要写进工作目录的文件, 相对的元数据目录名)``。
+    """
+    src = settings.harbor_root / "src"
+    if not (src / "harbor").is_dir():
+        raise BuildError(
+            f"Harbor 源码目录无效: {settings.harbor_root}（Harbor 环境模式需要在训练进程内 import harbor）"
+        )
+
+    version = ""
+    pyproject = settings.harbor_root / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            import tomllib
+
+            version = str(tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"])
+        except Exception:  # noqa: BLE001 - 版本号读不到不该拦住任务
+            version = ""
+    version = version or "0.0.0"
+
+    meta_dir = "harbor_meta"
+    files = {
+        f"{meta_dir}/harbor-{version}.dist-info/METADATA": (
+            f"Metadata-Version: 2.1\nName: harbor\nVersion: {version}\n"
+        ),
+    }
+    notes.append(
+        f"harbor {version} 通过 PYTHONPATH 指向检出（不装进 trl 环境，避免把 openai/websockets 降级）"
+    )
+    return files, meta_dir
 
 
 def _group_batch(prompts: int, group_size: int, n_gpus: int) -> tuple[int, int, int]:

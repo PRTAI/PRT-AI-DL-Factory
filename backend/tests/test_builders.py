@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -400,6 +401,8 @@ def test_generated_trl_scripts_are_valid_python(tmp_path, harbor_dataset, parque
         job = _job(JobType.RL, Framework.TRL, rl=config)
         result = trl_builder.build(job, tmp_path / f"w-{name}", tmp_path / "o")
         for filename, source in result.files.items():
+            if not filename.endswith(".py"):
+                continue  # harbor 模式还会写一份 dist-info 元数据
             compile(source, filename, "exec")  # 语法错就在这里炸，而不是排队几分钟后
             assert "true" not in source.split("CONFIG = ")[1].split("\n\n")[0].replace("True", "")
             assert "null" not in source
@@ -441,3 +444,40 @@ def test_trl_generation_batch_is_divisible_by_group_size(tmp_path, parquet_datas
         assert generation_batch % cfg["num_generations"] == 0, cfg
         # RLOOConfig 没有 loss_type
         assert ("loss_type" in cfg) == (algorithm != TrainStage.RLOO)
+
+
+def test_trl_harbor_mode_makes_harbor_importable(tmp_path, harbor_dataset):
+    """真机回归：训练循环跑起来后在 HarborSpec.reset() 里
+    `ModuleNotFoundError: No module named 'harbor'`。
+
+    Harbor agentic RL 在训练进程内起沙箱，所以 harbor 必须能被 trl 的解释器导入；
+    但不能 pip 装进 trl 环境（会把 openai/websockets 降级，vllm 依赖它们）。
+    """
+    from backend.app.config import settings
+
+    config = RLConfig(
+        framework=Framework.TRL, algorithm=TrainStage.GRPO, model_path="/tmp/m",
+        dataset_id=harbor_dataset.id,
+    )
+    config.harbor.enabled = True
+    job = _job(JobType.RL, Framework.TRL, rl=config)
+    work_dir = tmp_path / "w"
+    result = trl_builder.build(job, work_dir, tmp_path / "o")
+
+    parts = result.env["PYTHONPATH"].split(os.pathsep)
+    assert parts[0] == str(settings.trl_root), "trl 检出必须最前面"
+    assert str(settings.harbor_root / "src") in parts
+
+    # harbor/__init__.py 会读自己的 dist 元数据，光给代码会 PackageNotFoundError
+    meta = [name for name in result.files if name.endswith(".dist-info/METADATA")]
+    assert meta, result.files.keys()
+    body = result.files[meta[0]]
+    assert "Name: harbor" in body and "Version: " in body
+    assert str(work_dir / "harbor_meta") in parts
+
+    # 非 harbor 模式不该挂这些
+    plain = RLConfig(framework=Framework.TRL, algorithm=TrainStage.DPO, model_path="/tmp/m",
+                     dataset_id=harbor_dataset.id)
+    plain_job = _job(JobType.RL, Framework.TRL, rl=plain)
+    with pytest.raises(BuildError):
+        trl_builder.build(plain_job, tmp_path / "w2", tmp_path / "o")  # DPO 不吃 harbor_tasks
