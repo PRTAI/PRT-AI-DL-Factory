@@ -21,7 +21,11 @@ import type {
   ModelDownload,
   ModelEntry,
   Notification,
-  Preset,
+  ModelApi,
+  ModelProviderInfo,
+  RegistryDataset,
+  TrialDetail,
+  TrialPage,
   Project,
   ProjectWithStats,
   SystemMetrics,
@@ -225,25 +229,10 @@ export const api = {
       `/api/jobs/${id}/artifacts`,
     ),
   jobCommand: (id: string) => request<CommandPreview>(`/api/jobs/${id}/command`),
-  jobTrials: (id: string) =>
-    request<{
-      trials: {
-        task_name: string
-        trial_name: string
-        reward: number | null
-        rewards: Record<string, number>
-        exception_type: string | null
-        exception_message: string
-        agent: string
-        model: string
-        duration_seconds: number | null
-        path: string
-      }[]
-      job_dir: string
-      total: number
-      resolved: number
-      errored: number
-    }>(`/api/jobs/${id}/trials`),
+  jobTrials: (id: string, params: { page?: number; page_size?: number; phase?: string; q?: string } = {}) =>
+    request<TrialPage>(`/api/jobs/${id}/trials${qs(params)}`),
+  jobTrialDetail: (id: string, trialName: string) =>
+    request<TrialDetail>(`/api/jobs/${id}/trials/${encodeURIComponent(trialName)}`),
   // Downloads go through fetch + blob because the REST API only accepts the
   // bearer header (a token in the query string would leak into access logs).
   downloadArtifact: async (id: string, path: string) => {
@@ -399,13 +388,22 @@ export const api = {
 
   // ----------------------------------------------------------- catalog ----
   algorithms: () => request<AlgorithmInfo[]>('/api/catalog/algorithms'),
-  presets: () =>
-    request<{ sft_presets: Preset[]; rl_presets: Preset[]; verify_presets: Preset[] }>(
-      '/api/catalog/presets',
-    ),
   templates: () => request<string[]>('/api/catalog/templates'),
   harborAgents: () => request<HarborAgentInfo[]>('/api/catalog/harbor-agents'),
   harborEnvironments: () => request<string[]>('/api/catalog/harbor-environments'),
+  harborRegistry: (refresh = false) =>
+    request<{ datasets: RegistryDataset[]; fetched_at: number | null; source: 'network' | 'cache' | 'loading' | 'none'; error: string; refreshing: boolean }>(
+      `/api/catalog/harbor-registry${qs({ refresh: refresh || undefined })}`,
+    ),
+
+  // --------------------------------------------------------- model apis ----
+  modelApis: () => request<ModelApi[]>('/api/model-apis'),
+  modelProviders: () => request<ModelProviderInfo[]>('/api/model-apis/providers'),
+  createModelApi: (payload: Record<string, unknown>) =>
+    request<ModelApi>('/api/model-apis', { method: 'POST', body: JSON.stringify(payload) }),
+  updateModelApi: (id: string, payload: Record<string, unknown>) =>
+    request<ModelApi>(`/api/model-apis/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteModelApi: (id: string) => request<void>(`/api/model-apis/${id}`, { method: 'DELETE' }),
   frameworks: () => request<Record<string, Record<string, unknown>>>('/api/catalog/frameworks'),
 }
 

@@ -274,7 +274,11 @@ export interface VerifyConfig {
   tasks_path: string
   registry_dataset: string
   agent: string
+  /** 平台维护的模型配置；选了它就不用手填 model / 密钥 */
+  model_api_id: string
   model: string
+  /** 思考模式；空 = 不下发，交给 agent 默认 */
+  reasoning_effort: '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   agent_import_path: string
   n_concurrent: number
   n_attempts: number
@@ -298,6 +302,8 @@ export interface VerifyConfig {
   force_build: boolean
   export_traces: boolean
   sharegpt: boolean
+  /** 让 Harbor 用 --debug 把每个 trial 的命令与失败原因打进日志 */
+  verbose_log: boolean
   extra_args: Record<string, unknown>
 }
 
@@ -312,6 +318,7 @@ export interface JobProgress {
   message: string
   completed_trials: number
   total_trials: number
+  trial_phases?: Record<string, number>
 }
 
 export interface JobMetricsSummary {
@@ -509,22 +516,16 @@ export interface AlgorithmInfo {
   doc: string
 }
 
-export interface Preset {
-  id: string
-  label: string
-  description: string
-  framework?: Framework
-  algorithm?: TrainStage
-  recommended_gpus?: number
-  config: Record<string, unknown>
-}
-
 export interface HarborAgentInfo {
   name: string
   description: string
   env_keys: string[]
   needs_model: boolean
   recommended: boolean
+  /** 该 agent 接受的思考模式档位（空 = 不支持） */
+  effort_levels: string[]
+  /** bare：模型名原样给 CLI；litellm：需要 provider/ 前缀 */
+  model_style: 'bare' | 'litellm'
 }
 
 export interface DatasetSpec {
@@ -707,4 +708,102 @@ export interface ExportCandidates {
   base_model_path: string
   template: string
   checkpoints: { path: string; label: string; step: number | null }[]
+}
+
+// ------------------------------------------------------------ 模型 API ----
+export type ModelProvider =
+  | 'openai'
+  | 'anthropic'
+  | 'dashscope'
+  | 'google'
+  | 'openrouter'
+  | 'deepseek'
+  | 'xai'
+  | 'moonshot'
+
+export interface ModelApi {
+  id: string
+  name: string
+  provider: ModelProvider
+  model: string
+  model_id: string
+  base_url: string
+  api_key_masked: string
+  has_api_key: boolean
+  ready: boolean
+  extra_env_keys: string[]
+  note: string
+  enabled: boolean
+  supports_reasoning_effort: boolean
+  created_at: string
+  updated_at: string
+  created_by: string
+  updated_by: string
+  env_names: string[]
+}
+
+export interface ModelProviderInfo {
+  id: ModelProvider
+  label: string
+  api_key_envs: string[]
+  base_url_envs: string[]
+  default_base_url: string
+  hint: string
+}
+
+// ------------------------------------------------------- Harbor 注册表 ----
+export interface RegistryDataset {
+  name: string
+  version: string
+  ref: string
+  description: string
+  task_count: number
+}
+
+// -------------------------------------------------------- 评测 trial ----
+export type TrialPhase =
+  | 'pending'
+  | 'setup_environment'
+  | 'running_agent'
+  | 'running_verifier'
+  | 'success'
+  | 'failed'
+
+export interface TrialState {
+  trial_name: string
+  task_name: string
+  phase: TrialPhase
+  detail: string
+  reward: number | null
+  rewards: Record<string, number>
+  passed: boolean | null
+  exception_type: string | null
+  exception_message: string
+  agent: string
+  model: string
+  started_at: string | null
+  finished_at: string | null
+  duration_seconds: number | null
+  phase_seconds: Record<string, number>
+  tokens: Record<string, number>
+  path: string
+}
+
+export interface TrialPage {
+  items: TrialState[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+  counts: Record<string, number>
+  job_dir: string
+}
+
+export interface TrialDetail {
+  trial: TrialState
+  trial_log: string
+  exception: string
+  agent_logs: { name: string; content: string }[]
+  verifier_logs: { name: string; content: string }[]
+  files: { path: string; size_bytes: number }[]
 }

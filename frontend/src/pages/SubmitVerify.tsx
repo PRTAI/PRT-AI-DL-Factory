@@ -1,10 +1,10 @@
 import * as React from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, ChevronDown, Database, FlaskConical, KeyRound, Rocket, Settings2, Sparkles } from 'lucide-react'
+import { Bot, Brain, ChevronDown, Database, FlaskConical, Globe, KeyRound, Rocket, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import type { DeploymentEndpoint, Preset, VerifyConfig } from '@/lib/types'
+import type { DeploymentEndpoint, ModelApi, RegistryDataset, VerifyConfig } from '@/lib/types'
 import { useProject } from '@/lib/store'
 import { cn } from '@/lib/utils'
 import {
@@ -32,7 +32,9 @@ const DEFAULT_VERIFY: VerifyConfig = {
   tasks_path: '',
   registry_dataset: '',
   agent: 'oracle',
+  model_api_id: '',
   model: '',
+  reasoning_effort: '',
   agent_import_path: '',
   n_concurrent: 4,
   n_attempts: 1,
@@ -56,7 +58,128 @@ const DEFAULT_VERIFY: VerifyConfig = {
   force_build: false,
   export_traces: false,
   sharegpt: false,
+  verbose_log: true,
   extra_args: {},
+}
+
+const EFFORT_OPTIONS = [
+  { value: 'default', label: '默认（不指定）', description: '交给 agent 自己的默认值' },
+  { value: 'low', label: 'low', description: '最少思考，最快最省' },
+  { value: 'medium', label: 'medium' },
+  { value: 'high', label: 'high', description: '多数 agent 的默认档' },
+  { value: 'xhigh', label: 'xhigh' },
+  { value: 'max', label: 'max', description: '最深思考，最慢最贵' },
+]
+
+/** 平台维护的模型配置：选了它，密钥与 base_url 由后端按 Harbor 标准变量注入。 */
+function ModelApiPicker({
+  value,
+  onChange,
+  supportsEffort,
+}: {
+  value: string
+  onChange: (item: ModelApi | null) => void
+  supportsEffort: boolean
+}) {
+  const models = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
+  const rows = (models.data ?? []).filter((m) => m.enabled)
+  const current = rows.find((m) => m.id === value)
+  return (
+    <div className="space-y-1.5">
+      <Select
+        value={value || 'manual'}
+        onValueChange={(next) => onChange(next === 'manual' ? null : rows.find((m) => m.id === next) ?? null)}
+        options={[
+          { value: 'manual', label: '手动填写模型与密钥', description: '下方自己填 litellm 模型名和 agent 环境变量' },
+          ...rows.map((m) => ({
+            value: m.id,
+            label: m.ready ? m.name : `${m.name}（未配置密钥）`,
+            description: `${m.provider}${m.base_url ? ` · ${m.base_url}` : ''}`,
+            disabled: !m.ready,
+          })),
+        ]}
+      />
+      {current && (
+        <p className="text-[11px] leading-relaxed text-fg-subtle">
+          运行时注入 {current.env_names.join(' / ')}；密钥不会出现在命令记录与日志里。
+          {!supportsEffort && ' 该 agent 不支持思考模式，下面的选择会被忽略。'}
+        </p>
+      )}
+      {!rows.length && !models.isLoading && (
+        <p className="text-[11px] text-fg-subtle">还没有模型配置，管理员可在「平台管理 → 模型 API」添加。</p>
+      )}
+    </div>
+  )
+}
+
+/** Harbor 官方注册表里的数据集（terminal-bench 等），运行时需要联网 clone。 */
+function RegistryPicker({ value, onChange }: { value: string; onChange: (ref: string) => void }) {
+  const [keyword, setKeyword] = React.useState('')
+  const registry = useQuery({
+    queryKey: ['harbor-registry'],
+    queryFn: () => api.harborRegistry(),
+    staleTime: 60_000,
+    // 后端在后台拉 13 MB 的 registry.json；拉的时候先给空/旧列表，这里盯着它
+    refetchInterval: (query) => (query.state.data?.source === 'loading' ? 4000 : false),
+  })
+  const rows: RegistryDataset[] = registry.data?.datasets ?? []
+  const needle = keyword.trim().toLowerCase()
+  const shown = needle ? rows.filter((r) => `${r.name} ${r.description}`.toLowerCase().includes(needle)) : rows
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Input value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder={`搜索 ${rows.length} 个官方数据集`} className="h-8 text-xs" />
+        <Button
+          variant="ghost"
+          size="sm"
+          loading={registry.data?.source === 'loading'}
+          onClick={async () => {
+            await api.harborRegistry(true)
+            registry.refetch()
+          }}
+        >
+          刷新
+        </Button>
+      </div>
+      {registry.data?.source === 'loading' && (
+        <p className="text-[11px] text-fg-subtle">正在从 GitHub 拉取注册表（约 13 MB，首次要十几秒）…</p>
+      )}
+      {registry.data?.error && <WarnHint>{registry.data.error}</WarnHint>}
+      {registry.data?.source === 'cache' && !registry.data.error && (
+        <p className="text-[11px] text-fg-subtle">列表来自本地缓存（6 小时内不重复拉取）。</p>
+      )}
+      <div className="max-h-64 divide-y divide-border/60 overflow-y-auto rounded-md border border-border">
+        {shown.map((row) => {
+          const selected = row.ref === value
+          return (
+            <button
+              key={row.ref}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(selected ? '' : row.ref)}
+              className={cn('flex w-full items-start gap-3 px-3 py-2 text-left transition-colors', selected ? 'bg-primary-soft' : 'hover:bg-card-hover')}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <span className={cn('text-sm font-medium', selected ? 'text-primary' : 'text-fg')}>{row.name}</span>
+                  <Badge>{row.version || 'latest'}</Badge>
+                  <Badge tone="info">{row.task_count} 任务</Badge>
+                </div>
+                <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-fg-subtle">{row.description}</p>
+              </div>
+            </button>
+          )
+        })}
+        {!shown.length && !registry.isLoading && (
+          <p className="px-3 py-6 text-center text-xs text-fg-subtle">{rows.length ? '没有匹配的数据集' : '拿不到注册表（无网络？）'}</p>
+        )}
+      </div>
+      <p className="text-[11px] leading-relaxed text-fg-subtle">
+        <Globe className="mr-1 inline h-3 w-3" aria-hidden />
+        官方数据集运行时由 Harbor 从 GitHub 拉取任务仓库，机器需要能访问外网。
+      </p>
+    </div>
+  )
 }
 
 /** 让评测直接指向平台里跑着的 vLLM 服务，省得手抄 base_url 和模型名。 */
@@ -128,7 +251,6 @@ export default function SubmitVerify() {
 
   const agents = useQuery({ queryKey: ['harbor-agents'], queryFn: () => api.harborAgents() })
   const environments = useQuery({ queryKey: ['harbor-envs'], queryFn: () => api.harborEnvironments() })
-  const presets = useQuery({ queryKey: ['presets'], queryFn: () => api.presets() })
   const toolchain = useQuery({ queryKey: ['toolchain'], queryFn: () => api.toolchain() })
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
   const projectName = projects.data?.find((row) => row.project.id === projectId)?.project.name
@@ -144,12 +266,15 @@ export default function SubmitVerify() {
   const [tags, setTags] = React.useState('')
   const [nGpus, setNGpus] = React.useState(0)
   const [config, setConfig] = React.useState<VerifyConfig>(DEFAULT_VERIFY)
+  const [source, setSource] = React.useState<'uploaded' | 'registry' | 'path'>('uploaded')
   const [taskFilter, setTaskFilter] = React.useState('')
   const [excludeFilter, setExcludeFilter] = React.useState('')
   const [error, setError] = React.useState<string | null>(null)
 
   const patch = (values: Partial<VerifyConfig>) => setConfig((previous) => ({ ...previous, ...values }))
   const agentInfo = agents.data?.find((item) => item.name === config.agent)
+  const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
+  const modelApiName = modelApis.data?.find((m) => m.id === config.model_api_id)?.name
   const harborReady = toolchain.data?.find((row) => row.key === 'harbor-cli')?.python_ok ?? true
   const dockerRow = toolchain.data?.find((row) => row.key === 'docker')
   const dockerBlocked = config.environment_type === 'docker' && dockerRow ? dockerRow.status !== 'ready' : false
@@ -173,6 +298,7 @@ export default function SubmitVerify() {
   React.useEffect(() => {
     if (!agentInfo) return
     setConfig((previous) => {
+      if (previous.model_api_id) return previous  // 密钥由模型配置注入，不用手填
       const next = { ...previous.agent_env }
       let changed = false
       for (const key of agentInfo.env_keys) {
@@ -184,11 +310,6 @@ export default function SubmitVerify() {
       return changed ? { ...previous, agent_env: next } : previous
     })
   }, [agentInfo])
-
-  const applyPreset = (preset: Preset) => {
-    setConfig((previous) => ({ ...previous, ...(preset.config as Partial<VerifyConfig>) }))
-    toast.success(`已应用预设：${preset.label}`)
-  }
 
   const submit = useMutation({
     mutationFn: () =>
@@ -222,11 +343,13 @@ export default function SubmitVerify() {
     const out: string[] = []
     if (!name.trim()) out.push('请填写任务名称')
     if (!config.dataset_id && !config.tasks_path && !config.registry_dataset) out.push('请选择要评测的任务集')
-    if (agentInfo?.needs_model && !config.model) out.push(`agent ${config.agent} 需要指定模型`)
-    const missingKeys = Object.entries(config.agent_env)
-      .filter(([key, value]) => agentInfo?.env_keys.includes(key) && !value)
-      .map(([key]) => key)
-    if (missingKeys.length) out.push(`请填写 ${missingKeys.join(' / ')}`)
+    if (agentInfo?.needs_model && !config.model && !config.model_api_id) out.push(`agent ${config.agent} 需要选择或填写模型`)
+    if (!config.model_api_id) {
+      const missingKeys = Object.entries(config.agent_env)
+        .filter(([key, value]) => agentInfo?.env_keys.includes(key) && !value)
+        .map(([key]) => key)
+      if (missingKeys.length) out.push(`请填写 ${missingKeys.join(' / ')}（或改为选择平台的模型配置）`)
+    }
     return out
   }, [name, config, agentInfo])
 
@@ -305,30 +428,49 @@ export default function SubmitVerify() {
               }
             />
             <CardBody className="space-y-4">
-              <DatasetPicker
-                value={config.dataset_id ? [config.dataset_id] : []}
-                onChange={(ids) => patch({ dataset_id: ids[0] ?? '' })}
-                kinds={['harbor_tasks']}
-                emptyHint="请在「数据集」页上传 harbor_tasks 类型的压缩包（tasks/<task>/task.toml）。"
-              />
-              <Advanced title="其他任务来源（高级）">
-                <Grid cols={2}>
-                  <Field label="服务器上的任务目录" hint="绝对路径，适合已经放在机器上的大任务集">
-                    <Input
-                      value={config.tasks_path}
-                      onChange={(event) => patch({ tasks_path: event.target.value })}
-                      placeholder="/workspace/LiHanlin_Workspace/datasets/PRT-Terminal-Bench-Data4k"
-                    />
-                  </Field>
-                  <Field label="Harbor registry 数据集" hint="例如 terminal-bench@2.0，需要网络访问">
-                    <Input
-                      value={config.registry_dataset}
-                      onChange={(event) => patch({ registry_dataset: event.target.value })}
-                      placeholder="terminal-bench@2.0"
-                    />
-                  </Field>
-                </Grid>
-              </Advanced>
+              <div className="flex h-9 w-fit items-center gap-0.5 rounded-md border border-border bg-bg-elevated p-0.5" role="group" aria-label="任务集来源">
+                {(
+                  [
+                    ['uploaded', '已上传的任务集'],
+                    ['registry', 'Harbor 官方数据集'],
+                    ['path', '服务器目录'],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={source === key}
+                    onClick={() => {
+                      setSource(key)
+                      // 三个来源互斥：切换时清掉其他两个，后端也只接受一个
+                      patch({ dataset_id: '', registry_dataset: '', tasks_path: '' })
+                    }}
+                    className={cn('h-full rounded px-3 text-[13px] transition-colors', source === key ? 'bg-card font-medium text-primary shadow-sm' : 'text-fg-muted hover:text-fg')}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {source === 'uploaded' && (
+                <DatasetPicker
+                  value={config.dataset_id ? [config.dataset_id] : []}
+                  onChange={(ids) => patch({ dataset_id: ids[0] ?? '' })}
+                  kinds={['harbor_tasks']}
+                  emptyHint="请在「数据集」页上传 harbor_tasks 类型的压缩包（tasks/<task>/task.toml）。"
+                />
+              )}
+              {source === 'registry' && (
+                <RegistryPicker value={config.registry_dataset} onChange={(ref) => patch({ registry_dataset: ref })} />
+              )}
+              {source === 'path' && (
+                <Field label="服务器上的任务目录" hint="绝对路径，适合已经放在机器上的大任务集">
+                  <Input
+                    value={config.tasks_path}
+                    onChange={(event) => patch({ tasks_path: event.target.value })}
+                    placeholder="/workspace/LiHanlin_Workspace/datasets/PRT-Terminal-Bench-Data4k"
+                  />
+                </Field>
+              )}
             </CardBody>
           </Card>
 
@@ -349,17 +491,48 @@ export default function SubmitVerify() {
 
               {agentInfo?.needs_model && (
                 <>
-                  <Field
-                    label="模型"
-                    required
-                    hint="litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model"
-                  >
-                    <Input
-                      value={config.model}
-                      onChange={(event) => patch({ model: event.target.value })}
-                      placeholder="anthropic/claude-sonnet-4-5"
+                  <Field label="模型" required hint="平台维护的模型配置，全员共享；密钥由管理员在平台管理里填">
+                    <ModelApiPicker
+                      value={config.model_api_id}
+                      supportsEffort={(agentInfo?.effort_levels?.length ?? 0) > 0}
+                      onChange={(item) => patch({ model_api_id: item?.id ?? '', model: item ? '' : config.model })}
                     />
                   </Field>
+
+                  <Field
+                    label={
+                      <span className="flex items-center gap-1.5">
+                        <Brain className="h-3.5 w-3.5" aria-hidden />
+                        思考模式
+                      </span>
+                    }
+                    hint={
+                      agentInfo?.effort_levels?.length
+                        ? `${config.agent} 支持：${agentInfo.effort_levels.join(' / ')}；选了不支持的档位会自动收敛到最近一档`
+                        : `${config.agent} 不支持思考模式参数`
+                    }
+                  >
+                    <Select
+                      value={config.reasoning_effort || 'default'}
+                      onValueChange={(v) => patch({ reasoning_effort: (v === 'default' ? '' : v) as VerifyConfig['reasoning_effort'] })}
+                      options={EFFORT_OPTIONS}
+                      disabled={!agentInfo?.effort_levels?.length}
+                    />
+                  </Field>
+
+                  {!config.model_api_id && (
+                    <Field
+                      label="手动指定模型"
+                      required
+                      hint="litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model；密钥填在下方环境变量里"
+                    >
+                      <Input
+                        value={config.model}
+                        onChange={(event) => patch({ model: event.target.value })}
+                        placeholder="anthropic/claude-sonnet-4-5"
+                      />
+                    </Field>
+                  )}
 
                   <LocalEndpointPicker
                     onPick={(endpoint) => {
@@ -369,6 +542,7 @@ export default function SubmitVerify() {
                       // OPENAI_BASE_URL 是 Harbor 的首选键，OPENAI_API_BASE 是它的回退键，
                       // 两个都给以兼容不同 agent。
                       patch({
+                        model_api_id: '',
                         model: `hosted_vllm/${endpoint.model}`,
                         agent_env: {
                           ...config.agent_env,
@@ -422,25 +596,6 @@ export default function SubmitVerify() {
               icon={<Settings2 className="h-4 w-4" aria-hidden />}
             />
             <CardBody className="space-y-4">
-              {(presets.data?.verify_presets ?? []).length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {(presets.data?.verify_presets ?? []).map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      onClick={() => applyPreset(preset)}
-                      className="rounded-lg border border-border px-3 py-2 text-left transition-colors hover:border-primary hover:bg-primary-soft"
-                    >
-                      <div className="flex items-center gap-1.5 text-xs font-medium text-fg">
-                        <Sparkles className="h-3 w-3 text-primary" aria-hidden />
-                        {preset.label}
-                      </div>
-                      <p className="mt-0.5 max-w-64 text-[11px] leading-relaxed text-fg-subtle">{preset.description}</p>
-                    </button>
-                  ))}
-                </div>
-              )}
-
               <Grid cols={3}>
                 <Field label="pass@k（每题尝试次数）" required hint="k>1 时平台会统计 pass@1..pass@k">
                   <NumberInput
@@ -608,7 +763,10 @@ export default function SubmitVerify() {
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-fg-muted">模型</dt>
-                  <dd className="truncate text-right text-fg">{config.model || '（无需模型）'}</dd>
+                  <dd className="truncate text-right text-fg">
+                    {config.model_api_id ? modelApiName ?? '模型配置' : config.model || '（无需模型）'}
+                    {config.reasoning_effort && ` · ${config.reasoning_effort}`}
+                  </dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-fg-muted">密钥</dt>

@@ -161,11 +161,28 @@ def test_job_trials_parsing(tmp_path, monkeypatch):
     actor = User(id="usr_metrics", email="m@prt.local", display_name="m", role=Role.ADMIN, password_hash="x")
     result = job_service.job_trials(job.id, actor=actor)
     assert result["total"] == 3
-    assert result["resolved"] == 1
-    assert result["errored"] == 1
-    assert result["trials"][0]["reward"] == 0.0          # worst first
-    assert result["trials"][-1]["exception_type"] == "AgentTimeoutError"
-    assert result["trials"][0]["duration_seconds"] == 90.0
+    assert result["counts"]["success"] == 2
+    assert result["counts"]["failed"] == 1
+    assert result["counts"]["passed"] == 1
+    # 失败的排在完成的前面
+    assert result["items"][0]["exception_type"] == "AgentTimeoutError"
+    assert result["items"][0]["phase"] == "failed"
+    assert {i["reward"] for i in result["items"][1:]} == {0.0, 1.0}
+    assert result["items"][1]["duration_seconds"] == 90.0
+
+    # 分页 + 按阶段筛
+    page2 = job_service.job_trials(job.id, actor=actor, page=2, page_size=2)
+    assert page2["pages"] == 2 and len(page2["items"]) == 1
+    only_ok = job_service.job_trials(job.id, actor=actor, phase="success")
+    assert only_ok["total"] == 2 and all(i["phase"] == "success" for i in only_ok["items"])
+
+    # 单个 trial 的详情（路径穿越要被拒）
+    detail = job_service.job_trial_detail(job.id, "task-c.1", actor=actor)
+    assert detail["trial"]["exception_type"] == "AgentTimeoutError"
+    import pytest as _pytest
+    from fastapi import HTTPException as _HTTPException
+    with _pytest.raises(_HTTPException):
+        job_service.job_trial_detail(job.id, "../config.json", actor=actor)
 
 
 def test_llamafactory_final_progress_record_keeps_last_values(tmp_path):
@@ -299,6 +316,6 @@ def test_job_trials_reads_singular_result_json(tmp_path):
     actor = User(id="usr_singular", email="s@prt.local", display_name="s", role=Role.ADMIN, password_hash="x")
     result = job_service.job_trials(job.id, actor=actor)
     assert result["total"] == 1
-    assert result["errored"] == 1
-    assert result["trials"][0]["exception_type"] == "VerifierTimeoutError"
-    assert result["trials"][0]["agent"] == "oracle"
+    assert result["counts"]["failed"] == 1
+    assert result["items"][0]["exception_type"] == "VerifierTimeoutError"
+    assert result["items"][0]["agent"] == "oracle"

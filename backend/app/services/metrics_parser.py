@@ -328,7 +328,16 @@ def parse_harbor(output_dir: Path, job_id: str) -> ParsedMetrics:
     pending = int(stats.get("n_pending_trials") or 0)
     total = completed + running + pending
 
-    if total == 0:  # result.json not written yet — count trial dirs on disk
+    # 逐 trial 的阶段来自磁盘扫描（Docker 把 agent/verifier 目录 bind-mount 进容器，
+    # 文件是实时出现的），比 job 级 result.json 的 stats 新得多。
+    from . import harbor_trials
+
+    phase_counts = harbor_trials.counts(harbor_trials.scan(job_dir))
+    if phase_counts["total"]:
+        completed = phase_counts["success"] + phase_counts["failed"]
+        errored = max(errored, phase_counts["failed"])
+        total = max(total, phase_counts["total"])
+    elif total == 0:  # result.json not written yet — count trial dirs on disk
         completed = len(_trial_result_files(job_dir))
         total = completed
 
@@ -368,7 +377,8 @@ def parse_harbor(output_dir: Path, job_id: str) -> ParsedMetrics:
         percent=completed / total * 100 if total else 0.0,
         completed_trials=completed,
         total_trials=total,
-        message=f"trials {completed}/{total}" if total else "准备评测环境…",
+        trial_phases={k: v for k, v in phase_counts.items() if k not in {"total", "passed"}},
+        message=harbor_trials.progress_message(phase_counts) if phase_counts["total"] else "准备评测环境…",
     )
     parsed.summary = JobMetricsSummary(
         pass_at_k=pass_at_k,

@@ -23,6 +23,7 @@ from pathlib import Path
 
 from ..config import settings
 from ..models import DatasetKind, Job, VerifyConfig
+from ..services import model_api_service, resources_service
 from ..store import store
 from .base import BuildError, BuildResult, kv_flags
 
@@ -77,12 +78,35 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
 
     # ---- agent / model ---------------------------------------------------
     command += ["--agent", config.agent]
-    if config.model:
+    injected_env: dict[str, str] = {}
+    injected_secrets: list[str] = []
+    if config.model_api_id:
+        # 平台维护的模型配置：--model 与密钥/base_url 都由后端按 Harbor 的标准环境变量注入
+        resolved = model_api_service.resolve(
+            config.model_api_id, model_style=resources_service.model_style_for(config.agent)
+        )
+        command += ["--model", resolved.model]
+        injected_env = resolved.env
+        injected_secrets = resolved.secrets
+        notes.extend(resolved.notes)
+    elif config.model:
         command += ["--model", config.model]
     elif config.agent not in _NO_MODEL_AGENTS:
         raise BuildError(f"agent {config.agent} 需要指定模型（--model）")
     if config.agent_import_path:
         command += ["--agent-import-path", config.agent_import_path]
+
+    # 思考模式：各 agent 接受的集合不一样，收敛到它支持的最近一档
+    agent_kwargs = dict(config.agent_kwargs)
+    if config.reasoning_effort and config.agent not in _NO_MODEL_AGENTS:
+        effort, note = model_api_service.clamp_effort(
+            config.reasoning_effort, resources_service.effort_levels_for(config.agent)
+        )
+        if effort:
+            agent_kwargs.setdefault("reasoning_effort", effort)
+            notes.append(f"思考模式 reasoning_effort={effort}")
+        if note:
+            notes.append(note)
 
     # ---- scale -----------------------------------------------------------
     command += ["--n-concurrent", str(config.n_concurrent)]
@@ -102,8 +126,10 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         command += ["--n-tasks", str(config.n_tasks)]
 
     # ---- kwargs / env ----------------------------------------------------
-    command += kv_flags("--agent-env", config.agent_env)
-    command += kv_flags("--agent-kwarg", config.agent_kwargs)
+    # 用户手填的 agent_env 优先于模型配置注入的（万一要临时覆盖 base_url）
+    agent_env = {**injected_env, **config.agent_env}
+    command += kv_flags("--agent-env", agent_env)
+    command += kv_flags("--agent-kwarg", agent_kwargs)
     command += kv_flags("--verifier-env", config.verifier_env)
     command += kv_flags("--environment-kwarg", config.environment_kwargs)
     command += kv_flags("--verifier-kwarg", config.verifier_kwargs)
@@ -122,6 +148,10 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         command += ["--agent-timeout-multiplier", str(config.agent_timeout_multiplier)]
     if config.verifier_timeout_multiplier:
         command += ["--verifier-timeout-multiplier", str(config.verifier_timeout_multiplier)]
+    if config.verbose_log:
+        # rich 进度条在非终端里不输出；--debug 让 Harbor 把每个 trial 的安装命令、
+        # agent 命令与失败原因打进日志。
+        command.append("--debug")
     if config.disable_verification:
         command.append("--disable-verification")
         notes.append("已关闭 verifier：只跑 agent，不打分。")
@@ -136,7 +166,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
 
     # A .env file lets task.toml's ${VAR} interpolation resolve (that is how
     # reward-kit judge tasks pick up their API keys). Written 0600.
-    secrets_map = {**config.agent_env, **config.verifier_env}
+    secrets_map = {**agent_env, **config.verifier_env}
     if secrets_map:
         env_path = work_dir / ".env"
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -163,6 +193,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         )
 
     secrets = [value for key, value in secrets_map.items() if value and _looks_secret(key)]
+    secrets += [value for value in injected_secrets if value not in secrets]
 
     return BuildResult(
         command=command,

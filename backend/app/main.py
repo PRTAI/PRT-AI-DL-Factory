@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import api_router, ws_router
 from .config import REPO_ROOT, settings
-from .services import deployment_service, export_service, project_service, user_service
+from .services import deployment_service, export_service, model_api_service, project_service, user_service
 from .services.monitor import monitor
 from .services.scheduler import scheduler
 
@@ -41,6 +41,9 @@ async def lifespan(app: FastAPI):
             "created bootstrap administrator %s (password from PRT_BOOTSTRAP_ADMIN_PASSWORD) — change it now",
             admin.email,
         )
+    seeded = model_api_service.seed_defaults()
+    if seeded:
+        logger.info("seeded %d default model API config(s); admins fill in the keys", seeded)
     adopted = project_service.adopt_orphan_jobs()
     if adopted:
         logger.info("moved %d pre-existing job(s) into the default project", adopted)

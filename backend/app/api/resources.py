@@ -1,4 +1,4 @@
-"""Static catalogs the submission wizards need (presets, agents, templates)."""
+"""Static catalogs the submission wizards need (algorithms, agents, templates, registry)."""
 
 from __future__ import annotations
 
@@ -28,16 +28,6 @@ def algorithms(_: CurrentUser) -> list[dict[str, Any]]:
     return resources_service.algorithms()
 
 
-@router.get("/presets", summary="训练/评测预设")
-def presets(_: CurrentUser) -> dict[str, Any]:
-    payload = resources_service.presets()
-    return {
-        "sft_presets": payload.get("sft_presets", []),
-        "rl_presets": payload.get("rl_presets", []),
-        "verify_presets": payload.get("verify_presets", []),
-    }
-
-
 @router.get("/templates", summary="LLaMA-Factory 对话模板")
 def templates(_: CurrentUser) -> list[str]:
     return resources_service.llamafactory_templates()
@@ -46,6 +36,13 @@ def templates(_: CurrentUser) -> list[str]:
 @router.get("/harbor-agents", summary="Harbor 可用 agent")
 def harbor_agents(_: CurrentUser) -> list[dict[str, Any]]:
     return resources_service.harbor_agents()
+
+
+@router.get("/harbor-registry", summary="Harbor 官方注册表里的数据集")
+def harbor_registry(_: CurrentUser, refresh: bool = False) -> dict[str, Any]:
+    from ..services import harbor_registry_service
+
+    return harbor_registry_service.list_datasets(force_refresh=refresh)
 
 
 @router.get("/harbor-environments", summary="Harbor 沙箱后端")

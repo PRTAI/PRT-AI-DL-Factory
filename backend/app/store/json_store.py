@@ -37,10 +37,15 @@ def _json_default(value: Any) -> Any:
 class JsonCollection(Generic[T]):
     """A list of pydantic records persisted as a single JSON array."""
 
-    def __init__(self, path: Path, model: type[T], id_field: str = "id") -> None:
+    def __init__(
+        self, path: Path, model: type[T], id_field: str = "id", *, mode: int | None = None
+    ) -> None:
         self.path = path
         self.model = model
         self.id_field = id_field
+        # 存明文密钥的集合传 0o600：mkstemp 默认就是 0600，但 os.replace 会沿用
+        # 临时文件的权限，所以这里只是把「靠 mkstemp 的默认值」变成显式承诺。
+        self.mode = mode
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._file_lock = FileLock(str(self.path) + ".lock", timeout=30)
@@ -85,6 +90,8 @@ class JsonCollection(Generic[T]):
                 json.dump(payload, handle, ensure_ascii=False, indent=2, default=_json_default)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if self.mode is not None:
+                os.chmod(tmp, self.mode)
             os.replace(tmp, self.path)
         finally:
             if os.path.exists(tmp):

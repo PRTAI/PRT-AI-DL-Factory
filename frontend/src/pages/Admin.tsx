@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, ScrollText, ShieldCheck, Trash2, UserPlus, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
@@ -32,16 +32,26 @@ import {
   Tr,
 } from '@/components/ui'
 import { PageHeader } from '@/components/common'
+import { ModelApiPanel } from '@/components/ModelApiPanel'
 
 export default function Admin() {
-  const [tab, setTab] = React.useState('users')
+  // /admin?tab=models 可以直接分享给要填密钥的人
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = searchParams.get('tab') ?? 'users'
+  const setTab = (next: string) => {
+    const params = new URLSearchParams(searchParams)
+    if (next === 'users') params.delete('tab')
+    else params.set('tab', next)
+    setSearchParams(params, { replace: true })
+  }
   return (
     <div className="space-y-4">
-      <PageHeader title="平台管理" description="账号、审核、系统参数与审计日志" />
+      <PageHeader title="平台管理" description="账号、审核、模型 API、系统参数与审计日志" />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="users">账号管理</TabsTrigger>
           <TabsTrigger value="review">待审核</TabsTrigger>
+          <TabsTrigger value="models">模型 API</TabsTrigger>
           <TabsTrigger value="settings">系统设置</TabsTrigger>
           <TabsTrigger value="toolchain">工具链</TabsTrigger>
           <TabsTrigger value="audit">审计日志</TabsTrigger>
@@ -51,6 +61,9 @@ export default function Admin() {
         </TabsContent>
         <TabsContent value="review" className="mt-3">
           <ReviewPanel />
+        </TabsContent>
+        <TabsContent value="models" className="mt-3">
+          <ModelApiPanel />
         </TabsContent>
         <TabsContent value="settings" className="mt-3">
           <SettingsPanel />

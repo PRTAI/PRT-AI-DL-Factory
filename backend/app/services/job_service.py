@@ -207,7 +207,15 @@ def _validate_verify(payload: JobCreate) -> None:
                 status.HTTP_400_BAD_REQUEST,
                 detail=f"评测需要 harbor_tasks 类型的数据集，当前为 {dataset.kind.value}",
             )
-    if config.agent not in {"oracle", "nop"} and not config.model:
+    if config.model_api_id:
+        # 提交时就把「没填密钥 / 已停用」挡下来，别等排队到了才失败
+        from . import model_api_service, resources_service
+
+        resolved = model_api_service.resolve(
+            config.model_api_id, model_style=resources_service.model_style_for(config.agent)
+        )
+        config.model = resolved.model  # 列表/详情页展示用
+    elif config.agent not in {"oracle", "nop"} and not config.model:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"agent {config.agent} 需要指定模型")
 
 
@@ -459,61 +467,41 @@ def artifact_file(job_id: str, relative_path: str, *, actor: User) -> Path:
     return target
 
 
-def job_trials(job_id: str, *, actor: User, limit: int = 500) -> dict[str, Any]:
-    """Per-task results of a Harbor evaluation, worst reward first."""
+def job_trials(
+    job_id: str,
+    *,
+    actor: User,
+    page: int = 1,
+    page_size: int = 10,
+    phase: str = "",
+    query: str = "",
+) -> dict[str, Any]:
+    """评测任务逐 trial 的阶段（分页）。跑着的排前面，其次失败，再是完成。"""
     job = get_job(job_id)
     _assert_can_view(job, actor)
     if job.type != JobType.VERIFY:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="只有评测任务有 trial 明细")
+    from . import harbor_trials
 
     output_dir = Path(job.runtime.output_dir or runner.output_dir_for(job))
     harbor_dir = metrics_parser.harbor_job_dir(output_dir, job.id)
     if harbor_dir is None:
-        return {"trials": [], "job_dir": str(output_dir)}
+        return {"items": [], "total": 0, "page": 1, "page_size": page_size, "pages": 1,
+                "counts": {p: 0 for p in harbor_trials.PHASES} | {"total": 0, "passed": 0}, "job_dir": str(output_dir)}
+    return harbor_trials.page(harbor_dir, page_no=page, page_size=page_size, phase=phase, query=query)
 
-    trials: list[dict[str, Any]] = []
-    for result_path in sorted(metrics_parser._trial_result_files(harbor_dir, limit=limit * 2)):
-        try:
-            payload = json.loads(result_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            continue
-        rewards = ((payload.get("verifier_result") or {}).get("rewards")) or {}
-        primary = rewards.get("reward")
-        if primary is None and rewards:
-            numeric = [v for v in rewards.values() if isinstance(v, (int, float))]
-            primary = sum(numeric) / len(numeric) if numeric else None
-        exception = payload.get("exception_info") or {}
-        agent_info = payload.get("agent_info") or {}
-        model_info = agent_info.get("model_info") or {}
-        started, finished = payload.get("started_at"), payload.get("finished_at")
-        trials.append(
-            {
-                "task_name": payload.get("task_name", result_path.parent.name),
-                "trial_name": payload.get("trial_name", result_path.parent.name),
-                "reward": primary,
-                "rewards": rewards,
-                "exception_type": exception.get("exception_type"),
-                "exception_message": (exception.get("exception_message") or "")[:400],
-                "agent": agent_info.get("name", ""),
-                "model": model_info.get("name", ""),
-                "started_at": started,
-                "finished_at": finished,
-                "duration_seconds": _duration(started, finished),
-                "path": str(result_path.parent),
-            }
-        )
-        if len(trials) >= limit:
-            break
 
-    trials.sort(key=lambda t: (t["reward"] is None, t["reward"] if t["reward"] is not None else 0))
-    resolved = [t for t in trials if isinstance(t["reward"], (int, float)) and t["reward"] >= 1.0]
-    return {
-        "trials": trials,
-        "job_dir": str(harbor_dir),
-        "total": len(trials),
-        "resolved": len(resolved),
-        "errored": sum(1 for t in trials if t["exception_type"]),
-    }
+def job_trial_detail(job_id: str, trial_name: str, *, actor: User) -> dict[str, Any]:
+    job = get_job(job_id)
+    _assert_can_view(job, actor)
+    from . import harbor_trials
+
+    output_dir = Path(job.runtime.output_dir or runner.output_dir_for(job))
+    harbor_dir = metrics_parser.harbor_job_dir(output_dir, job.id)
+    payload = harbor_trials.detail(harbor_dir, trial_name) if harbor_dir else None
+    if payload is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="trial 不存在")
+    return payload
 
 
 def _duration(started: Any, finished: Any) -> float | None:

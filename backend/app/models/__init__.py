@@ -47,6 +47,15 @@ from .deployment import (
     ExportTask,
     VLLMConfig,
 )
+from .model_api import (
+    EFFORT_ORDER,
+    PROVIDERS,
+    ModelApiConfig,
+    ModelApiCreate,
+    ModelApiPublic,
+    ModelApiUpdate,
+    ReasoningEffort,
+)
 from .model_registry import ModelDownload, ModelDownloadRequest, ModelEntry
 from .project import (
     Project,
@@ -110,6 +119,13 @@ __all__ = [
     "JobType",
     "LoginRequest",
     "LoraSpec",
+    "EFFORT_ORDER",
+    "PROVIDERS",
+    "ModelApiConfig",
+    "ModelApiCreate",
+    "ModelApiPublic",
+    "ModelApiUpdate",
+    "ReasoningEffort",
     "ModelDownload",
     "ModelDownloadRequest",
     "ModelEntry",

@@ -84,9 +84,21 @@ def download_artifact(job_id: str, path: str, user: CurrentUser) -> FileResponse
     return FileResponse(target, filename=target.name, media_type="application/octet-stream")
 
 
-@router.get("/{job_id}/trials", summary="评测 trial 明细")
-def get_trials(job_id: str, user: CurrentUser, limit: int = Query(default=500, le=2000)) -> dict[str, Any]:
-    return job_service.job_trials(job_id, actor=user, limit=limit)
+@router.get("/{job_id}/trials", summary="评测逐 trial 阶段（分页）")
+def get_trials(
+    job_id: str,
+    user: CurrentUser,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+    phase: str = Query(default="", description="pending/setup_environment/running_agent/running_verifier/success/failed/running"),
+    q: str = "",
+) -> dict[str, Any]:
+    return job_service.job_trials(job_id, actor=user, page=page, page_size=page_size, phase=phase, query=q)
+
+
+@router.get("/{job_id}/trials/{trial_name}", summary="单个 trial 的详细日志")
+def get_trial_detail(job_id: str, trial_name: str, user: CurrentUser) -> dict[str, Any]:
+    return job_service.job_trial_detail(job_id, trial_name, actor=user)
 
 
 @router.get("/{job_id}/command", summary="预览将要执行的命令")

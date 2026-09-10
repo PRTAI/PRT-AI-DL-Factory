@@ -55,6 +55,7 @@ import {
 } from '@/components/ui'
 import { CopyButton, FRAMEWORK_LABEL, JobTypeBadge, Mono, PageHeader, StatusBadge } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
+import { TrialBoard } from '@/components/TrialBoard'
 import { LineSeriesChart } from '@/components/charts'
 
 export default function JobDetail() {
@@ -64,7 +65,8 @@ export default function JobDetail() {
   const queryClient = useQueryClient()
   // Tab lives in the URL so links like /jobs/<id>?tab=logs are shareable.
   const [searchParams, setSearchParams] = useSearchParams()
-  const tab = searchParams.get('tab') ?? 'overview'
+  // 评测任务的核心信息是「每个任务到哪一步了」，默认落在任务进展
+  const tabParam = searchParams.get('tab')
   const setTab = (next: string) => {
     const params = new URLSearchParams(searchParams)
     if (next === 'overview') params.delete('tab')
@@ -84,6 +86,7 @@ export default function JobDetail() {
     },
   })
 
+  const tab = tabParam ?? (job.data?.type === 'verify' ? 'trials' : 'overview')
   const isActive = job.data ? ['queued', 'preparing', 'running'].includes(job.data.status) : false
   const stream = useJobStream(jobId, isActive)
 
@@ -111,13 +114,6 @@ export default function JobDetail() {
     queryKey: ['job-artifacts', jobId],
     queryFn: () => api.jobArtifacts(jobId!),
     enabled: Boolean(jobId) && tab === 'artifacts',
-  })
-
-  const trials = useQuery({
-    queryKey: ['job-trials', jobId],
-    queryFn: () => api.jobTrials(jobId!),
-    enabled: Boolean(jobId) && tab === 'trials' && job.data?.type === 'verify',
-    refetchInterval: isActive ? 15000 : false,
   })
 
   const invalidate = () => {
@@ -375,7 +371,7 @@ export default function JobDetail() {
           <TabsTrigger value="overview">概览</TabsTrigger>
           <TabsTrigger value="logs">实时日志</TabsTrigger>
           <TabsTrigger value="metrics">指标曲线</TabsTrigger>
-          {data.type === 'verify' && <TabsTrigger value="trials">Trial 明细</TabsTrigger>}
+          {data.type === 'verify' && <TabsTrigger value="trials">任务进展</TabsTrigger>}
           <TabsTrigger value="config">配置与命令</TabsTrigger>
           <TabsTrigger value="artifacts">产物</TabsTrigger>
         </TabsList>
@@ -428,73 +424,7 @@ export default function JobDetail() {
         </TabsContent>
 
         <TabsContent value="trials" className="mt-3">
-          <Card>
-            <CardHeader
-              title="Trial 明细"
-              description={
-                trials.data
-                  ? `${trials.data.total} 个 trial · 通过 ${trials.data.resolved} · 异常 ${trials.data.errored}（按 reward 从低到高排序，便于定位失败）`
-                  : '解析 Harbor 的 trial 结果'
-              }
-              actions={trials.data && <CopyButton value={trials.data.job_dir} label="复制结果目录" />}
-            />
-            {trials.isLoading ? (
-              <CardBody>
-                <Skeleton className="h-40 w-full" />
-              </CardBody>
-            ) : trials.data?.trials.length ? (
-              <Table>
-                <thead>
-                  <tr>
-                    <Th>任务</Th>
-                    <Th className="w-24">reward</Th>
-                    <Th className="w-28">耗时</Th>
-                    <Th className="w-40">Agent / 模型</Th>
-                    <Th>异常</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trials.data.trials.map((trial) => (
-                    <Tr key={trial.trial_name}>
-                      <Td>
-                        <div className="num text-xs font-medium">{trial.task_name}</div>
-                        <div className="num truncate text-[11px] text-fg-subtle">{trial.trial_name}</div>
-                      </Td>
-                      <Td>
-                        {trial.reward === null ? (
-                          <Badge tone="neutral">无</Badge>
-                        ) : (
-                          <Badge tone={trial.reward >= 1 ? 'success' : trial.reward > 0 ? 'warning' : 'danger'}>
-                            {trial.reward.toFixed(2)}
-                          </Badge>
-                        )}
-                      </Td>
-                      <Td className="num text-xs text-fg-muted">{formatDuration(trial.duration_seconds)}</Td>
-                      <Td className="text-[11px] text-fg-muted">
-                        <div>{trial.agent}</div>
-                        <div className="truncate text-fg-subtle">{trial.model}</div>
-                      </Td>
-                      <Td className="text-[11px]">
-                        {trial.exception_type ? (
-                          <>
-                            <Badge tone="danger">{trial.exception_type}</Badge>
-                            <div className="mt-0.5 line-clamp-2 text-fg-muted">{trial.exception_message}</div>
-                          </>
-                        ) : (
-                          <span className="text-fg-subtle">—</span>
-                        )}
-                      </Td>
-                    </Tr>
-                  ))}
-                </tbody>
-              </Table>
-            ) : (
-              <EmptyState
-                title="还没有 trial 结果"
-                description="Harbor 会在每个 trial 结束后写入 results.json，这里会自动刷新。"
-              />
-            )}
-          </Card>
+          <TrialBoard jobId={data.id} live={isActive} />
         </TabsContent>
 
         <TabsContent value="config" className="mt-3">

@@ -16,8 +16,10 @@ summary: Harbor pass@k、并发、agent 与密钥怎么配
 | pass@k | `--n-attempts` | 每题尝试次数，结果给出 pass@1..pass@k |
 | 并发 | `--n-concurrent` | 同时跑的 trial 数，受本机 CPU/内存与 Docker 限制 |
 | Agent | `--agent` | `oracle` / `nop` / `claude-code` / `codex` / `terminus` … |
-| 模型 | `--model` | litellm 格式，如 `anthropic/claude-sonnet-4-5` |
-| Agent 环境变量 | `--agent-env` | 注入 agent 容器的 API Key |
+| 模型 | `--model` + `--agent-env` | **选平台的模型配置**：密钥与地址由后端按 Harbor 标准变量注入；也可手填 litellm 格式模型名 |
+| 思考模式 | `--agent-kwarg reasoning_effort=…` | low → max；各 agent 支持的档位不同，超出会自动收敛 |
+| Agent 环境变量 | `--agent-env` | 手填模型时自己给 API Key |
+| 详细日志 | `--debug` | 默认开：每个 trial 装了什么、跑了什么命令、为什么失败都进日志 |
 | Verifier 环境变量 | `--verifier-env` | judge 打分用的 Key，同时写入 `.env` |
 | 沙箱后端 | `--env` | `docker` / `e2b` / `daytona` / `modal` … |
 | 只跑匹配的任务 | `--include-task-name` | glob，多个用逗号分隔 |
@@ -26,6 +28,57 @@ summary: Harbor pass@k、并发、agent 与密钥怎么配
 | 超时倍数 | `--timeout-multiplier` | 慢模型或网络差时调到 2~5 |
 | 强制重建镜像 | `--force-build` | 改过 Dockerfile 后用 |
 | 导出轨迹 | `--export-traces` | 轨迹可直接拿去做 SFT |
+
+## 任务集来源
+
+| 来源 | 说明 |
+|---|---|
+| 已上传的任务集 | 「数据集」页上传的 `harbor_tasks` 压缩包 |
+| **Harbor 官方数据集** | terminal-bench、aider-polyglot、aime … 直接从注册表选。运行时 Harbor 会从 GitHub 拉任务仓库，**机器需要外网** |
+| 服务器目录 | 已经放在机器上的大任务集，填绝对路径 |
+
+## 模型与密钥
+
+模型由管理员在「平台管理 → 模型 API」统一维护，全员可选、密钥不外露。每条配置有一个
+**厂家/协议**，它决定运行时注入哪些环境变量（变量名与 Harbor 自己的
+`model_connection.py` 完全一致）：
+
+| 协议 | 注入 | 适用 |
+|---|---|---|
+| `openai` | `OPENAI_API_KEY` / `OPENAI_BASE_URL` | GPT 系、中转站、任何 OpenAI 兼容端点（含 Qwen 的兼容模式） |
+| `anthropic` | `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` | Claude 系；`claude-code` agent 只认这一档 |
+| `dashscope` | `DASHSCOPE_API_KEY` | 百炼原生入口 |
+| `google` / `openrouter` / `deepseek` / `xai` / `moonshot` | 各自的 `*_API_KEY` / `*_BASE_URL` | |
+
+模型名怎么传也和 agent 有关：CLI 类 agent（codex、claude-code、cursor-cli…）拿到的是
+裸模型名；litellm 类 agent（terminus、mini-swe-agent、aider…）会自动加上 `provider/` 前缀。
+
+**思考模式**（reasoning effort）在 Agent 卡片里选，low → max。各 agent 接受的档位：
+
+| agent | 档位 |
+|---|---|
+| claude-code、cursor-cli、copilot-cli、terminus | low / medium / high / xhigh / max |
+| codex | low / medium / high / xhigh |
+| gemini-cli、aider、openhands | low / medium / high |
+
+选了 agent 不支持的档位，平台会收敛到它支持的最近一档，并在「配置与命令」的说明里写明。
+
+## 任务进展页
+
+评测任务详情默认打开「任务进展」：每个 trial 一行，阶段来自 Harbor 在 trial 目录里
+留下的文件（Docker 把目录挂进容器，文件是实时出现的），**10 条一页**，可按阶段筛：
+
+| 阶段 | 判断依据 |
+|---|---|
+| 待开始 | 在任务清单里但目录还没出现 |
+| 环境准备 | 有 `config.json`；出现 `agent/setup/` 表示容器已起、正在装 agent |
+| Agent 运行 | `agent/` 里出现 agent 的输出文件 |
+| 验证中 | `verifier/` 里出现测试输出 |
+| 完成 | `result.json` 已写且无异常；附 reward（1.0 通过 / 0.0 未通过） |
+| 失败 | `result.json` 带 `exception_info`，如 `AgentSetupTimeoutError` |
+
+点任意一行能看这个 trial 的 `trial.log`、agent 输出、verifier 输出和异常栈——
+排查「为什么这一题挂了」不用再去服务器翻目录。
 
 ## 推荐流程
 

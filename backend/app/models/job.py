@@ -219,7 +219,13 @@ class VerifyConfig(Base):
     registry_dataset: str = ""  # e.g. "terminal-bench@2.0"
 
     agent: str = "oracle"
+    # 二选一：选平台维护的模型配置（推荐，密钥与 base_url 由后端按 Harbor 的标准
+    # 环境变量注入），或者手填 litellm 风格的模型名 + 自己在 agent_env 里给密钥。
+    model_api_id: str = ""
     model: str = ""
+    # 思考模式：留空表示不下发，交给 agent 自己的默认值。各 agent 接受的集合不同，
+    # builder 会收敛到该 agent 支持的最近一档并在 notes 里说明。
+    reasoning_effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
     agent_import_path: str = ""
 
     n_concurrent: int = Field(default=4, ge=1, le=256)
@@ -250,6 +256,9 @@ class VerifyConfig(Base):
     force_build: bool = False  # --force-build
     export_traces: bool = False
     sharegpt: bool = False  # --export-sharegpt
+    # Harbor 的进度条是 rich Live，在非终端里一个字都不会打；--debug 把它的控制台
+    # handler 调到 DEBUG，每个 trial 装了什么、跑了什么命令、为什么失败才会进日志。
+    verbose_log: bool = True
 
     extra_args: dict[str, Any] = Field(default_factory=dict)
 
@@ -302,6 +311,8 @@ class JobProgress(Base):
     # verification-specific
     completed_trials: int = 0
     total_trials: int = 0
+    # 各阶段的 trial 数：pending / setup_environment / running_agent / running_verifier / success / failed
+    trial_phases: dict[str, int] = Field(default_factory=dict)
 
 
 class JobMetricsSummary(Base):

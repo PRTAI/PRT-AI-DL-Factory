@@ -41,10 +41,6 @@ def framework_support() -> dict[str, Any]:
     return _load("framework_support.json")
 
 
-def presets() -> dict[str, Any]:
-    return _load("presets.json")
-
-
 def dataset_specs() -> dict[str, Any]:
     return _load("dataset_specs.json")
 
@@ -54,6 +50,39 @@ def dataset_specs() -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 def llamafactory_templates() -> list[str]:
     return framework_support().get("llamafactory", {}).get("templates", [])
+
+
+# 各 agent 接受的 reasoning_effort 取值，逐个抄自本机 Harbor 源码
+# （claude_code.py 的 CliFlag choices、cursor_cli.py 的 frozenset、terminus_2.py 的 Literal…）。
+# tests/test_model_apis.py 会去解析源码核对；这里只列平台下拉框里有的 low..max。
+_EFFORT_LEVELS: dict[str, list[str]] = {
+    "claude-code": ["low", "medium", "high", "xhigh", "max"],
+    "codex": ["low", "medium", "high", "xhigh"],  # codex CLI 的 model_reasoning_effort
+    "copilot-cli": ["low", "medium", "high", "xhigh", "max"],
+    "cursor-cli": ["low", "medium", "high", "xhigh", "max"],
+    "terminus": ["low", "medium", "high", "xhigh", "max"],
+    "terminus-2": ["low", "medium", "high", "xhigh", "max"],
+    "grok-build": ["low", "medium", "high", "xhigh", "max"],
+    "gemini-cli": ["low", "medium", "high"],
+    "antigravity-cli": ["low", "medium", "high"],
+    "aider": ["low", "medium", "high"],
+    "openhands": ["low", "medium", "high"],
+}
+
+# 模型名怎么传：CLI 类 agent 把 --model 原样交给自己的 CLI（加 provider/ 前缀会被当成
+# 模型名发给 API）；litellm 类 agent 反而要靠前缀知道走哪家协议。
+_LITELLM_AGENTS = {
+    "terminus", "terminus-1", "terminus-2", "mini-swe-agent", "swe-agent",
+    "aider", "goose", "opencode", "openhands", "openhands-sdk", "langgraph", "hermes",
+}
+
+
+def effort_levels_for(agent: str) -> list[str]:
+    return list(_EFFORT_LEVELS.get(agent, []))
+
+
+def model_style_for(agent: str) -> str:
+    return "litellm" if agent in _LITELLM_AGENTS else "bare"
 
 
 def harbor_agents() -> list[dict[str, Any]]:
@@ -92,6 +121,8 @@ def harbor_agents() -> list[dict[str, Any]]:
                 "env_keys": env,
                 "needs_model": name not in {"oracle", "nop"},
                 "recommended": name in {"oracle", "nop", "claude-code", "codex", "terminus"},
+                "effort_levels": effort_levels_for(name),
+                "model_style": model_style_for(name),
             }
         )
     items.sort(key=lambda a: (not a["recommended"], a["name"]))
@@ -107,7 +138,7 @@ def verl_advantage_estimators() -> list[str]:
 
 
 def algorithms() -> list[dict[str, Any]]:
-    return presets().get("algorithms", [])
+    return _load("algorithms.json").get("algorithms", [])
 
 
 _PROBE_TTL = 60.0

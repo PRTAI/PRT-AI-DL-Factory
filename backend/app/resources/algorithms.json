@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "algorithms": [
+    {
+      "id": "sft",
+      "label": "SFT 监督微调",
+      "job_type": "sft",
+      "frameworks": [
+        "llamafactory"
+      ],
+      "dataset_kinds": [
+        "sft_alpaca",
+        "sft_sharegpt"
+      ],
+      "summary": "在指令数据上做有监督微调，是所有后训练的起点。",
+      "doc": "LLaMA-Factory stage=sft。LoRA 适合快速迭代与小显存；full 需要 ZeRO-3 或多卡。"
+    },
+    {
+      "id": "dpo",
+      "label": "DPO 直接偏好优化",
+      "job_type": "sft",
+      "frameworks": [
+        "llamafactory",
+        "trl"
+      ],
+      "dataset_kinds": [
+        "dpo_pairs"
+      ],
+      "summary": "用成对偏好数据直接优化策略，无需奖励模型与采样。",
+      "doc": "LLaMA-Factory stage=dpo，pref_loss=sigmoid 即标准 DPO；pref_loss=orpo/simpo 切换到对应变体。beta 越大越保守。"
+    },
+    {
+      "id": "kto",
+      "label": "KTO",
+      "job_type": "sft",
+      "frameworks": [
+        "llamafactory",
+        "trl"
+      ],
+      "dataset_kinds": [
+        "kto_pairs"
+      ],
+      "summary": "只需要「好/坏」二元标签的偏好对齐方法。",
+      "doc": "数据成本比 DPO 低，适合只有点赞/点踩反馈的场景。"
+    },
+    {
+      "id": "orpo",
+      "label": "ORPO",
+      "job_type": "sft",
+      "frameworks": [
+        "llamafactory"
+      ],
+      "dataset_kinds": [
+        "dpo_pairs"
+      ],
+      "summary": "把 SFT 与偏好优化合成一个阶段，省掉参考模型。",
+      "doc": "stage=dpo + pref_loss=orpo，不需要 reference model，显存占用更低。"
+    },
+    {
+      "id": "simpo",
+      "label": "SimPO",
+      "job_type": "sft",
+      "frameworks": [
+        "llamafactory"
+      ],
+      "dataset_kinds": [
+        "dpo_pairs"
+      ],
+      "summary": "长度归一化的无参考偏好优化。",
+      "doc": "stage=dpo + pref_loss=simpo，通常配合较大的 beta（2.0~2.5）与 gamma。"
+    },
+    {
+      "id": "grpo",
+      "label": "GRPO",
+      "job_type": "rl",
+      "frameworks": [
+        "verl",
+        "trl"
+      ],
+      "dataset_kinds": [
+        "verl_parquet",
+        "harbor_tasks"
+      ],
+      "summary": "组相对策略优化：同一 prompt 采样一组回复，用组内均值做基线，无需 critic。",
+      "doc": "verl: algorithm.adv_estimator=grpo，rollout.n 即组大小（建议 8~16）。TRL: GRPOTrainer，num_generations 对应组大小。"
+    },
+    {
+      "id": "dapo",
+      "label": "DAPO",
+      "job_type": "rl",
+      "frameworks": [
+        "verl"
+      ],
+      "dataset_kinds": [
+        "verl_parquet",
+        "harbor_tasks"
+      ],
+      "summary": "解耦裁剪 + 动态采样的 GRPO 改进版，长思维链 RL 更稳。",
+      "doc": "在 GRPO 基础上：clip_ratio_low/high 解耦（0.2/0.28）、filter_groups 动态过滤全对/全错组、token-level 损失聚合、超长回复软惩罚。"
+    },
+    {
+      "id": "gspo",
+      "label": "GSPO",
+      "job_type": "rl",
+      "frameworks": [
+        "trl"
+      ],
+      "dataset_kinds": [
+        "verl_parquet",
+        "harbor_tasks"
+      ],
+      "summary": "序列级重要性采样的 GRPO 变体，MoE 训练更稳定。",
+      "doc": "TRL: GRPOConfig(importance_sampling_level=\"sequence\")。"
+    },
+    {
+      "id": "ppo",
+      "label": "PPO",
+      "job_type": "rl",
+      "frameworks": [
+        "verl"
+      ],
+      "dataset_kinds": [
+        "verl_parquet"
+      ],
+      "summary": "经典 actor-critic RLHF，需要额外的 critic 与 reward model。",
+      "doc": "verl: algorithm.adv_estimator=gae，需要配置 critic 相关资源，显存占用最高。"
+    },
+    {
+      "id": "rloo",
+      "label": "RLOO",
+      "job_type": "rl",
+      "frameworks": [
+        "verl",
+        "trl"
+      ],
+      "dataset_kinds": [
+        "verl_parquet"
+      ],
+      "summary": "留一法基线的 REINFORCE，实现简单、方差较低。",
+      "doc": "verl: adv_estimator=rloo；TRL: RLOOTrainer。"
+    },
+    {
+      "id": "reinforce_plus_plus",
+      "label": "REINFORCE++",
+      "job_type": "rl",
+      "frameworks": [
+        "verl"
+      ],
+      "dataset_kinds": [
+        "verl_parquet"
+      ],
+      "summary": "带全局基线与归一化技巧的 REINFORCE。",
+      "doc": "verl: adv_estimator=reinforce_plus_plus 或 reinforce_plus_plus_baseline。"
+    },
+    {
+      "id": "remax",
+      "label": "ReMax",
+      "job_type": "rl",
+      "frameworks": [
+        "verl"
+      ],
+      "dataset_kinds": [
+        "verl_parquet"
+      ],
+      "summary": "用贪心解码作为基线的方差缩减方法。",
+      "doc": "verl: adv_estimator=remax，需要额外一次贪心采样。"
+    }
+  ]
+}

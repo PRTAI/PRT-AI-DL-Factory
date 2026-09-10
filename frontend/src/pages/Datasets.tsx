@@ -1,11 +1,11 @@
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Database, Upload } from 'lucide-react'
+import { Database, FlaskConical, GraduationCap, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/store'
 import type { DatasetKind, DatasetSpec } from '@/lib/types'
-import { formatBytes, formatNumber, formatRelative } from '@/lib/utils'
+import { cn, formatBytes, formatNumber, formatRelative } from '@/lib/utils'
 import {
   Badge,
   Button,
@@ -34,8 +34,16 @@ export default function Datasets() {
   const queryClient = useQueryClient()
   const [uploadOpen, setUploadOpen] = React.useState(false)
   const [previewId, setPreviewId] = React.useState<string | null>(null)
+  // 训练数据 / 评测数据：harbor_tasks 是评测用的任务树（做 agentic RL 时也能训），其余都是训练格式
+  const [category, setCategory] = React.useState<'all' | 'train' | 'verify'>('all')
 
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
+  const isVerifyKind = (kind: DatasetKind) => kind === 'harbor_tasks'
+  const visible = (datasets.data ?? []).filter((d) =>
+    category === 'all' ? true : category === 'verify' ? isVerifyKind(d.kind) : !isVerifyKind(d.kind),
+  )
+  const countTrain = (datasets.data ?? []).filter((d) => !isVerifyKind(d.kind)).length
+  const countVerify = (datasets.data ?? []).filter((d) => isVerifyKind(d.kind)).length
   const specs = useQuery({ queryKey: ['dataset-specs'], queryFn: () => api.datasetSpecs() })
 
   const remove = useMutation({
@@ -62,12 +70,39 @@ export default function Datasets() {
         }
       />
 
+      <div className="flex h-10 w-fit items-center gap-0.5 rounded-lg border border-border bg-bg-elevated p-0.5" role="group" aria-label="按用途筛选">
+        {(
+          [
+            ['all', '全部', null, (datasets.data ?? []).length],
+            ['train', '训练数据', GraduationCap, countTrain],
+            ['verify', '评测数据', FlaskConical, countVerify],
+          ] as const
+        ).map(([key, label, Icon, n]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={category === key}
+            onClick={() => setCategory(key)}
+            className={cn(
+              'flex h-full items-center gap-1.5 rounded-md px-4 text-[13px] transition-colors',
+              category === key ? 'bg-card font-medium text-primary shadow-sm' : 'text-fg-muted hover:text-fg',
+            )}
+          >
+            {Icon && <Icon className="h-3.5 w-3.5" aria-hidden />}
+            {label}
+            <span className="num text-[11px] text-fg-subtle">{n}</span>
+          </button>
+        ))}
+      </div>
+
       <Card>
         <CardHeader
-          title="已登记的数据集"
+          title={category === 'train' ? '训练数据集' : category === 'verify' ? '评测数据集' : '已登记的数据集'}
           description={
             datasets.data
-              ? `共 ${datasets.data.length} 个 · 解压后统一存放在 data/datasets/<dataset_id>/`
+              ? `${category === 'all' ? `共 ${datasets.data.length} 个` : `${visible.length} 个`} · 解压后统一存放在 data/datasets/<dataset_id>/${
+                  category === 'verify' ? ' · Harbor 任务树（task.toml / instruction.md / environment / tests）' : ''
+                }`
               : undefined
           }
         />
@@ -75,7 +110,7 @@ export default function Datasets() {
           <CardBody>
             <Skeleton className="h-32 w-full" />
           </CardBody>
-        ) : datasets.data?.length ? (
+        ) : visible.length ? (
           <Table>
             <thead>
               <tr>
@@ -88,7 +123,7 @@ export default function Datasets() {
               </tr>
             </thead>
             <tbody>
-              {datasets.data.map((dataset) => (
+              {visible.map((dataset) => (
                 <Tr key={dataset.id}>
                   <Td>
                     <div className="font-medium text-fg">{dataset.name}</div>
@@ -148,7 +183,7 @@ export default function Datasets() {
         ) : (
           <EmptyState
             icon={<Database className="h-6 w-6" aria-hidden />}
-            title="还没有数据集"
+            title={category === 'train' ? '还没有训练数据集' : category === 'verify' ? '还没有评测数据集' : '还没有数据集'}
             description="上传 zip / tar.gz，平台会按所选格式做结构校验，并生成框架需要的索引文件。"
             action={
               <Button variant="primary" size="sm" onClick={() => setUploadOpen(true)}>

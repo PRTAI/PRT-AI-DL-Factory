@@ -1,12 +1,12 @@
 import * as React from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ChevronDown, Cpu, Database, Rocket, Server, Settings2, Sparkles } from 'lucide-react'
+import { ChevronDown, Cpu, Database, Rocket, Server, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import type { AlgorithmInfo, DatasetKind, ModelEntry, Preset, RLConfig, SFTConfig, TrainStage } from '@/lib/types'
+import type { AlgorithmInfo, DatasetKind, ModelEntry, RLConfig, SFTConfig, TrainStage } from '@/lib/types'
 import { useProject } from '@/lib/store'
-import { cn, deepMerge } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import {
   Badge,
   Button,
@@ -200,7 +200,6 @@ export default function SubmitTraining() {
   const { projectId } = useProject()
 
   const algorithms = useQuery({ queryKey: ['algorithms'], queryFn: () => api.algorithms() })
-  const presets = useQuery({ queryKey: ['presets'], queryFn: () => api.presets() })
   const templates = useQuery({ queryKey: ['templates'], queryFn: () => api.templates() })
   const info = useQuery({ queryKey: ['info'], queryFn: () => api.info() })
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
@@ -253,18 +252,6 @@ export default function SubmitTraining() {
     }
   }
 
-  const applyPreset = (preset: Preset) => {
-    if (isRl) {
-      setRl((previous) => deepMerge(previous as unknown as Record<string, unknown>, preset.config) as unknown as RLConfig)
-      if (preset.framework) setRl((previous) => ({ ...previous, framework: preset.framework as RLConfig['framework'] }))
-      if (preset.algorithm) setAlgorithm(preset.algorithm)
-    } else {
-      setSft((previous) => deepMerge(previous as unknown as Record<string, unknown>, preset.config) as unknown as SFTConfig)
-    }
-    if (preset.recommended_gpus) setNGpus(Math.min(preset.recommended_gpus, info.data?.gpu_total || preset.recommended_gpus))
-    toast.success(`已应用预设：${preset.label}`)
-  }
-
   const submit = useMutation({
     mutationFn: () => {
       const payload = {
@@ -299,11 +286,6 @@ export default function SubmitTraining() {
     }
     return problems
   }, [name, isRl, rl, sft, nGpus])
-
-  // RL presets are framework-specific; SFT presets always apply.
-  const relevantPresets = (isRl ? (presets.data?.rl_presets ?? []) : (presets.data?.sft_presets ?? [])).filter(
-    (preset) => !isRl || !preset.framework || preset.framework === rl.framework,
-  )
 
   return (
     <div className="space-y-4">
@@ -518,28 +500,9 @@ export default function SubmitTraining() {
           {/* ----------------------------------------------- parameters -- */}
           <Section
             title="训练参数"
-            description="先套用预设，再按需微调"
+            description="默认值已按常见配置给好，按需修改即可"
             icon={<Settings2 className="h-4 w-4" aria-hidden />}
           >
-            {relevantPresets.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {relevantPresets.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => applyPreset(preset)}
-                    className="rounded-lg border border-border px-3 py-2 text-left transition-colors hover:border-primary hover:bg-primary-soft"
-                  >
-                    <div className="flex items-center gap-1.5 text-xs font-medium text-fg">
-                      <Sparkles className="h-3 w-3 text-primary" aria-hidden />
-                      {preset.label}
-                    </div>
-                    <p className="mt-0.5 max-w-64 text-[11px] leading-relaxed text-fg-subtle">{preset.description}</p>
-                  </button>
-                ))}
-              </div>
-            )}
-
             {isRl ? <RlParams rl={rl} setRl={setRl} /> : <SftParams sft={sft} setSft={setSft} />}
           </Section>
 
