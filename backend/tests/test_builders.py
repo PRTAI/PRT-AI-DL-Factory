@@ -281,7 +281,7 @@ def test_trl_gspo_sets_sequence_importance_sampling(tmp_path, parquet_dataset):
     job = _job(JobType.RL, Framework.TRL, rl=config)
     result = trl_builder.build(job, tmp_path / "w", tmp_path / "o")
     script = result.files["train_gspo.py"]
-    assert '"importance_sampling_level": "sequence"' in script
+    assert "'importance_sampling_level': 'sequence'" in script
     assert "outcome_reward" in script
 
 
@@ -375,3 +375,31 @@ def test_harbor_requires_task_source(tmp_path, monkeypatch):
     job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(agent="oracle"))
     with pytest.raises(BuildError, match="任务集"):
         harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+
+
+def test_generated_trl_scripts_are_valid_python(tmp_path, harbor_dataset, parquet_dataset):
+    """生成的训练脚本必须能被 Python 编译。
+
+    真机回归：配置曾用 json.dumps 嵌进脚本，`"bf16": true` 在 Python 里是未定义的名字，
+    GRPO 任务一启动就 NameError。
+    """
+    cases = [
+        ("harbor", RLConfig(framework=Framework.TRL, algorithm=TrainStage.GRPO, model_path="/tmp/m",
+                            dataset_id=harbor_dataset.id, use_kl_loss=True, total_training_steps=None)),
+        ("grpo", RLConfig(framework=Framework.TRL, algorithm=TrainStage.GRPO, model_path="/tmp/m",
+                          dataset_id=parquet_dataset.id, gradient_checkpointing=True)),
+        ("dpo", RLConfig(framework=Framework.TRL, algorithm=TrainStage.DPO, model_path="/tmp/m",
+                         dataset_id=parquet_dataset.id, total_training_steps=None)),
+        ("custom-reward", RLConfig(framework=Framework.TRL, algorithm=TrainStage.GRPO, model_path="/tmp/m",
+                                   dataset_id=parquet_dataset.id, custom_reward_function_path="/tmp/r.py",
+                                   custom_reward_function_name="score")),
+    ]
+    for name, config in cases:
+        if name == "harbor":
+            config.harbor.enabled = True
+        job = _job(JobType.RL, Framework.TRL, rl=config)
+        result = trl_builder.build(job, tmp_path / f"w-{name}", tmp_path / "o")
+        for filename, source in result.files.items():
+            compile(source, filename, "exec")  # 语法错就在这里炸，而不是排队几分钟后
+            assert "true" not in source.split("CONFIG = ")[1].split("\n\n")[0].replace("True", "")
+            assert "null" not in source

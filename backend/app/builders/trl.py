@@ -15,7 +15,6 @@ is reproducible from the job work dir.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from ..config import settings
@@ -223,8 +222,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
             job_name=job.name,
             model_path=config.model_path,
             data_files=", ".join(data_files),
-            data_files_json=json.dumps(data_files, ensure_ascii=False),
-            eval_files_json=json.dumps(eval_files, ensure_ascii=False),
+            data_files_json=_pretty(data_files),
+            eval_files_json=_pretty(eval_files),
             config_json=_pretty(trainer_config),
             reward_block=reward_block,
             reward_kwarg=reward_kwarg,
@@ -365,5 +364,12 @@ def _apply_attn(cfg: dict, attn: str) -> None:
     cfg["model_init_kwargs"] = kwargs
 
 
-def _pretty(payload: dict) -> str:
-    return json.dumps(payload, ensure_ascii=False, indent=4)
+def _pretty(payload: object) -> str:
+    """把配置渲染成 **Python** 字面量嵌进生成脚本。
+
+    之前用的是 json.dumps —— JSON 的 true / false / null 在 Python 源码里是未定义的名字，
+    真跑时第一行 ``"bf16": true`` 就 NameError。测试会把生成的脚本 compile 一遍。
+    """
+    import pprint
+
+    return pprint.pformat(payload, indent=4, width=100, sort_dicts=False)

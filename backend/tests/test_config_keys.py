@@ -279,7 +279,7 @@ def test_rl_attn_auto_falls_back_when_flash_attn_missing(tmp_path, parquet_datas
             make_job(Framework.TRL, "auto"), tmp_path / f"trl-auto-{expected}", tmp_path / "o"
         )
         body = next(iter(trl_result.files.values()))
-        assert f'"attn_implementation": "{expected}"' in body
+        assert f"'attn_implementation': '{expected}'" in body
 
     # "default" 表示完全不下发
     monkeypatch.setattr(resources_service, "has_flash_attn", lambda _bin: False)
@@ -316,8 +316,8 @@ def test_trl_attn_implementation_goes_through_model_init_kwargs(tmp_path, parque
     )
     script = trl_builder.build(job, tmp_path / "trl-attn", tmp_path / "o")
     body = next(iter(script.files.values()))
-    assert '"model_init_kwargs"' in body
-    assert '"attn_implementation": "flash_attention_2"' in body
+    assert "'model_init_kwargs'" in body
+    assert "'attn_implementation': 'flash_attention_2'" in body
 
     grpo_config = settings.trl_root / "trl" / "trainer" / "grpo_config.py"
     if grpo_config.is_file():
