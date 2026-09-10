@@ -252,6 +252,9 @@ export interface RLConfig {
   overlong_penalty_factor: number
   rollout: RolloutSpec
   harbor: HarborEnvSpec
+  /** RL 也支持 LoRA：全参 + vLLM colocate 在单卡上常常装不下 */
+  finetuning_type: 'full' | 'lora'
+  lora: LoraSpec
   attn_implementation: 'auto' | 'flash_attention_2' | 'sdpa' | 'eager' | 'default'
   strategy: 'fsdp' | 'fsdp2' | 'megatron'
   param_offload: boolean

@@ -182,6 +182,12 @@ class RLConfig(Base):
     rollout: RolloutSpec = Field(default_factory=RolloutSpec)
     harbor: HarborEnvSpec = Field(default_factory=HarborEnvSpec)
 
+    # LoRA：GRPO 全参 + vLLM colocate 在单张 80G 卡上装不下 4B 模型
+    # （真机实测 OOM），LoRA 能把可训练参数和优化器状态降一个量级。
+    # TRL 的四个 Trainer 都收 peft_config，见 tests/test_config_keys.py。
+    finetuning_type: Literal["full", "lora"] = "full"
+    lora: LoraSpec = Field(default_factory=LoraSpec)
+
     # engine / parallelism
     # auto（默认）：装了 flash-attn 就用 flash_attention_2，否则回落到 sdpa ——
     # 直接把 flash_attention_2 当默认值会在没装 flash-attn 的机器上，

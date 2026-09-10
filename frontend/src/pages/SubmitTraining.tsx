@@ -126,6 +126,8 @@ const DEFAULT_RL: RLConfig = {
     max_tool_calling_iterations: 25,
     include_metadata: true,
   },
+  finetuning_type: 'full',
+  lora: { rank: 8, alpha: 16, dropout: 0.05, target: 'all', create_new_adapter: false },
   attn_implementation: 'auto',
   strategy: 'fsdp2',
   param_offload: false,
@@ -927,6 +929,23 @@ function RlParams({ rl, setRl }: { rl: RLConfig; setRl: React.Dispatch<React.Set
           <NumberInput value={rl.total_epochs} min={1} onChange={(value) => patch({ total_epochs: value ?? 1 })} />
         </Field>
         <Field
+          label="微调方式"
+          hint={
+            rl.finetuning_type === 'lora'
+              ? '只训练低秩适配器，显存与优化器状态低一个量级'
+              : '全参训练；单卡跑 4B 以上 + vLLM colocate 很容易 OOM'
+          }
+        >
+          <Select
+            value={rl.finetuning_type}
+            onValueChange={(value) => patch({ finetuning_type: value as RLConfig['finetuning_type'] })}
+            options={[
+              { value: 'full', label: '全参数', description: '显存占用最高' },
+              { value: 'lora', label: 'LoRA', description: '显存友好，单卡首选' },
+            ]}
+          />
+        </Field>
+        <Field
           label="加速 attn_implementation"
           hint={
             rl.framework === 'verl'
@@ -942,6 +961,23 @@ function RlParams({ rl, setRl }: { rl: RLConfig; setRl: React.Dispatch<React.Set
           />
         </Field>
       </Grid>
+
+      {rl.finetuning_type === 'lora' && (
+        <Grid cols={4}>
+          <Field label="LoRA rank">
+            <NumberInput value={rl.lora.rank} min={1} onChange={(v) => setRl((p) => ({ ...p, lora: { ...p.lora, rank: v ?? 8 } }))} />
+          </Field>
+          <Field label="LoRA alpha" hint="经验值：alpha = 2 × rank">
+            <NumberInput value={rl.lora.alpha} min={1} onChange={(v) => setRl((p) => ({ ...p, lora: { ...p.lora, alpha: v ?? 16 } }))} />
+          </Field>
+          <Field label="LoRA dropout">
+            <NumberInput value={rl.lora.dropout} step="0.01" onChange={(v) => setRl((p) => ({ ...p, lora: { ...p.lora, dropout: v ?? 0 } }))} />
+          </Field>
+          <Field label="作用模块" hint="all 表示所有线性层">
+            <Input value={rl.lora.target} onChange={(e) => setRl((p) => ({ ...p, lora: { ...p.lora, target: e.target.value } }))} />
+          </Field>
+        </Grid>
+      )}
 
       <div>
         <h4 className="mb-2 text-xs font-semibold text-fg-muted">采样 (rollout)</h4>

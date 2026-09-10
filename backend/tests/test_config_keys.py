@@ -580,3 +580,67 @@ def test_trl_config_keys_are_known(tmp_path, parquet_dataset):
         emitted = set(_generated_config(next(iter(result.files.values()))))
         unknown = sorted(emitted - known)
         assert not unknown, f"{class_name} 不认识这些键: {unknown}"
+
+
+def test_trl_lora_uses_real_peft_fields(tmp_path, parquet_dataset, harbor_dataset=None):
+    """RL 的 LoRA 走 TRL 的 peft_config；字段名以本机 peft 的 LoraConfig 为准。
+
+    背景：单卡 H800 上 GRPO 全参 + vLLM colocate 实测 OOM，加 LoRA 是为了把
+    可训练参数和优化器状态降一个量级。
+    """
+    from backend.app.builders import trl as trl_builder
+
+    trainer_dir = settings.trl_root / "trl" / "trainer"
+    if not trainer_dir.is_dir():
+        pytest.skip("TRL 源码不可用")
+
+    # 四个 Trainer 都必须真的收 peft_config，否则生成的脚本会 TypeError
+    for filename in ("grpo_trainer.py", "rloo_trainer.py", "dpo_trainer.py", "kto_trainer.py"):
+        source = (trainer_dir / filename).read_text(encoding="utf-8")
+        assert "peft_config" in source, filename
+
+    try:
+        import dataclasses
+
+        from peft import LoraConfig
+
+        lora_fields = {f.name for f in dataclasses.fields(LoraConfig)} | {"r", "task_type"}
+    except ImportError:
+        lora_fields = set()
+
+    for algorithm in (TrainStage.GRPO, TrainStage.DPO):
+        config = RLConfig(
+            framework=Framework.TRL, algorithm=algorithm, model_path="/tmp/m",
+            dataset_id=parquet_dataset.id, finetuning_type="lora",
+        )
+        job = Job(name="lora", type=JobType.RL, framework=Framework.TRL, owner_id="usr_keys",
+                  resources=ResourceSpec(n_gpus=1), rl=config)
+        result = trl_builder.build(job, tmp_path / f"lora-{algorithm.value}", tmp_path / "o")
+        source = next(s for n, s in result.files.items() if n.endswith(".py"))
+        compile(source, "gen", "exec")
+        assert "from peft import LoraConfig" in source
+        assert "peft_config=PEFT_CONFIG" in source or 'kwargs["peft_config"] = PEFT_CONFIG' in source
+
+        # PEFT_CONFIG 的每个键都得是 LoraConfig 认识的
+        tree = ast.parse(source)
+        # 生成的是 LoraConfig(**{...})，参数在 keywords[0].value 上
+        kwargs = next(
+            ast.literal_eval(node.value.keywords[0].value)
+            for node in tree.body
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "PEFT_CONFIG"
+        )
+        if lora_fields:
+            unknown = sorted(set(kwargs) - lora_fields)
+            assert not unknown, f"LoraConfig 不认识这些键: {unknown}"
+        assert kwargs["target_modules"] == "all-linear"  # "all" -> peft 的写法
+
+    # 全参时不该出现任何 peft 痕迹
+    plain = RLConfig(framework=Framework.TRL, algorithm=TrainStage.GRPO, model_path="/tmp/m",
+                     dataset_id=parquet_dataset.id)
+    job = Job(name="full", type=JobType.RL, framework=Framework.TRL, owner_id="usr_keys",
+              resources=ResourceSpec(n_gpus=1), rl=plain)
+    result = trl_builder.build(job, tmp_path / "full", tmp_path / "o")
+    source = next(s for n, s in result.files.items() if n.endswith(".py"))
+    # 不能整串搜 "peft"：pytest 的临时目录名里就带这个词（测试函数名的一部分）
+    assert "from peft import" not in source
+    assert "PEFT_CONFIG" not in source

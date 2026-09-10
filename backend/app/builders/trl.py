@@ -45,9 +45,9 @@ Tasks: {tasks_root}
 
 from trl import GRPOConfig, GRPOTrainer
 from trl.experimental.harbor import HarborSpec
-
+{peft_import}
 CONFIG = {config_json}
-
+{peft_block}
 
 def main() -> None:
     spec = HarborSpec(
@@ -61,7 +61,7 @@ def main() -> None:
         args=GRPOConfig(**CONFIG),
         train_dataset=spec.train_dataset,
         environment_factory=spec.environment_factory,
-        reward_funcs=spec.reward_funcs,
+        reward_funcs=spec.reward_funcs,{peft_kwarg}
     )
     trainer.train()
     trainer.save_model(CONFIG["output_dir"])
@@ -82,11 +82,11 @@ import re
 
 from datasets import load_dataset
 from trl import {trainer_name}, {config_name}
-
+{peft_import}
 CONFIG = {config_json}
 DATA_FILES = {data_files_json}
 EVAL_FILES = {eval_files_json}
-
+{peft_block}
 
 def _load(files):
     if not files:
@@ -109,7 +109,7 @@ def main() -> None:
     )
     if eval_dataset is not None:
         kwargs["eval_dataset"] = eval_dataset
-{reward_kwarg}
+{peft_assign}{reward_kwarg}
     trainer = {trainer_name}(**kwargs)
     trainer.train()
     trainer.save_model(CONFIG["output_dir"])
@@ -163,6 +163,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     notes: list[str] = []
     extra_files: dict[str, str] = {}
     harbor_pythonpath: list[str] = []
+    peft = _peft_snippets(config, notes)
     # 必须在渲染脚本之前定下来：配置是以字面量嵌进生成脚本里的，
     # 渲染完再改 dict 不会反映到脚本内容里。
     attn, attn_note = resolve_attn_implementation(
@@ -184,6 +185,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
             _grpo_config(job, config, output_dir, agentic=True, attn=attn), "GRPOConfig", notes
         )
         script = HARBOR_SCRIPT.format(
+            **peft,
             job_id=job.id,
             job_name=job.name,
             model_path=config.model_path,
@@ -229,6 +231,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
             reward_kwarg = ""
         script_name = f"train_{config.algorithm.value}.py"
         script = TABULAR_SCRIPT.format(
+            **peft,
             trainer_name=trainer_name,
             config_name=config_name,
             job_id=job.id,
@@ -315,6 +318,42 @@ def _tabular_files(dataset, config: RLConfig) -> tuple[list[str], list[str]]:
         if eval_dataset is not None:
             evals = [str(Path(eval_dataset.root_path) / f.path) for f in eval_dataset.files]
     return train, evals
+
+
+def _peft_snippets(config: RLConfig, notes: list[str]) -> dict[str, str]:
+    """LoRA 的三段代码：import、PEFT_CONFIG 常量、传给 Trainer 的关键字。
+
+    TRL 的 GRPO/RLOO/DPO/KTO Trainer 都接 ``peft_config``（见各 trainer 的 __init__），
+    字段名以本机 peft 的 ``LoraConfig`` dataclass 为准。
+    """
+    if config.finetuning_type != "lora":
+        return {"peft_import": "", "peft_block": "", "peft_kwarg": "", "peft_assign": ""}
+
+    spec = config.lora
+    # target_modules: "all" -> peft 的 "all-linear"；否则按逗号分隔的列表
+    target = spec.target.strip()
+    if target in {"", "all"}:
+        modules: object = "all-linear"
+    else:
+        modules = [item.strip() for item in target.split(",") if item.strip()]
+    lora_kwargs = {
+        "r": spec.rank,
+        "lora_alpha": spec.alpha,
+        "lora_dropout": spec.dropout,
+        "target_modules": modules,
+        "task_type": "CAUSAL_LM",
+    }
+    notes.append(
+        f"LoRA：rank {spec.rank} / alpha {spec.alpha} / dropout {spec.dropout} / "
+        f"target {modules if isinstance(modules, str) else ','.join(modules)}"
+        "（只训练适配器，显存与优化器状态都低一个量级）"
+    )
+    return {
+        "peft_import": "from peft import LoraConfig\n",
+        "peft_block": f"PEFT_CONFIG = LoraConfig(**{_pretty(lora_kwargs)})\n",
+        "peft_kwarg": "\n        peft_config=PEFT_CONFIG,",
+        "peft_assign": '    kwargs["peft_config"] = PEFT_CONFIG\n',
+    }
 
 
 def _harbor_import_files(notes: list[str]) -> tuple[dict[str, str], str]:
