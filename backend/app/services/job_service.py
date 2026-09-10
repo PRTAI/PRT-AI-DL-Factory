@@ -209,7 +209,10 @@ def _validate_rl(payload: JobCreate) -> None:
         config.harbor.enabled = True
     if config.framework == Framework.VERL and config.algorithm == TrainStage.GSPO:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="GSPO 请使用 TRL 框架")
-    if config.rollout.n < 2 and config.algorithm in {TrainStage.GRPO, TrainStage.DAPO, TrainStage.GSPO}:
+    # GRPO / RLOO 系都要求至少 2 条采样才能算组内相对优势（TRL 自己也会拒）
+    if config.rollout.n < 2 and config.algorithm in {
+        TrainStage.GRPO, TrainStage.DAPO, TrainStage.GSPO, TrainStage.RLOO
+    }:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="组相对算法的 rollout 组大小至少为 2")
 
 

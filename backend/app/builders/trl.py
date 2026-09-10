@@ -23,6 +23,9 @@ from ..services import dataset_service
 from ..store import store
 from .base import BuildError, BuildResult, resolve_attn_implementation
 
+# 组相对算法：num_generations 是「组大小」，生成批次必须是它的整数倍
+_GROUP_ALGOS = {TrainStage.GRPO, TrainStage.DAPO, TrainStage.GSPO, TrainStage.RLOO}
+
 _SUPPORTED = {
     TrainStage.GRPO,
     TrainStage.DAPO,
@@ -171,7 +174,9 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         if config.algorithm not in {TrainStage.GRPO, TrainStage.DAPO, TrainStage.GSPO}:
             raise BuildError("Harbor 环境模式目前只支持 GRPO / GSPO")
         script_name = "train_harbor_grpo.py"
-        trainer_config = _grpo_config(job, config, output_dir, agentic=True, attn=attn)
+        trainer_config = _drop_unknown_keys(
+            _grpo_config(job, config, output_dir, agentic=True, attn=attn), "GRPOConfig", notes
+        )
         script = HARBOR_SCRIPT.format(
             job_id=job.id,
             job_name=job.name,
@@ -192,10 +197,12 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     else:
         trainer_name, config_name = _trainer_for(config.algorithm)
         data_files, eval_files = _tabular_files(dataset, config)
-        trainer_config = (
+        trainer_config = _drop_unknown_keys(
             _grpo_config(job, config, output_dir, agentic=False, attn=attn)
             if trainer_name in {"GRPOTrainer", "RLOOTrainer"}
-            else _preference_config(job, config, output_dir, attn=attn)
+            else _preference_config(job, config, output_dir, attn=attn),
+            config_name,
+            notes,
         )
         if trainer_name in {"GRPOTrainer", "RLOOTrainer"}:
             if config.custom_reward_function_path:
@@ -251,6 +258,14 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         "ACCELERATE_LOG_LEVEL": "info",
     }
     notes.insert(0, f"TRL {config.algorithm.value.upper()}，{n_gpus} GPU")
+    if config.algorithm in _GROUP_ALGOS:
+        per_device, accum, effective = _group_batch(config.train_batch_size, config.rollout.n, n_gpus)
+        notes.append(
+            f"批次换算：每卡 batch {per_device}（= 组大小，保证生成批次里都是完整的组）× "
+            f"{n_gpus} 卡 × 梯度累积 {accum} → 每轮 {effective} 个 prompt、"
+            f"{effective * config.rollout.n} 条采样"
+            + ("" if effective == config.train_batch_size else f"（填的是 {config.train_batch_size}，已向上取整到卡数的整数倍）")
+        )
     if attn_note:
         notes.append(f"{attn_note}（走 model_init_kwargs）")
 
@@ -294,15 +309,33 @@ def _tabular_files(dataset, config: RLConfig) -> tuple[list[str], list[str]]:
     return train, evals
 
 
+def _group_batch(prompts: int, group_size: int, n_gpus: int) -> tuple[int, int, int]:
+    """把「每轮多少 prompt + 组大小」翻译成 TRL 的三个批次参数。
+
+    TRL 里 ``generation_batch_size = per_device_train_batch_size × 卡数 × steps_per_generation``
+    （后者默认取 ``gradient_accumulation_steps``），而且**必须能被 num_generations 整除**
+    ——生成批次里不能出现半个组。直接把 prompt 数当每卡 batch 会炸：
+    ``generation_batch_size (2) must be divisible by num_generations (8)``。
+
+    所以让每卡每步正好跑一个完整的组，用梯度累积去凑 prompt 数。
+    返回 ``(每卡 batch, 梯度累积, 实际每轮 prompt 数)``。
+    """
+    per_device = group_size
+    accum = max(1, -(-prompts // n_gpus))  # 向上取整，至少 1
+    return per_device, accum, accum * n_gpus
+
+
 def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool, attn: str) -> dict:
     n_gpus = max(1, job.resources.n_gpus)
+    per_device, accum, _ = _group_batch(config.train_batch_size, config.rollout.n, n_gpus)
     cfg: dict = {
         "output_dir": str(output_dir),
         "learning_rate": config.learning_rate,
-        "per_device_train_batch_size": max(1, config.train_batch_size // n_gpus),
-        "gradient_accumulation_steps": 1,
+        "per_device_train_batch_size": per_device,
+        "gradient_accumulation_steps": accum,
         "num_generations": config.rollout.n,
-        "max_prompt_length": config.max_prompt_length,
+        # 本机这版 TRL 已经没有 max_prompt_length（GRPOConfig 只剩 max_completion_length，
+        # prompt 由 trainer 按 truncation_side="left" 处理），发了会直接 TypeError。
         "max_completion_length": config.max_response_length,
         "num_train_epochs": config.total_epochs,
         "temperature": config.rollout.temperature,
@@ -310,7 +343,6 @@ def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool,
         "beta": config.kl_loss_coef if config.use_kl_loss else 0.0,
         "epsilon": config.clip_ratio_low,
         "epsilon_high": config.clip_ratio_high,
-        "loss_type": "dapo" if config.algorithm == TrainStage.DAPO else "bnpo",
         "logging_steps": 1,
         "save_steps": config.save_freq,
         "bf16": True,
@@ -320,6 +352,9 @@ def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool,
     }
     if config.total_training_steps:
         cfg["max_steps"] = config.total_training_steps
+    if config.algorithm != TrainStage.RLOO:
+        # loss_type / importance_sampling_level 是 GRPOConfig 独有的，RLOOConfig 没有
+        cfg["loss_type"] = "dapo" if config.algorithm == TrainStage.DAPO else "bnpo"
     if config.algorithm == TrainStage.GSPO:
         cfg["importance_sampling_level"] = "sequence"
     if config.rollout.backend == "vllm":
@@ -342,8 +377,8 @@ def _preference_config(job: Job, config: RLConfig, output_dir: Path, *, attn: st
         "per_device_train_batch_size": max(1, config.train_batch_size // n_gpus),
         "gradient_accumulation_steps": 1,
         "num_train_epochs": config.total_epochs,
+        # DPO/KTO 只有 max_length（prompt+response 总长），没有单独的 max_prompt_length
         "max_length": config.max_prompt_length + config.max_response_length,
-        "max_prompt_length": config.max_prompt_length,
         "logging_steps": 10,
         "save_steps": config.save_freq,
         "bf16": True,
@@ -362,6 +397,74 @@ def _apply_attn(cfg: dict, attn: str) -> None:
     kwargs = dict(cfg.get("model_init_kwargs") or {})
     kwargs["attn_implementation"] = attn
     cfg["model_init_kwargs"] = kwargs
+
+
+_FIELD_CACHE: dict[str, tuple[float, set[str]]] = {}
+
+
+def _declared_fields(path: Path, class_name: str) -> set[str]:
+    """解析某个 dataclass 声明的字段名（按 mtime 缓存）。"""
+    import ast
+
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return set()
+    key = f"{path}|{class_name}"
+    cached = _FIELD_CACHE.get(key)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return set()
+    fields: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            fields = {
+                item.target.id
+                for item in node.body
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name)
+            }
+            break
+    _FIELD_CACHE[key] = (mtime, fields)
+    return fields
+
+
+def _known_config_keys(config_name: str) -> set[str]:
+    """``<Xxx>Config`` 自己的字段 + 继承来的 ``TrainingArguments`` 字段。
+
+    TRL 各版本之间这些字段改得很勤（本机这版就把 ``max_prompt_length`` 整个拿掉了，
+    ``loss_type`` 也只有 GRPOConfig 有）。发一个它不认识的键，任务会在
+    ``XxxConfig(**CONFIG)`` 那一行直接 TypeError —— 而那已经是排队拿到 GPU 之后了。
+    """
+    trainer_dir = settings.trl_root / "trl" / "trainer"
+    # GRPOConfig -> grpo_config.py
+    stem = config_name.removesuffix("Config").lower()
+    own = _declared_fields(trainer_dir / f"{stem}_config.py", config_name)
+    if not own:
+        return set()  # 解析不出来就不过滤，别帮倒忙
+
+    base: set[str] = set()
+    interpreter = Path(settings.python_for("trl"))
+    if interpreter.is_absolute():
+        for candidate in sorted(interpreter.resolve().parents[1].glob(
+            "lib/python3*/site-packages/transformers/training_args.py"
+        )):
+            base |= _declared_fields(candidate, "TrainingArguments")
+    return own | base
+
+
+def _drop_unknown_keys(cfg: dict, config_name: str, notes: list[str]) -> dict:
+    known = _known_config_keys(config_name)
+    if not known:
+        return cfg
+    unknown = [key for key in cfg if key not in known]
+    if unknown:
+        notes.append(
+            f"以下参数在本机这版 TRL 的 {config_name} 里不存在，已跳过：{', '.join(sorted(unknown))}"
+        )
+    return {key: value for key, value in cfg.items() if key in known}
 
 
 def _pretty(payload: object) -> str:

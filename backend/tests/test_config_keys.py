@@ -518,3 +518,65 @@ def test_generated_framework_support_is_current():
         assert "docker" in payload["harbor"]["environments"]
     if (settings.verl_root / "verl").is_dir():
         assert "grpo" in payload["verl"]["advantage_estimators"]
+
+
+# --------------------------------------------------------------------------- #
+# TRL：生成脚本里 CONFIG 的每个键都必须是 XxxConfig / TrainingArguments 声明过的字段
+# --------------------------------------------------------------------------- #
+def _dataclass_fields(path: Path, class_name: str) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == class_name:
+            return {
+                n.target.id for n in node.body
+                if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+            }
+    return set()
+
+
+def _generated_config(script: str) -> dict:
+    """从生成脚本里把 CONFIG 字面量抠出来（它是合法 Python，直接 literal_eval）。"""
+    tree = ast.parse(script)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "CONFIG" for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError("生成脚本里没有 CONFIG = {...}")
+
+
+def test_trl_config_keys_are_known(tmp_path, parquet_dataset):
+    """真机回归：GRPO 一启动就 `GRPOConfig.__init__() got an unexpected keyword argument
+    'max_prompt_length'` —— 本机这版 TRL 把它从所有 Config 里拿掉了。"""
+    from backend.app.builders import trl as trl_builder
+
+    trainer_dir = settings.trl_root / "trl" / "trainer"
+    if not trainer_dir.is_dir():
+        pytest.skip("TRL 源码不可用")
+    training_args = None
+    for candidate in sorted(Path(settings.python_for("trl")).resolve().parents[1].glob(
+        "lib/python3*/site-packages/transformers/training_args.py"
+    )):
+        training_args = candidate
+    base = _dataclass_fields(training_args, "TrainingArguments") if training_args else set()
+    assert base or training_args is None, "没解析出 TrainingArguments 的字段"
+
+    cases = {
+        TrainStage.GRPO: ("grpo_config.py", "GRPOConfig"),
+        TrainStage.GSPO: ("grpo_config.py", "GRPOConfig"),
+        TrainStage.RLOO: ("rloo_config.py", "RLOOConfig"),
+        TrainStage.DPO: ("dpo_config.py", "DPOConfig"),
+        TrainStage.KTO: ("kto_config.py", "KTOConfig"),
+    }
+    for algorithm, (filename, class_name) in cases.items():
+        own = _dataclass_fields(trainer_dir / filename, class_name)
+        assert own, f"{filename} 里没解析出 {class_name}"
+        known = own | base
+        config = RLConfig(
+            framework=Framework.TRL, algorithm=algorithm, model_path="/tmp/m",
+            dataset_id=parquet_dataset.id, total_training_steps=5, attn_implementation="sdpa",
+        )
+        job = Job(name="keys-trl", type=JobType.RL, framework=Framework.TRL, owner_id="usr_keys",
+                  resources=ResourceSpec(n_gpus=1), rl=config)
+        result = trl_builder.build(job, tmp_path / f"trl-{algorithm.value}", tmp_path / "o")
+        emitted = set(_generated_config(next(iter(result.files.values()))))
+        unknown = sorted(emitted - known)
+        assert not unknown, f"{class_name} 不认识这些键: {unknown}"

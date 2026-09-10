@@ -403,3 +403,41 @@ def test_generated_trl_scripts_are_valid_python(tmp_path, harbor_dataset, parque
             compile(source, filename, "exec")  # 语法错就在这里炸，而不是排队几分钟后
             assert "true" not in source.split("CONFIG = ")[1].split("\n\n")[0].replace("True", "")
             assert "null" not in source
+
+
+def test_trl_generation_batch_is_divisible_by_group_size(tmp_path, parquet_dataset):
+    """TRL 要求 generation_batch_size 能被 num_generations 整除，否则 Config 直接拒。
+
+    真机回归：GRPO 一启动就
+    `generation_batch_size (2) must be divisible by num_generations (8)`。
+    """
+    from backend.app.builders.trl import _group_batch
+
+    for prompts in (1, 2, 7, 8, 64, 65):
+        for group in (2, 4, 8, 16):
+            for n_gpus in (1, 2, 4):
+                per_device, accum, effective = _group_batch(prompts, group, n_gpus)
+                generation_batch = per_device * n_gpus * accum
+                assert generation_batch % group == 0, (prompts, group, n_gpus)
+                assert accum >= 1 and per_device >= 1
+                assert effective >= prompts - n_gpus  # 只向上取整到卡数的整数倍
+
+    # 端到端：生成脚本里的三个数也要满足这个约束
+    for algorithm, group in ((TrainStage.GRPO, 8), (TrainStage.RLOO, 4)):
+        config = RLConfig(
+            framework=Framework.TRL, algorithm=algorithm, model_path="/tmp/m",
+            dataset_id=parquet_dataset.id, train_batch_size=2,
+        )
+        config.rollout.n = group
+        job = _job(JobType.RL, Framework.TRL, rl=config)
+        result = trl_builder.build(job, tmp_path / f"batch-{algorithm.value}", tmp_path / "o")
+        source = next(iter(result.files.values()))
+        cfg = {}
+        import ast
+        for node in ast.parse(source).body:
+            if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", "") == "CONFIG":
+                cfg = ast.literal_eval(node.value)
+        generation_batch = cfg["per_device_train_batch_size"] * 1 * cfg["gradient_accumulation_steps"]
+        assert generation_batch % cfg["num_generations"] == 0, cfg
+        # RLOOConfig 没有 loss_type
+        assert ("loss_type" in cfg) == (algorithm != TrainStage.RLOO)
