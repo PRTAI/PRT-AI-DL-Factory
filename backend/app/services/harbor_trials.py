@@ -261,6 +261,9 @@ def counts(states: list[TrialState]) -> dict[str, int]:
     for state in states:
         out[state.phase] = out.get(state.phase, 0) + 1
     out["passed"] = sum(1 for s in states if s.passed)
+    # 有 reward 的 trial 数。Harbor 允许「有 reward 也有异常」（agent 超时但 verifier 仍打了分），
+    # 这种算作已打分，分数分布里不能再记一次「异常」。
+    out["scored"] = sum(1 for s in states if s.reward is not None)
     out["total"] = len(states)
     return out
 

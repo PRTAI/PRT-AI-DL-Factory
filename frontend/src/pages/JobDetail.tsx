@@ -56,6 +56,7 @@ import {
 import { CopyButton, FRAMEWORK_LABEL, JobTypeBadge, Mono, PageHeader, StatusBadge } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
 import { TrialBoard } from '@/components/TrialBoard'
+import { VerifyOverview } from '@/components/VerifyOverview'
 import { LineSeriesChart } from '@/components/charts'
 
 export default function JobDetail() {
@@ -67,12 +68,6 @@ export default function JobDetail() {
   const [searchParams, setSearchParams] = useSearchParams()
   // 评测任务的核心信息是「每个任务到哪一步了」，默认落在任务进展
   const tabParam = searchParams.get('tab')
-  const setTab = (next: string) => {
-    const params = new URLSearchParams(searchParams)
-    if (next === 'overview') params.delete('tab')
-    else params.set('tab', next)
-    setSearchParams(params, { replace: true })
-  }
   const [rejectOpen, setRejectOpen] = React.useState(false)
   const [rejectComment, setRejectComment] = React.useState('')
 
@@ -87,6 +82,13 @@ export default function JobDetail() {
   })
 
   const tab = tabParam ?? (job.data?.type === 'verify' ? 'trials' : 'overview')
+  const setTab = (next: string) => {
+    const params = new URLSearchParams(searchParams)
+    // 评测任务的默认页是任务进展，所以「概览」也要显式写进 URL，否则删掉参数就又跳回去了
+    if (next === 'overview' && job.data?.type !== 'verify') params.delete('tab')
+    else params.set('tab', next)
+    setSearchParams(params, { replace: true })
+  }
   const isActive = job.data ? ['queued', 'preparing', 'running'].includes(job.data.status) : false
   const stream = useJobStream(jobId, isActive)
 
@@ -312,7 +314,7 @@ export default function JobDetail() {
       )}
 
       {/* --------------------------------------------------------- stats -- */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-5">
+      <div className={cn('grid grid-cols-2 gap-3', data.type === 'verify' ? 'md:grid-cols-4' : 'md:grid-cols-4 xl:grid-cols-5')}>
         <Stat
           label="进度"
           value={(liveProgress.percent ?? 0).toFixed(0)}
@@ -332,16 +334,7 @@ export default function JobDetail() {
                 ? `${(data.metrics.resolved_rate * 100).toFixed(1)}%`
                 : '—'}
               tone="success"
-            />
-            <Stat label="错误数" value={data.metrics.n_errors ?? 0} tone={data.metrics.n_errors ? 'danger' : 'neutral'} />
-            <Stat
-              label="花费"
-              value={data.metrics.cost_usd !== null && data.metrics.cost_usd !== undefined ? `$${data.metrics.cost_usd.toFixed(2)}` : '—'}
-              hint={
-                data.metrics.tokens?.input
-                  ? `输入 ${formatNumber(data.metrics.tokens.input)} / 输出 ${formatNumber(data.metrics.tokens.output ?? 0)} tokens`
-                  : undefined
-              }
+              hint={data.metrics.n_errors ? `${data.metrics.n_errors} 个异常计为失败` : undefined}
             />
           </>
         ) : (
@@ -376,7 +369,8 @@ export default function JobDetail() {
           <TabsTrigger value="artifacts">产物</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="overview" className="mt-3">
+        <TabsContent value="overview" className="mt-3 space-y-3">
+          {data.type === 'verify' && <VerifyOverview jobId={data.id} live={isActive} />}
           <div className="grid gap-3 lg:grid-cols-2">
             <Card>
               <CardHeader title="运行信息" />

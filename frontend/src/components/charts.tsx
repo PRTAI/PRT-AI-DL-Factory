@@ -12,9 +12,12 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Cell,
   Legend,
   Line,
   LineChart,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -287,6 +290,81 @@ export function Meter({
           style={{ width: `${percent}%`, background: tone }}
         />
       </div>
+    </div>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Donut                                                                       */
+/* -------------------------------------------------------------------------- */
+export interface DonutSlice {
+  key: string
+  label: string
+  value: number
+  color: string
+}
+
+/**
+ * 圆环图 + 右侧图例。中心放总数，图例里每一项都带数字与百分比——
+ * 颜色只是辅助，看数字就能读，不依赖分辨色相。
+ */
+export function DonutChart({
+  slices,
+  centerLabel,
+  centerValue,
+  className,
+  height = 200,
+}: {
+  slices: DonutSlice[]
+  centerLabel: string
+  centerValue: React.ReactNode
+  className?: string
+  height?: number
+}) {
+  const total = slices.reduce((sum, s) => sum + s.value, 0)
+  const shown = slices.filter((s) => s.value > 0)
+  return (
+    <div className={cn('flex items-center gap-4', className)}>
+      <div className="relative shrink-0" style={{ width: height, height }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={shown.length ? shown : [{ key: 'empty', label: '无数据', value: 1, color: 'var(--muted)' }]}
+              dataKey="value"
+              nameKey="label"
+              innerRadius="68%"
+              outerRadius="92%"
+              paddingAngle={shown.length > 1 ? 2 : 0}
+              stroke="none"
+              isAnimationActive={false}
+            >
+              {(shown.length ? shown : [{ key: 'empty', color: 'var(--muted)' }]).map((s) => (
+                <Cell key={s.key} fill={s.color} />
+              ))}
+            </Pie>
+            {shown.length > 0 && (
+              <Tooltip
+                formatter={(value: number, name: string) => [`${value}（${total ? ((value / total) * 100).toFixed(1) : 0}%）`, name]}
+                contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+              />
+            )}
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="num text-2xl font-semibold leading-none text-fg">{centerValue}</span>
+          <span className="mt-1 text-[11px] text-fg-subtle">{centerLabel}</span>
+        </div>
+      </div>
+      <ul className="min-w-0 flex-1 space-y-1.5">
+        {slices.map((s) => (
+          <li key={s.key} className="flex items-center gap-2 text-xs">
+            <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-fg-muted">{s.label}</span>
+            <span className="num text-fg">{s.value}</span>
+            <span className="num w-12 text-right text-fg-subtle">{total ? `${((s.value / total) * 100).toFixed(0)}%` : '—'}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

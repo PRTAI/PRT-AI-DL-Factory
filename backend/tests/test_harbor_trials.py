@@ -46,6 +46,7 @@ def test_phases_from_disk(tmp_path):
 
     counts = harbor_trials.counts(list(states.values()))
     assert counts["total"] == 5 and counts["pending"] == 1 and counts["running_agent"] == 1
+    assert counts["scored"] == 0
     assert "agent 1" in harbor_trials.progress_message(counts)
 
     # 完成：写 result.json 后变 success/failed，带 reward 与阶段耗时
@@ -60,6 +61,7 @@ def test_phases_from_disk(tmp_path):
     }), encoding="utf-8")
     done = {s.task_name: s for s in harbor_trials.scan(job_dir)}["ds/t3"]
     assert done.phase == "success" and done.passed is True and done.reward == 1.0
+    assert harbor_trials.counts(harbor_trials.scan(job_dir))["scored"] == 1
     assert done.phase_seconds["running_agent"] == 420.0
     assert done.duration_seconds == 600.0
     # 带前缀的 task_name 也要能和清单对上，pending 仍只有 t4
