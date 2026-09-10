@@ -324,3 +324,23 @@ def test_absurd_learning_rate_is_rejected(client, member_headers, dataset_id):
 
     payload["sft"]["learning_rate"] = 1e-4
     assert client.post("/api/jobs", headers=member_headers, json=payload).status_code == 201
+
+
+def test_resubmit_repairs_bad_learning_rate(client, admin_headers, member_headers, dataset_id):
+    """真机回归：旧任务存着 lr=1.000001，重跑不能永远被拦在校验上。"""
+    from backend.app.store import store
+
+    job = client.post("/api/jobs", headers=member_headers, json=_sft_payload(dataset_id)).json()
+    # 绕过校验直接把库里的值改坏，模拟校验上线前提交的老任务
+    store.jobs.update(job["id"], lambda item: setattr(item.sft, "learning_rate", 1.000001))
+
+    clone = client.post(f"/api/jobs/{job['id']}/resubmit", headers=member_headers)
+    assert clone.status_code == 201, clone.text
+    body = clone.json()
+    assert body["sft"]["learning_rate"] == 1e-4
+    assert "自动修正" in body["note"] and "1.000001" in body["note"]
+    assert body["name"] == "pytest-sft (重跑)"
+
+    again = client.post(f"/api/jobs/{body['id']}/resubmit", headers=member_headers).json()
+    assert again["name"] == "pytest-sft (重跑)"  # 不叠加
+    del admin_headers

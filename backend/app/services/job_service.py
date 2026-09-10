@@ -18,6 +18,8 @@ from ..models import (
     JobCreate,
     JobStatus,
     JobType,
+    RLConfig,
+    SFTConfig,
     TrainStage,
     User,
     utcnow,
@@ -163,7 +165,7 @@ def _check_learning_rate(value: float, *, upper: float, label: str) -> None:
     if not (0 < value <= upper):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            detail=f"{label}学习率 {value:g} 不合理（应在 0 到 {upper:g} 之间，常用量级 1e-6 ~ 1e-4）。"
+            detail=f"{label}学习率 {value!r} 不合理（应在 0 到 {upper:g} 之间，常用量级 1e-6 ~ 1e-4）。"
             "输入框支持科学计数法，直接输 1e-6 即可。",
         )
 
@@ -318,15 +320,32 @@ def resubmit_job(job_id: str, *, actor: User) -> Job:
     """Clone a finished/rejected job back into the review queue."""
     source = get_job(job_id)
     _assert_can_view(source, actor)
+    sft, rl, note = source.sft, source.rl, source.note
+    # 旧任务可能带着后来才被禁止的坏值（真机上 GRPO 的学习率被数字框改成了 1.000001）。
+    # 重跑时替用户改回该算法的默认值并写进备注，而不是把人堵在「重跑」按钮上。
+    fixes: list[str] = []
+    if rl is not None and not (0 < rl.learning_rate <= 0.01):
+        default_lr = RLConfig.model_fields["learning_rate"].default
+        fixes.append(f"学习率 {rl.learning_rate!r} 不合理，已改回默认 {default_lr:g}")
+        rl = rl.model_copy(update={"learning_rate": default_lr})
+    if sft is not None and not (0 < sft.learning_rate <= 0.1):
+        default_lr = SFTConfig.model_fields["learning_rate"].default
+        fixes.append(f"学习率 {sft.learning_rate!r} 不合理，已改回默认 {default_lr:g}")
+        sft = sft.model_copy(update={"learning_rate": default_lr})
+    if fixes:
+        note = (note + "\n" if note else "") + "重跑时自动修正：" + "；".join(fixes)
+
+    # 名字别一直叠「(重跑) (重跑)」
+    base_name = source.name.replace(" (重跑)", "").strip()
     payload = JobCreate(
-        name=f"{source.name} (重跑)",
-        note=source.note,
+        name=f"{base_name} (重跑)",
+        note=note,
         type=source.type,
         project_id=source.project_id,
         tags=source.tags,
         resources=source.resources.model_copy(update={"gpu_ids": []}),
-        sft=source.sft,
-        rl=source.rl,
+        sft=sft,
+        rl=rl,
         verify=source.verify,
         parent_job_id=source.id,
     )
