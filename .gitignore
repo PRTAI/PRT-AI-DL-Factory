@@ -2,7 +2,22 @@
 data/
 !data/.gitkeep
 uploads/
+outputs/
+runs/
+logs/
 *.log
+*.log.*
+nohup.out
+*.pid
+# 训练/评测产物
+*.ckpt
+*.pt
+*.bin
+*.safetensors
+checkpoint-*/
+wandb/
+ray_results/
+.harbor/
 
 # ---- python ----
 __pycache__/
@@ -29,6 +44,8 @@ npm-debug.log*
 yarn-error.log*
 
 # ---- editors / os ----
+*.swp
+*~
 .vscode/
 .idea/
 .DS_Store
@@ -36,9 +53,12 @@ Thumbs.db
 
 # ---- secrets ----
 .env
-.env.local
+.env.*
+!.env.example
 backend/.env
 *.pem
+*.key
+secrets.json
 
 # tsc -b 的增量构建缓存，机器相关，不该进仓库
 *.tsbuildinfo
