@@ -28,7 +28,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from . import archive, audit_service
+from . import archive, audit_service, project_service
 
 CHUNK = 4 * 1024 * 1024
 DATA_SUFFIXES = (".json", ".jsonl")
@@ -329,6 +329,7 @@ def create_from_upload(
     *,
     name: str,
     kind: DatasetKind,
+    project_id: str = "",
     description: str,
     tags: list[str],
     filename: str,
@@ -336,12 +337,18 @@ def create_from_upload(
     rewardkit: bool = False,
     owner: User,
 ) -> Dataset:
+    project = (
+        project_service.assert_usable(project_id)
+        if project_id
+        else project_service.ensure_default_project(owner_id=owner.id, owner_email=owner.email)
+    )
     dataset_id = new_id("ds")
     archive_path = _receive_archive(dataset_id, filename, stream)
     root = settings.datasets_dir / dataset_id
     dataset = Dataset(
         id=dataset_id,
         name=name.strip() or dataset_id,
+        project_id=project.id,
         kind=kind,
         description=description,
         tags=tags,
@@ -374,6 +381,7 @@ def create_from_upload(
         target_id=dataset.id,
         summary=f"上传数据集 {dataset.name} ({dataset.kind.value})",
         detail={
+            "project_id": dataset.project_id,
             "records": dataset.stats.n_records,
             "tasks": dataset.stats.n_tasks,
             "rewardkit": dataset.rewardkit,
@@ -556,12 +564,34 @@ def lf_entries(dataset: Dataset) -> dict[str, Any]:
         return {}
 
 
-def list_datasets(*, kind: DatasetKind | None = None, owner_id: str | None = None) -> list[Dataset]:
+def adopt_orphan_datasets() -> int:
+    """为旧记录补齐项目归属；重复启动不会再次迁移。"""
+    project_ids = {p.id for p in store.projects.all()}
+    orphans = store.datasets.find(
+        lambda d: d.status != DatasetStatus.DELETED and d.project_id not in project_ids
+    )
+    if not orphans:
+        return 0
+    oldest = min(orphans, key=lambda d: d.created_at)
+    project = project_service.ensure_default_project(owner_id=oldest.owner_id, owner_email=oldest.owner_email)
+    for dataset in orphans:
+        store.datasets.update(dataset.id, lambda item: setattr(item, "project_id", project.id))
+    return len(orphans)
+
+
+def list_datasets(
+    *,
+    kind: DatasetKind | None = None,
+    owner_id: str | None = None,
+    project_id: str | None = None,
+) -> list[Dataset]:
     items = store.datasets.find(lambda d: d.status != DatasetStatus.DELETED)
     if kind:
         items = [d for d in items if d.kind == kind]
     if owner_id:
         items = [d for d in items if d.owner_id == owner_id]
+    if project_id is not None:
+        items = [d for d in items if d.project_id == project_id]
     items.sort(key=lambda d: d.created_at, reverse=True)
     return items
 
@@ -577,6 +607,10 @@ def update_dataset(dataset_id: str, payload: DatasetUpdate, *, actor: User) -> D
     dataset = get_dataset(dataset_id)
     if dataset.owner_id != actor.id and not actor.is_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="只能修改自己上传的数据集")
+
+    if payload.project_id is not None and payload.project_id != dataset.project_id:
+        project = project_service.assert_usable(payload.project_id)
+        payload = payload.model_copy(update={"project_id": project.id})
 
     def mutate(item: Dataset) -> None:
         data = payload.model_dump(exclude_unset=True, exclude_none=True)

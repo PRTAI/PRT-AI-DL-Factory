@@ -30,6 +30,7 @@ class DatasetStats(Base):
 class Dataset(Base):
     id: str = Field(default_factory=lambda: new_id("ds"))
     name: str
+    project_id: str = ""  # 旧记录在启动时归入默认项目
     kind: DatasetKind
     description: str = ""
     status: DatasetStatus = DatasetStatus.UPLOADING
@@ -58,6 +59,7 @@ class Dataset(Base):
 
 class DatasetCreate(Base):
     name: str
+    project_id: str = ""
     kind: DatasetKind
     description: str = ""
     tags: list[str] = Field(default_factory=list)
@@ -65,6 +67,7 @@ class DatasetCreate(Base):
 
 class DatasetUpdate(Base):
     name: str | None = None
+    project_id: str | None = None
     description: str | None = None
     tags: list[str] | None = None
     rewardkit: bool | None = None

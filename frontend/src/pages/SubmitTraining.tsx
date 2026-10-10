@@ -364,8 +364,8 @@ export default function SubmitTraining() {
 
       <ProjectBar />
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-        <div className="space-y-4">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-4">
           {/* --------------------------------------------------- basics -- */}
           <Section title="基本信息" icon={<Rocket className="h-4 w-4" aria-hidden />}>
             <Grid cols={2}>
@@ -512,6 +512,7 @@ export default function SubmitTraining() {
               <>
                 <Field label="训练数据集" required>
                   <DatasetPicker
+                    projectId={projectId}
                     value={rl.dataset_id ? [rl.dataset_id] : []}
                     onChange={(ids) => {
                       const id = ids[0] ?? ''
@@ -526,6 +527,7 @@ export default function SubmitTraining() {
               <>
                 <Field label="训练数据集" required hint="可多选，平台会自动合并生成 LLaMA-Factory dataset_info.json">
                   <DatasetPicker
+                    projectId={projectId}
                     value={sft.dataset_ids}
                     onChange={(ids) => setSft((previous) => ({ ...previous, dataset_ids: ids }))}
                     kinds={datasetKinds}
@@ -535,6 +537,7 @@ export default function SubmitTraining() {
                 <Advanced title="验证集设置（可选）">
                   <Field label="独立验证集" hint="不选则可用下面的比例从训练集中切分">
                     <DatasetPicker
+                      projectId={projectId}
                       value={sft.eval_dataset_ids}
                       onChange={(ids) => setSft((previous) => ({ ...previous, eval_dataset_ids: ids }))}
                       kinds={datasetKinds}

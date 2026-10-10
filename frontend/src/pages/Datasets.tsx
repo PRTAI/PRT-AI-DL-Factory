@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Database, FlaskConical, GraduationCap, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import { useAuth } from '@/lib/store'
+import { useAuth, useProject } from '@/lib/store'
+import { useProjectNames } from '@/components/ProjectTag'
 import type { Dataset, DatasetKind, DatasetSpec } from '@/lib/types'
 import { cn, formatBytes, formatNumber, formatRelative } from '@/lib/utils'
 import {
@@ -33,6 +34,8 @@ import { PageHeader } from '@/components/common'
 export default function Datasets() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
+  const projectNames = useProjectNames()
+  const [projectFilter, setProjectFilter] = React.useState('all')
   const [uploadOpen, setUploadOpen] = React.useState(false)
   const [previewId, setPreviewId] = React.useState<string | null>(null)
   const [editing, setEditing] = React.useState<Dataset | null>(null)
@@ -41,11 +44,12 @@ export default function Datasets() {
 
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
   const isVerifyKind = (kind: DatasetKind) => kind === 'harbor_tasks'
-  const visible = (datasets.data ?? []).filter((d) =>
+  const projectDatasets = (datasets.data ?? []).filter((d) => projectFilter === 'all' || d.project_id === projectFilter)
+  const visible = projectDatasets.filter((d) =>
     category === 'all' ? true : category === 'verify' ? isVerifyKind(d.kind) : !isVerifyKind(d.kind),
   )
-  const countTrain = (datasets.data ?? []).filter((d) => !isVerifyKind(d.kind)).length
-  const countVerify = (datasets.data ?? []).filter((d) => isVerifyKind(d.kind)).length
+  const countTrain = projectDatasets.filter((d) => !isVerifyKind(d.kind)).length
+  const countVerify = projectDatasets.filter((d) => isVerifyKind(d.kind)).length
   const specs = useQuery({ queryKey: ['dataset-specs'], queryFn: () => api.datasetSpecs() })
 
   const remove = useMutation({
@@ -72,10 +76,11 @@ export default function Datasets() {
         }
       />
 
+      <div className="flex flex-wrap items-center gap-3">
       <div className="flex h-10 w-fit items-center gap-0.5 rounded-lg border border-border bg-bg-elevated p-0.5" role="group" aria-label="按用途筛选">
         {(
           [
-            ['all', '全部', null, (datasets.data ?? []).length],
+            ['all', '全部', null, projectDatasets.length],
             ['train', '训练数据', GraduationCap, countTrain],
             ['verify', '评测数据', FlaskConical, countVerify],
           ] as const
@@ -96,13 +101,24 @@ export default function Datasets() {
           </button>
         ))}
       </div>
+      <div className="w-full sm:w-64">
+        <Select
+          value={projectFilter}
+          onValueChange={setProjectFilter}
+          options={[
+            { value: 'all', label: '全部项目的数据' },
+            ...Array.from(projectNames, ([id, name]) => ({ value: id, label: name })),
+          ]}
+        />
+      </div>
+      </div>
 
       <Card>
         <CardHeader
           title={category === 'train' ? '训练数据集' : category === 'verify' ? '评测数据集' : '已登记的数据集'}
           description={
             datasets.data
-              ? `${category === 'all' ? `共 ${datasets.data.length} 个` : `${visible.length} 个`} · 解压后统一存放在 data/datasets/<dataset_id>/${
+              ? `共 ${visible.length} 个 · 解压后统一存放在 data/datasets/<dataset_id>/${
                   category === 'verify' ? ' · Harbor 任务树（task.toml / instruction.md / environment / tests）' : ''
                 }`
               : undefined
@@ -128,7 +144,10 @@ export default function Datasets() {
               {visible.map((dataset) => (
                 <Tr key={dataset.id}>
                   <Td>
-                    <div className="font-medium text-fg">{dataset.name}</div>
+                    <div className="font-medium text-fg">
+                      <span className="text-primary">{projectNames.get(dataset.project_id) ?? '默认项目'} / </span>
+                      {dataset.name}
+                    </div>
                     {dataset.description && (
                       <div className="mt-0.5 line-clamp-1 text-[11px] text-fg-muted">{dataset.description}</div>
                     )}
@@ -236,6 +255,9 @@ function UploadDialog({
   specs: DatasetSpec[]
   onUploaded: () => void
 }) {
+  const { projectId: currentProjectId } = useProject()
+  const projects = useQuery({ queryKey: ['projects', 'dataset-upload'], queryFn: () => api.projects({ include_archived: true }) })
+  const [projectId, setProjectId] = React.useState('')
   const [name, setName] = React.useState('')
   const [kind, setKind] = React.useState<DatasetKind>('sft_alpaca')
   const [description, setDescription] = React.useState('')
@@ -249,7 +271,9 @@ function UploadDialog({
   const spec = specs.find((item) => item.kind === kind)
 
   React.useEffect(() => {
-    if (!open || !editing) return
+    if (!open) return
+    setProjectId(editing?.project_id || currentProjectId)
+    if (!editing) return
     setName(editing.name)
     setKind(editing.kind)
     setDescription(editing.description)
@@ -258,7 +282,7 @@ function UploadDialog({
     setFile(null)
     setProgress(0)
     setError(null)
-  }, [open, editing])
+  }, [open, editing, currentProjectId])
 
   const reset = () => {
     setName('')
@@ -286,6 +310,7 @@ function UploadDialog({
       }
       const updated = await api.updateDataset(target.id, {
         name: name.trim() || target.name,
+        project_id: projectId,
         description,
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
         rewardkit: savedKind === 'harbor_tasks' ? savedRewardkit : false,
@@ -311,6 +336,7 @@ function UploadDialog({
     form.append('file', file)
     form.append('name', name || file.name.replace(/\.(zip|tar\.gz|tgz|tar)$/i, ''))
     form.append('kind', kind)
+    form.append('project_id', projectId)
     form.append('description', description)
     form.append('tags', tags)
     // 后端 bool 表单字段不能收空串，永远显式发 true/false
@@ -351,13 +377,28 @@ function UploadDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button variant="primary" disabled={!editing && !file} loading={uploading} onClick={submit}>
+          <Button variant="primary" disabled={!projectId || (!editing && !file)} loading={uploading} onClick={submit}>
             {editing ? (file ? '替换文件并保存' : '保存') : '上传并校验'}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
+        <Field label="所属项目" required hint="数据集显示为「项目名 / 数据集名」，训练和评测时可跨项目选择。">
+          <Select
+            value={projectId}
+            onValueChange={setProjectId}
+            placeholder="选择数据集所属项目"
+            options={(projects.data ?? []).map(({ project }) => ({
+              value: project.id,
+              label: `${project.name}${project.archived ? '（已归档）' : ''}`,
+              disabled: project.archived && project.id !== editing?.project_id,
+            }))}
+          />
+          {!projects.isLoading && !projects.data?.length && (
+            <p className="mt-1 text-xs text-fg-muted">请先到「项目」页创建项目。</p>
+          )}
+        </Field>
         <Field
           label="数据格式"
           required
@@ -456,6 +497,7 @@ function UploadDialog({
 
 /* -------------------------------------------------------------------------- */
 function PreviewDialog({ datasetId, onClose }: { datasetId: string | null; onClose: () => void }) {
+  const projectNames = useProjectNames()
   const dataset = useQuery({
     queryKey: ['dataset', datasetId],
     queryFn: () => api.dataset(datasetId!),
@@ -472,7 +514,7 @@ function PreviewDialog({ datasetId, onClose }: { datasetId: string | null; onClo
       open={Boolean(datasetId)}
       onOpenChange={(open) => !open && onClose()}
       width="max-w-3xl"
-      title={dataset.data?.name ?? '数据集预览'}
+      title={dataset.data ? `${projectNames.get(dataset.data.project_id) ?? '默认项目'} / ${dataset.data.name}` : '数据集预览'}
       description={dataset.data ? `${dataset.data.kind} · ${dataset.data.root_path}` : undefined}
     >
       {preview.isLoading ? (

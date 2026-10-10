@@ -331,7 +331,7 @@ export const api = {
     request<void>(`/api/jobs/${id}${qs({ purge_outputs: purgeOutputs })}`, { method: 'DELETE' }),
 
   // ---------------------------------------------------------- datasets ----
-  datasets: (params: { kind?: DatasetKind; mine_only?: boolean } = {}) =>
+  datasets: (params: { kind?: DatasetKind; mine_only?: boolean; project_id?: string } = {}) =>
     request<Dataset[]>(`/api/datasets${qs(params)}`),
   dataset: (id: string) => request<Dataset>(`/api/datasets/${id}`),
   datasetPreview: (id: string) =>
@@ -349,7 +349,7 @@ export const api = {
   prebuild: (buildId: string) => request<Prebuild>(`/api/datasets/prebuilds/${buildId}`),
   updateDataset: (
     id: string,
-    payload: { name?: string; description?: string; tags?: string[]; rewardkit?: boolean },
+    payload: { name?: string; project_id?: string; description?: string; tags?: string[]; rewardkit?: boolean },
   ) =>
     request<Dataset>(`/api/datasets/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteDataset: (id: string) => request<void>(`/api/datasets/${id}`, { method: 'DELETE' }),

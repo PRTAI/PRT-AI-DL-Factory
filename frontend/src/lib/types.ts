@@ -81,6 +81,7 @@ export interface DatasetFileInfo {
 export interface Dataset {
   id: string
   name: string
+  project_id: string
   kind: DatasetKind
   description: string
   status: DatasetStatus

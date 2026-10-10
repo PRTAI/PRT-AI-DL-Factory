@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils'
 /** 项目 id -> 名称。所有调用共用同一份缓存。 */
 export function useProjectNames(): Map<string, string> {
   const projects = useQuery({
-    queryKey: ['projects', '', '', 'all'],
+    queryKey: ['projects', 'names'],
     queryFn: () => api.projects({ include_archived: true }),
     staleTime: 30_000,
   })

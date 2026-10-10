@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import HTTPException, status
 
 from ..models import (
+    DatasetStatus,
     Job,
     JobStatus,
     JobType,
@@ -257,6 +258,12 @@ def delete_project(project_id: str, *, actor: User) -> None:
             status.HTTP_409_CONFLICT,
             detail=f"项目下还有 {used} 个任务，无法删除；可以改为归档",
         )
+    datasets = store.datasets.count(lambda d: d.project_id == project.id and d.status != DatasetStatus.DELETED)
+    if datasets:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"项目下还有 {datasets} 个数据集，无法删除；请先转移数据集或归档项目",
+        )
     store.projects.delete(project.id)
     audit_service.record(
         "project.delete",
@@ -293,6 +300,20 @@ def recent_jobs(project_id: str, limit: int = 20) -> list[Job]:
 DEFAULT_PROJECT_NAME = "默认项目"
 
 
+def ensure_default_project(*, owner_id: str, owner_email: str) -> Project:
+    project = store.projects.first(lambda p: p.name == DEFAULT_PROJECT_NAME and not p.archived)
+    if project is None:
+        project = Project(
+            name=DEFAULT_PROJECT_NAME,
+            slug=slugify(DEFAULT_PROJECT_NAME),
+            description="未指定项目的历史任务与数据集",
+            owner_id=owner_id,
+            owner_email=owner_email,
+        )
+        store.projects.put(project)
+    return project
+
+
 def adopt_orphan_jobs() -> int:
     """把「项目」上线之前提交的任务收进一个默认项目。
 
@@ -303,18 +324,8 @@ def adopt_orphan_jobs() -> int:
     if not orphans:
         return 0
 
-    project = store.projects.first(lambda p: p.name == DEFAULT_PROJECT_NAME)
-    if project is None:
-        # 归到最早那个任务的负责人名下，比挂在 admin 名下更贴近事实
-        oldest = min(orphans, key=lambda j: j.created_at)
-        project = Project(
-            name=DEFAULT_PROJECT_NAME,
-            slug=slugify(DEFAULT_PROJECT_NAME),
-            description="「项目」功能上线前提交的历史任务",
-            owner_id=oldest.owner_id,
-            owner_email=oldest.owner_email,
-        )
-        store.projects.put(project)
+    oldest = min(orphans, key=lambda j: j.created_at)
+    project = ensure_default_project(owner_id=oldest.owner_id, owner_email=oldest.owner_email)
 
     for job in orphans:
         store.jobs.update(job.id, lambda item: setattr(item, "project_id", project.id))

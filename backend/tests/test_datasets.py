@@ -41,6 +41,7 @@ def test_upload_alpaca(client, member_headers, alpaca_zip):
     assert response.status_code == 201, response.text
     body = response.json()
     assert body["status"] == "ready"
+    assert body["project_id"]
     assert body["stats"]["n_records"] == 12
     assert body["lf_dataset_names"] == ["train"]
 
@@ -318,3 +319,93 @@ def test_prebuild_runs_docker_build_for_selected_task(client, member_headers, ha
 
     bad = client.post(f"/api/datasets/{created['id']}/prebuild", headers=member_headers, json={"task": "../../etc"})
     assert bad.status_code == 400
+
+
+def test_dataset_project_upload_filter_and_replace(client, member_headers, alpaca_zip):
+    project = client.post("/api/projects", headers=member_headers, json={"name": "数据归属上传"}).json()
+    other = client.post("/api/projects", headers=member_headers, json={"name": "数据归属过滤"}).json()
+    response = _upload(
+        client, member_headers, alpaca_zip, name="shared-name", kind="sft_alpaca", project_id=project["id"],
+    )
+    assert response.status_code == 201, response.text
+    dataset = response.json()
+    assert dataset["project_id"] == project["id"]
+    assert dataset["name"] == "shared-name"  # 前缀由项目名动态展示，避免改名后残留旧前缀
+    scoped = client.get("/api/datasets", headers=member_headers, params={"project_id": project["id"]}).json()
+    assert [row["id"] for row in scoped] == [dataset["id"]]
+    assert client.get("/api/datasets", headers=member_headers, params={"project_id": other["id"]}).json() == []
+    with alpaca_zip.open("rb") as handle:
+        replaced = client.put(
+            f"/api/datasets/{dataset['id']}/file", headers=member_headers,
+            files={"file": (alpaca_zip.name, handle, "application/zip")},
+        )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["project_id"] == project["id"]
+
+
+def test_dataset_rejects_missing_or_archived_project(client, member_headers, alpaca_zip):
+    missing = _upload(client, member_headers, alpaca_zip, name="missing-project", kind="sft_alpaca", project_id="prj_missing")
+    assert missing.status_code == 404
+    project = client.post("/api/projects", headers=member_headers, json={"name": "数据归属归档"}).json()
+    assert client.patch(f"/api/projects/{project['id']}", headers=member_headers, json={"archived": True}).status_code == 200
+    archived = _upload(client, member_headers, alpaca_zip, name="archived-project", kind="sft_alpaca", project_id=project["id"])
+    assert archived.status_code == 400
+    assert "已归档" in archived.json()["detail"]
+
+
+def test_dataset_project_transfer_permissions_and_deletion(client, admin_headers, member_headers, alpaca_zip):
+    source = client.post("/api/projects", headers=admin_headers, json={"name": "数据归属转移前"}).json()
+    target = client.post("/api/projects", headers=admin_headers, json={"name": "数据归属转移后"}).json()
+    created = _upload(
+        client, admin_headers, alpaca_zip, name="transfer", kind="sft_alpaca", project_id=source["id"],
+    ).json()
+    url = f"/api/datasets/{created['id']}"
+    assert client.patch(url, headers=member_headers, json={"project_id": target["id"]}).status_code == 403
+    assert client.patch(url, headers=admin_headers, json={"project_id": ""}).status_code == 400
+    assert client.patch(url, headers=admin_headers, json={"project_id": "prj_missing"}).status_code == 404
+    moved = client.patch(url, headers=admin_headers, json={"project_id": target["id"]})
+    assert moved.status_code == 200, moved.text
+    assert moved.json()["project_id"] == target["id"]
+    assert client.delete(f"/api/projects/{source['id']}", headers=admin_headers).status_code == 204
+    blocked = client.delete(f"/api/projects/{target['id']}", headers=admin_headers)
+    assert blocked.status_code == 409
+    assert "数据集" in blocked.json()["detail"]
+    assert client.delete(url, headers=admin_headers).status_code == 204
+    assert client.delete(f"/api/projects/{target['id']}", headers=admin_headers).status_code == 204
+
+
+def test_legacy_datasets_adopt_default_project_once(client, member_headers, alpaca_zip, tmp_path, monkeypatch):
+    from backend.app.models import Dataset
+    from backend.app.services import dataset_service
+    from backend.app.store import store
+    from backend.app.store.json_store import JsonCollection
+
+    monkeypatch.setattr(store, "datasets", JsonCollection(tmp_path / "legacy_datasets.json", Dataset))
+    created = _upload(client, member_headers, alpaca_zip, name="legacy", kind="sft_alpaca").json()
+    original = store.datasets.get(created["id"])
+    old_project_id = original.project_id
+    legacy = original.model_dump(mode="json")
+    legacy.pop("project_id")
+    store.datasets.put(type(original).model_validate(legacy))
+    assert dataset_service.adopt_orphan_datasets() == 1
+    assert store.datasets.get(original.id).project_id == old_project_id
+    assert dataset_service.adopt_orphan_datasets() == 0
+
+
+def test_training_and_verify_can_use_external_project_data(client, member_headers, alpaca_zip, harbor_zip):
+    from .conftest import FAKE_MODEL_ID
+
+    current = client.post("/api/projects", headers=member_headers, json={"name": "跨项目数据使用"}).json()
+    external = client.post("/api/projects", headers=member_headers, json={"name": "跨项目外部数据"}).json()
+    training = _upload(client, member_headers, alpaca_zip, name="external-train", kind="sft_alpaca", project_id=external["id"]).json()
+    harbor = _upload(client, member_headers, harbor_zip, name="external-verify", kind="harbor_tasks", project_id=external["id"]).json()
+    train_job = client.post("/api/jobs", headers=member_headers, json={
+        "name": "external-training", "type": "sft", "project_id": current["id"], "resources": {"n_gpus": 0},
+        "sft": {"stage": "sft", "model_id": FAKE_MODEL_ID, "model_path": "", "dataset_ids": [training["id"]]},
+    })
+    assert train_job.status_code == 201, train_job.text
+    verify_job = client.post("/api/jobs", headers=member_headers, json={
+        "name": "external-evaluation", "type": "verify", "project_id": current["id"], "resources": {"n_gpus": 0},
+        "verify": {"agent": "oracle", "dataset_id": harbor["id"]},
+    })
+    assert verify_job.status_code == 201, verify_job.text

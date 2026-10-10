@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from .api import api_router, ws_router
 from .config import REPO_ROOT, settings
 from .services import (
+    dataset_service,
     deployment_service,
     export_service,
     model_api_service,
@@ -54,6 +55,9 @@ async def lifespan(app: FastAPI):
     adopted = project_service.adopt_orphan_jobs()
     if adopted:
         logger.info("moved %d pre-existing job(s) into the default project", adopted)
+    adopted_datasets = dataset_service.adopt_orphan_datasets()
+    if adopted_datasets:
+        logger.info("moved %d pre-existing dataset(s) into the default project", adopted_datasets)
 
     await monitor.start()
     await scheduler.start()

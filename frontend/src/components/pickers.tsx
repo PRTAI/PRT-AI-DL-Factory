@@ -5,8 +5,9 @@ import { Boxes, Database, Download, RefreshCw, Search, Sparkles } from 'lucide-r
 import { api } from '@/lib/api'
 import type { Dataset, DatasetKind, ModelEntry } from '@/lib/types'
 import { cn, formatBytes, formatNumber } from '@/lib/utils'
-import { Badge, Button, EmptyState, Input, Spinner } from './ui'
+import { Badge, Button, EmptyState, Input, Select, Spinner } from './ui'
 import { FRAMEWORK_LABEL, Mono } from './common'
+import { useProjectNames } from './ProjectTag'
 
 /* -------------------------------------------------------------------------- */
 /* Model picker                                                                */
@@ -150,28 +151,43 @@ export function DatasetPicker({
   value,
   onChange,
   kinds,
+  projectId,
   multiple = false,
   emptyHint,
 }: {
   value: string[]
   onChange: (ids: string[]) => void
   kinds: DatasetKind[]
+  projectId: string
   multiple?: boolean
   emptyHint?: React.ReactNode
 }) {
   const [keyword, setKeyword] = React.useState('')
+  const [scope, setScope] = React.useState<'project' | 'external' | 'all'>('project')
+  const [externalProject, setExternalProject] = React.useState('all')
+  const projectNames = useProjectNames()
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
   const matching = (datasets.data ?? []).filter(
     (dataset) => dataset.status === 'ready' && kinds.includes(dataset.kind),
   )
   const needle = keyword.trim().toLowerCase()
+  const scoped = matching.filter((dataset) => {
+    if (scope === 'project') return dataset.project_id === projectId
+    if (scope === 'external') {
+      return dataset.project_id !== projectId
+        && (externalProject === 'all' || dataset.project_id === externalProject)
+    }
+    return true
+  })
   const eligible = needle
-    ? matching.filter((dataset) =>
-        `${dataset.name} ${dataset.description} ${dataset.tags.join(' ')} ${dataset.owner_email}`
+    ? scoped.filter((dataset) =>
+        `${projectNames.get(dataset.project_id) ?? ''} ${dataset.name} ${dataset.description} ${dataset.tags.join(' ')} ${dataset.owner_email}`
           .toLowerCase()
           .includes(needle),
       )
-    : matching
+    : scoped
+  const projectCount = matching.filter((dataset) => dataset.project_id === projectId).length
+  const selectedDatasets = (datasets.data ?? []).filter((dataset) => value.includes(dataset.id))
 
   const toggle = (dataset: Dataset) => {
     if (multiple) {
@@ -198,40 +214,75 @@ export function DatasetPicker({
       <Input
         value={keyword}
         onChange={(event) => setKeyword(event.target.value)}
-        placeholder={`按名称搜索（共 ${matching.length} 个可用数据集）`}
+        placeholder={`按项目、名称搜索（共 ${scoped.length} 个可用数据集）`}
         className="pl-8"
         aria-label="搜索数据集"
       />
     </div>
   )
 
-  if (!matching.length) {
-    return (
-      <div className="rounded-md border border-border">
+  return (
+    <div className="min-w-0 space-y-2">
+      <div className="flex flex-wrap gap-1" role="group" aria-label="数据集项目范围">
+        {([
+          ['project', '本项目数据', projectCount],
+          ['external', '外部数据', matching.length - projectCount],
+          ['all', '全部数据', matching.length],
+        ] as const).map(([key, label, count]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={scope === key}
+            onClick={() => setScope(key)}
+            className={cn(
+              'rounded-md px-3 py-1.5 text-xs transition-colors',
+              scope === key ? 'bg-primary-soft font-medium text-primary' : 'text-fg-muted hover:bg-card-hover',
+            )}
+          >
+            {label}（{count}）
+          </button>
+        ))}
+      </div>
+      {scope === 'external' && (
+        <Select
+          value={externalProject}
+          onValueChange={setExternalProject}
+          options={[
+            { value: 'all', label: '全部外部项目' },
+            ...Array.from(projectNames)
+              .filter(([id]) => id !== projectId)
+              .map(([id, name]) => ({ value: id, label: name })),
+          ]}
+        />
+      )}
+      {search}
+      {selectedDatasets.length > 0 && (
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-fg-muted">
+          <span>已选 {selectedDatasets.length} 个：</span>
+          {selectedDatasets.map((dataset) => (
+            <button
+              key={dataset.id}
+              type="button"
+              onClick={() => onChange(value.filter((id) => id !== dataset.id))}
+              title="点击取消选择"
+              className="max-w-full truncate rounded bg-primary-soft px-2 py-1 text-primary"
+            >
+              {projectNames.get(dataset.project_id) ?? dataset.project_id} / {dataset.name}
+              {dataset.project_id !== projectId ? '（外部）' : ''} ×
+            </button>
+          ))}
+        </div>
+      )}
+      {!eligible.length ? (
         <EmptyState
           icon={<Database className="h-6 w-6" aria-hidden />}
-          title="没有符合该算法的数据集"
-          description={emptyHint ?? `请先在「数据集」页上传 ${kinds.join(' / ')} 类型的压缩包。`}
+          title={needle ? '没有匹配的数据集' : scope === 'project' ? '本项目暂无可用数据' : '暂无符合条件的数据集'}
+          description={scope === 'project'
+            ? '可切换「外部数据」选择其他项目的数据，或上传数据到本项目。'
+            : emptyHint ?? `请上传 ${kinds.join(' / ')} 类型的数据，或调整筛选。`}
         />
-      </div>
-    )
-  }
-
-  if (!eligible.length) {
-    return (
-      <div className="space-y-2">
-        {search}
-        <div className="rounded-md border border-border py-6 text-center text-xs text-fg-subtle">
-          没有名称匹配「{keyword}」的数据集
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-2">
-      {search}
-      <div className="max-h-64 space-y-1.5 overflow-y-auto rounded-md border border-border p-1.5">
+      ) : (
+      <div className="min-w-0 max-h-64 space-y-1.5 overflow-y-auto rounded-md border border-border p-1.5">
       {eligible.map((dataset) => {
         const selected = value.includes(dataset.id)
         return (
@@ -245,10 +296,10 @@ export function DatasetPicker({
               selected ? 'border-primary/50 bg-primary-soft' : 'border-transparent hover:bg-card-hover',
             )}
           >
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
                 <span className={cn('truncate text-sm font-medium', selected ? 'text-primary' : 'text-fg')}>
-                  {dataset.name}
+                  {projectNames.get(dataset.project_id) ?? dataset.project_id} / {dataset.name}
                 </span>
                 <Badge>{dataset.kind}</Badge>
                 {dataset.rewardkit && <Badge tone="primary">reward-kit</Badge>}
@@ -260,7 +311,7 @@ export function DatasetPicker({
                 <span>{dataset.owner_email}</span>
               </div>
               {dataset.stats.warnings.length > 0 && (
-                <p className="mt-1 text-[11px] text-warning">⚠ {dataset.stats.warnings[0]}</p>
+                <p className="mt-1 break-words text-[11px] text-warning">⚠ {dataset.stats.warnings[0]}</p>
               )}
             </div>
               {selected && <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" aria-hidden />}
@@ -268,6 +319,7 @@ export function DatasetPicker({
           )
         })}
       </div>
+      )}
     </div>
   )
 }

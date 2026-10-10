@@ -458,8 +458,8 @@ export default function SubmitVerify() {
         </InlineHint>
       )}
 
-      <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
-        <div className="space-y-4">
+      <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-4">
           <Card>
             <CardHeader title="基本信息" icon={<FlaskConical className="h-4 w-4" aria-hidden />} />
             <CardBody className="space-y-4">
@@ -521,6 +521,7 @@ export default function SubmitVerify() {
               </div>
               {source === 'uploaded' && (
                 <DatasetPicker
+                  projectId={projectId}
                   value={config.dataset_id ? [config.dataset_id] : []}
                   onChange={(ids) => patch({ dataset_id: ids[0] ?? '' })}
                   kinds={['harbor_tasks']}
@@ -965,7 +966,7 @@ function PrebuildPanel({ dataset }: { dataset: Dataset }) {
 
   if (!tasks.length) return null
   return (
-    <div className="space-y-2 rounded-lg border border-border bg-bg-elevated p-3">
+    <div className="min-w-0 w-full max-w-full overflow-hidden space-y-2 rounded-lg border border-border bg-bg-elevated p-3">
       <div className="flex items-center gap-1.5 text-[13px] font-medium text-fg">
         <Container className="h-3.5 w-3.5" aria-hidden />
         预构建容器
@@ -975,7 +976,7 @@ function PrebuildPanel({ dataset }: { dataset: Dataset }) {
         正式评测时也能复用 docker 层缓存。不占 GPU、不走审核。
       </p>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-[240px] flex-1">
+        <div className="min-w-0 flex-1 basis-60">
           <Select value={task} onValueChange={setTask} options={tasks.map((path) => ({ value: path, label: path }))} />
         </div>
         <Button
@@ -990,16 +991,16 @@ function PrebuildPanel({ dataset }: { dataset: Dataset }) {
         </Button>
       </div>
       {build && (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2 text-[11px]">
+        <div className="min-w-0 max-w-full space-y-1.5">
+          <div className="flex min-w-0 items-center gap-2 text-[11px]">
             <Badge tone={build.status === 'succeeded' ? 'success' : build.status === 'failed' ? 'danger' : 'info'}>
               {build.status === 'succeeded' ? '构建成功' : build.status === 'failed' ? `构建失败 (${build.return_code})` : '构建中…'}
             </Badge>
-            <code className="num truncate text-fg-subtle">{build.command}</code>
+            <code className="num min-w-0 flex-1 truncate text-fg-subtle" title={build.command}>{build.command}</code>
           </div>
           <pre
             ref={logRef}
-            className="num max-h-56 overflow-auto rounded bg-card p-2 text-[11px] leading-relaxed text-fg-muted"
+            className="num min-w-0 w-full max-w-full max-h-56 overflow-auto rounded bg-card p-2 text-[11px] leading-relaxed text-fg-muted"
           >
             {build.log || '（暂无输出）'}
           </pre>

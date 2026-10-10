@@ -23,8 +23,9 @@ def list_datasets(
     user: CurrentUser,
     kind: DatasetKind | None = Query(default=None),
     mine_only: bool = Query(default=False),
+    project_id: str | None = Query(default=None),
 ) -> list[Dataset]:
-    return dataset_service.list_datasets(kind=kind, owner_id=user.id if mine_only else None)
+    return dataset_service.list_datasets(kind=kind, owner_id=user.id if mine_only else None, project_id=project_id)
 
 
 @router.post("", response_model=Dataset, status_code=201, summary="上传数据集压缩包")
@@ -33,6 +34,7 @@ async def upload_dataset(
     file: UploadFile = File(..., description="zip / tar.gz 压缩包"),
     name: str = Form(...),
     kind: DatasetKind = Form(...),
+    project_id: str = Form(default=""),
     description: str = Form(default=""),
     tags: str = Form(default=""),
     rewardkit: bool = Form(default=False),
@@ -43,6 +45,7 @@ async def upload_dataset(
     return dataset_service.create_from_upload(
         name=name,
         kind=kind,
+        project_id=project_id,
         description=description,
         tags=tag_list,
         filename=file.filename,
