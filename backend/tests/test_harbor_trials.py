@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from backend.app.services import harbor_registry_service, harbor_trials
 
 
@@ -74,6 +76,117 @@ def test_phases_from_disk(tmp_path):
     detail = harbor_trials.detail(job_dir, "t2__c")
     assert detail and detail["agent_logs"][0]["content"] == "thinking..."
     assert harbor_trials.detail(job_dir, "../job") is None
+
+
+def _result(name, reward=0.0):
+    return {
+        "trial_name": name, "task_name": name.split("__", 1)[0],
+        "started_at": "2026-10-10T10:00:00Z", "finished_at": "2026-10-10T10:10:00Z",
+        "verifier_result": {"rewards": {"reward": reward}},
+        "agent_info": {"name": "nop"}, "timeout_multiplier": 1.0,
+    }
+
+
+def test_scrubbed_trials_recover_from_job_results_without_rewriting(tmp_path):
+    results = []
+    originals = {}
+    for index in range(1, 4):
+        name = f"PRT-医疗-{index:03d}-20261003-1__trial{index}"
+        trial = _trial(tmp_path, name, name.split("__", 1)[0])
+        result = _result(name)
+        corrupted = json.dumps(result, ensure_ascii=False).replace("1", "[REDACTED]")
+        (trial / "result.json").write_text(corrupted)
+        (trial / "config.json").write_text('{"attempt": [REDACTED]}')
+        (trial / "verifier" / "test-stdout.txt").write_text("done")
+        results.append(result)
+        originals[trial / "result.json"] = corrupted
+    (tmp_path / "result.json").write_text(json.dumps({
+        "finished_at": "2026-10-10T10:11:00Z", "trial_results": results,
+    }))
+    (tmp_path / "lock.json").write_text(json.dumps({
+        "trials": [{"task": {"name": result["task_name"]}} for result in results],
+    }))
+
+    page = harbor_trials.page(tmp_path)
+    assert page["counts"]["success"] == page["counts"]["scored"] == 3
+    assert page["counts"]["pending"] == page["counts"]["running_verifier"] == 0
+    assert page["counts"]["passed"] == 0
+    assert harbor_trials.page(tmp_path, phase="running")["total"] == 0
+    for row in page["items"]:
+        assert row["duration_seconds"] == 600
+        assert row["finished_at"] == "2026-10-10T10:10:00Z"
+        assert row["reward"] == 0.0 and row["passed"] is False
+        detail = harbor_trials.detail(tmp_path, row["trial_name"])
+        assert detail["trial"] == row
+        assert detail["verifier_logs"][0]["content"] == "done"
+    assert all(path.read_text() == original for path, original in originals.items())
+
+
+def test_corrupt_result_recovers_reward_and_exception_buckets(tmp_path):
+    name = "医疗任务__summary"
+    trial = _trial(tmp_path, name, "医疗任务")
+    (trial / "result.json").write_text('{"multiplier": [REDACTED].0}')
+    (tmp_path / "result.json").write_text(json.dumps({
+        "finished_at": "2026-10-10T10:10:00Z",
+        "stats": {"evals": {"nop__adhoc": {
+            "reward_stats": {"reward": {"0.5": [name]}},
+            "exception_stats": {"AgentTimeoutError": [name]},
+        }}},
+    }))
+    state = harbor_trials.scan(tmp_path)[0]
+    assert state.phase == "failed" and state.exception_type == "AgentTimeoutError"
+    assert state.reward == 0.5 and state.passed is False
+    assert state.finished_at == "2026-10-10T10:10:00Z"
+    assert harbor_trials.counts([state])["scored"] == 1
+
+
+def test_unrecoverable_terminal_trial_stops_running_and_freezes_time(tmp_path):
+    trial = _trial(tmp_path, "医疗任务__broken", "医疗任务")
+    (trial / "verifier" / "test-stdout.txt").write_text("done")
+    (trial / "result.json").write_text('{"reward": [REDACTED]}')
+    live = harbor_trials.scan(tmp_path)[0]
+    assert live.phase == "running_verifier" and live.finished_at is None
+
+    end = "2026-10-10T10:10:00Z"
+    stopped = harbor_trials.page(tmp_path, job_status="succeeded", finished_at=end)["items"][0]
+    assert stopped["phase"] == "failed" and stopped["exception_type"] == "TrialResultReadError"
+    assert stopped["reward"] is None and stopped["passed"] is None
+    assert stopped["finished_at"] == end
+    assert harbor_trials.detail(tmp_path, trial.name, job_status="succeeded", finished_at=end)["trial"] == stopped
+
+
+def test_terminal_job_marks_unstarted_trials_as_finished(tmp_path):
+    (tmp_path / "lock.json").write_text(json.dumps({"trials": [{"task": {"name": "never-started"}}]}))
+    state = harbor_trials.scan(tmp_path, job_status="cancelled", finished_at="2026-10-10T10:10:00Z")[0]
+    assert state.phase == "failed" and state.exception_type == "TrialNotStarted"
+    assert state.reward is None
+
+
+def test_unicode_trial_name_and_scrubbed_name_use_real_directory(tmp_path):
+    name = "PRT-医疗 001-20261003-1__abc"
+    trial = _trial(tmp_path, name, "医疗")
+    result = _result(name, 1.0)
+    result["trial_name"] = name.replace("1", "[REDACTED]")
+    result["task_name"] = result["trial_name"]
+    (trial / "result.json").write_text(json.dumps(result))
+    detail = harbor_trials.detail(tmp_path, name)
+    assert detail["trial"]["trial_name"] == name
+    assert detail["trial"]["task_name"] == name.split("__", 1)[0]
+    assert detail["trial"]["passed"] is True
+
+
+@pytest.mark.parametrize("name", ["", ".", "..", "../other", "/other", "a/b", "a\\b", "医疗\n", "医疗\x00"])
+def test_trial_detail_rejects_invalid_components(tmp_path, name):
+    assert harbor_trials.detail(tmp_path, name) is None
+
+
+def test_trial_detail_and_scan_reject_directory_symlinks(tmp_path):
+    root = tmp_path / "job"
+    root.mkdir()
+    outside = _trial(tmp_path, "outside", "outside")
+    (root / "医疗__link").symlink_to(outside, target_is_directory=True)
+    assert harbor_trials.detail(root, "医疗__link") is None
+    assert harbor_trials.scan(root) == []
 
 
 def test_registry_summary_and_offline_fallback(tmp_path, monkeypatch):

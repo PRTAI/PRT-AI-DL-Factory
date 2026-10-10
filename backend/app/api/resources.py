@@ -50,6 +50,13 @@ def harbor_environments(_: CurrentUser) -> list[str]:
     return resources_service.harbor_environments()
 
 
+@router.get("/harbor-verifier-env", summary="检测 task.toml 中的 verifier 环境变量")
+def harbor_verifier_env(_: CurrentUser, dataset_id: str = "", tasks_path: str = "") -> dict[str, Any]:
+    from ..services import harbor_env_service
+
+    return harbor_env_service.inspect_source(dataset_id=dataset_id, tasks_path=tasks_path)
+
+
 @router.get("/verl-estimators", summary="verl 优势估计器")
 def verl_estimators(_: CurrentUser) -> list[str]:
     return resources_service.verl_advantage_estimators()

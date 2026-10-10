@@ -18,17 +18,36 @@ Mapping from the submission form:
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 from pathlib import Path
 
 from ..config import settings
 from ..models import DatasetKind, Job, VerifyConfig
-from ..services import harbor_compat, model_api_service, resources_service
+from ..services import harbor_compat, harbor_env_service, model_api_service, resources_service
 from ..store import store
 from .base import BuildError, BuildResult, kv_flags
 
 _NO_MODEL_AGENTS = {"oracle", "nop"}
+
+
+def validate_secret_env(env: dict[str, str]) -> None:
+    """Harbor 会盲替换密钥值；短值或 JSON 标量会破坏数字/布尔字段。"""
+    for key, value in env.items():
+        if not value or not _looks_secret(key):
+            continue
+        try:
+            literal = json.loads(value)
+            json_placeholder = literal is None or isinstance(literal, (int, float, bool))
+        except ValueError:
+            json_placeholder = False
+        if len(value.strip()) < 4 or json_placeholder:
+            raise BuildError(
+                f"环境变量 {key} 的密钥值过短或为数字/布尔占位值，会导致 Harbor 脱敏破坏结果文件。"
+                "请填写真实密钥；不需要的变量请删除，不要用 1 等短值占位。"
+            )
 
 
 def resolve_harbor_bin() -> str:
@@ -179,6 +198,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     # verifier_env 同理，手填优先于 judge 模型注入的 JUDGE_*。
     agent_env = {**injected_env, **config.agent_env}
     verifier_env = {**judge_env, **config.verifier_env}
+    for env_source in (agent_env, verifier_env, job.resources.env):
+        validate_secret_env(env_source)
     command += kv_flags("--agent-env", agent_env)
     command += kv_flags("--agent-kwarg", agent_kwargs)
     command += kv_flags("--verifier-env", verifier_env)
@@ -218,11 +239,27 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     # A .env file lets task.toml's ${VAR} interpolation resolve (that is how
     # reward-kit judge tasks pick up their API keys). Written 0600.
     secrets_map = {**agent_env, **verifier_env}
-    if secrets_map:
+    optional_references: set[str] = set()
+    if local_root is not None:
+        for field in harbor_env_service.inspect_root(local_root)["variables"]:
+            if field["required"]:
+                continue
+            for reference in field["source_variables"]:
+                if reference in secrets_map:
+                    continue
+                inherited = job.resources.env.get(reference, os.environ.get(reference))
+                if inherited is not None:
+                    secrets_map[reference] = inherited
+                else:
+                    optional_references.add(reference)
+        validate_secret_env(secrets_map)
+    if secrets_map or optional_references:
         env_path = work_dir / ".env"
         work_dir.mkdir(parents=True, exist_ok=True)
         env_path.write_text(
-            "".join(f"{key}={value}\n" for key, value in secrets_map.items() if key), encoding="utf-8"
+            "".join(f"{key}={value}\n" for key, value in secrets_map.items() if key)
+            # dotenv 的无值键只声明来源，不覆盖各题默认值；Harbor 视其为已显式确认。
+            + "".join(f"{key}\n" for key in sorted(optional_references)), encoding="utf-8"
         )
         env_path.chmod(0o600)
         command += ["--env-file", str(env_path)]
@@ -259,4 +296,4 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
 
 def _looks_secret(key: str) -> bool:
     upper = key.upper()
-    return any(token in upper for token in ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL"))
+    return bool(re.search(r"KEY|SECRET|TOKEN(?!S)|PASSWORD|CREDENTIAL|AUTH", upper))

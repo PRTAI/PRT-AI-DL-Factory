@@ -797,6 +797,23 @@ export interface TrialState {
   path: string
 }
 
+export interface VerifierEnvVariable {
+  key: string
+  required: boolean
+  secret: boolean
+  tasks: string[]
+  has_task_value: boolean
+  default: string | null
+  conflicting_defaults: boolean
+  source_variable: string | null
+}
+
+export interface VerifierEnvInfo {
+  variables: VerifierEnvVariable[]
+  n_tasks: number
+  warnings: string[]
+}
+
 export interface TrialPage {
   items: TrialState[]
   total: number

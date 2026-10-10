@@ -305,7 +305,7 @@ def harbor_job_dir(output_dir: Path, job_id: str) -> Path | None:
     return max(dirs, key=lambda p: p.stat().st_mtime)
 
 
-def parse_harbor(output_dir: Path, job_id: str) -> ParsedMetrics:
+def parse_harbor(output_dir: Path, job_id: str, *, job_status: str = "", finished_at: str | None = None) -> ParsedMetrics:
     parsed = ParsedMetrics()
     job_dir = harbor_job_dir(output_dir, job_id)
     if job_dir is None:
@@ -332,7 +332,7 @@ def parse_harbor(output_dir: Path, job_id: str) -> ParsedMetrics:
     # 文件是实时出现的），比 job 级 result.json 的 stats 新得多。
     from . import harbor_trials
 
-    phase_counts = harbor_trials.counts(harbor_trials.scan(job_dir))
+    phase_counts = harbor_trials.counts(harbor_trials.scan(job_dir, job_status=job_status, finished_at=finished_at))
     if phase_counts["total"]:
         completed = phase_counts["success"] + phase_counts["failed"]
         errored = max(errored, phase_counts["failed"])
@@ -415,7 +415,8 @@ def parse_job(job: Job) -> ParsedMetrics:
         if job.framework == Framework.TRL:
             return parse_trl(output_dir, log_file)
         if job.framework == Framework.HARBOR:
-            return parse_harbor(output_dir, job.id)
+            return parse_harbor(output_dir, job.id, job_status=job.status.value,
+                                finished_at=job.runtime.finished_at.isoformat() if job.runtime.finished_at else None)
     except Exception:  # pragma: no cover - monitoring must never break a job
         return ParsedMetrics()
     return ParsedMetrics()

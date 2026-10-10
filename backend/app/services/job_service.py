@@ -219,6 +219,13 @@ def _validate_rl(payload: JobCreate) -> None:
 def _validate_verify(payload: JobCreate) -> None:
     config = payload.verify
     assert config is not None
+    from ..builders.harbor import validate_secret_env
+
+    try:
+        for env_source in (config.agent_env, config.verifier_env, payload.resources.env):
+            validate_secret_env(env_source)
+    except BuildError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not (config.dataset_id or config.tasks_path or config.registry_dataset):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择要评测的 Harbor 任务集")
     if config.dataset_id:
@@ -245,6 +252,10 @@ def _validate_verify(payload: JobCreate) -> None:
         resolved = model_api_service.resolve(
             config.model_api_id, model_style=resources_service.model_style_for(config.agent)
         )
+        try:
+            validate_secret_env({**resolved.env, **config.agent_env})
+        except BuildError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         config.model = resolved.model  # 列表/详情页展示用
     elif config.agent not in {"oracle", "nop"} and not config.model:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"agent {config.agent} 需要指定模型")
@@ -536,7 +547,9 @@ def job_trials(
     if harbor_dir is None:
         return {"items": [], "total": 0, "page": 1, "page_size": page_size, "pages": 1,
                 "counts": {p: 0 for p in harbor_trials.PHASES} | {"total": 0, "passed": 0}, "job_dir": str(output_dir)}
-    return harbor_trials.page(harbor_dir, page_no=page, page_size=page_size, phase=phase, query=query)
+    return harbor_trials.page(harbor_dir, page_no=page, page_size=page_size, phase=phase, query=query,
+                              job_status=job.status.value,
+                              finished_at=job.runtime.finished_at.isoformat() if job.runtime.finished_at else None)
 
 
 def job_trial_detail(job_id: str, trial_name: str, *, actor: User) -> dict[str, Any]:
@@ -546,7 +559,10 @@ def job_trial_detail(job_id: str, trial_name: str, *, actor: User) -> dict[str, 
 
     output_dir = Path(job.runtime.output_dir or runner.output_dir_for(job))
     harbor_dir = metrics_parser.harbor_job_dir(output_dir, job.id)
-    payload = harbor_trials.detail(harbor_dir, trial_name) if harbor_dir else None
+    payload = harbor_trials.detail(
+        harbor_dir, trial_name, job_status=job.status.value,
+        finished_at=job.runtime.finished_at.isoformat() if job.runtime.finished_at else None,
+    ) if harbor_dir else None
     if payload is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="trial 不存在")
     return payload

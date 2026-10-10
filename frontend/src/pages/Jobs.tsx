@@ -14,7 +14,6 @@ import {
   Dialog,
   EmptyState,
   Input,
-  LinkButton,
   Progress,
   Select,
   Table,
@@ -274,22 +273,21 @@ export default function Jobs() {
         </div>
 
         {items.length ? (
-          <Table>
+          <Table className="min-w-[1240px] table-fixed">
             <thead>
-              {/* 「任务」列给固定宽度、最后一列吸收剩余空间，
-                  这样类型/状态/进度等会整体左移，右侧不再挤成一团 */}
+              {/* 为操作预留宽度；窄屏在表格内横向滚动，避免按钮文字竖排。 */}
               <tr>
-                <Th className="w-[280px]">任务</Th>
+                <Th className="w-[240px]">任务</Th>
                 {/* 每个任务都属于一个项目，所以这一列常驻 —— 哪怕已经按项目筛过，
                     看列表的人也不该靠记忆确认自己在看哪个项目 */}
                 <Th className="w-[140px]">项目</Th>
                 <Th className="w-[160px]">类型</Th>
                 <Th className="w-[88px]">状态</Th>
-                <Th className="w-[170px]">进度</Th>
+                <Th className="w-[150px]">进度</Th>
                 <Th className="w-[64px]">GPU</Th>
                 <Th className="w-[80px]">耗时</Th>
-                <Th className="w-[120px]">提交</Th>
-                <Th>操作</Th>
+                <Th className="w-[100px]">提交</Th>
+                <Th className="w-[216px] whitespace-nowrap">操作</Th>
               </tr>
             </thead>
             <tbody>
@@ -306,7 +304,7 @@ export default function Jobs() {
                       {job.note && <div className="mt-0.5 line-clamp-1 text-[11px] text-fg-muted">{job.note}</div>}
                     </Td>
                     <Td>
-                      <ProjectTag projectId={job.project_id} className="text-xs" />
+                      <ProjectTag projectId={job.project_id} className="max-w-full text-xs" />
                     </Td>
                     <Td>
                       <JobTypeBadge type={job.type} framework={job.framework} />
@@ -339,49 +337,69 @@ export default function Jobs() {
                       <div className="text-[11px] text-fg-subtle">{formatRelative(job.created_at)}</div>
                     </Td>
                     <Td>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <Link to={`/jobs/${job.id}`} className="link text-xs">
-                          详情
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <Link to={`/jobs/${job.id}`}>
+                          <Button variant="outline" size="sm" className="px-2">
+                            详情
+                          </Button>
                         </Link>
-                        <LinkButton
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="px-2"
                           disabled={downloading.includes(job.id)}
                           onClick={() => downloadJob(job.id)}
                           title="下载 ZIP：任务配置、日志、指标与当前产物"
                         >
                           {downloading.includes(job.id) ? '打包中…' : '导出下载'}
-                        </LinkButton>
+                        </Button>
                         {user?.role === 'admin' && job.status === 'pending_review' && (
                           <>
-                            <LinkButton
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-success/30 px-2 text-success hover:border-success hover:bg-success-soft hover:text-success"
                               onClick={() => review.mutate({ id: job.id, approve: true, comment: '' })}
                               disabled={review.isPending}
                             >
                               通过
-                            </LinkButton>
-                            <LinkButton
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="border-danger/30 px-2 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
                               onClick={() => {
                                 setReviewTarget(job)
                                 setReviewComment('')
                               }}
                             >
                               驳回
-                            </LinkButton>
+                            </Button>
                           </>
                         )}
                         {canControl && isActive && (
-                          <LinkButton tone="danger" onClick={() => cancel.mutate(job.id)}>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-danger/30 px-2 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
+                            disabled={cancel.isPending && cancel.variables === job.id}
+                            onClick={() => cancel.mutate(job.id)}
+                          >
                             终止
-                          </LinkButton>
+                          </Button>
                         )}
                         {canControl && !isActive && (
-                          <LinkButton
-                            tone="danger"
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="border-danger/30 px-2 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
+                            disabled={remove.isPending && remove.variables === job.id}
                             onClick={() => {
                               if (confirm(`确认删除任务「${job.name}」的记录？训练产物会保留。`)) remove.mutate(job.id)
                             }}
                           >
                             删除
-                          </LinkButton>
+                          </Button>
                         )}
                       </div>
                     </Td>

@@ -331,6 +331,68 @@ export default function SubmitVerify() {
   // DatasetPicker（components/pickers.tsx）用同一个 queryKey，直接复用缓存
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
   const selectedDataset = datasets.data?.find((d) => d.id === config.dataset_id)
+  const [envTasksPath, setEnvTasksPath] = React.useState('')
+  React.useEffect(() => {
+    const timer = window.setTimeout(() => setEnvTasksPath(source === 'path' ? config.tasks_path.trim() : ''), 400)
+    return () => window.clearTimeout(timer)
+  }, [source, config.tasks_path])
+  const envDatasetId = source === 'uploaded' ? config.dataset_id : ''
+  const canDetectEnv = Boolean(envDatasetId || (source === 'path' && envTasksPath))
+  const verifierEnv = useQuery({
+    queryKey: ['harbor-verifier-env', envDatasetId, source === 'path' ? envTasksPath : '', selectedDataset?.updated_at],
+    queryFn: () => api.harborVerifierEnv(envDatasetId ? { dataset_id: envDatasetId } : { tasks_path: envTasksPath }),
+    enabled: canDetectEnv,
+    retry: false,
+  })
+  const autoEnvKeys = React.useRef(new Set<string>())
+  React.useEffect(() => {
+    const fields = canDetectEnv ? verifierEnv.data?.variables : []
+    if (!fields) return
+    const keys = new Set(fields.map((field) => field.key))
+    const previousAutoKeys = autoEnvKeys.current
+    const nextAutoKeys = new Set<string>()
+    setConfig((previous) => {
+      const next = { ...previous.verifier_env }
+      let changed = false
+      for (const key of previousAutoKeys) {
+        if (!keys.has(key) && next[key] === '') {
+          delete next[key]
+          changed = true
+        } else if (keys.has(key)) nextAutoKeys.add(key)
+      }
+      for (const key of keys) {
+        if (!(key in next)) {
+          next[key] = ''
+          nextAutoKeys.add(key)
+          changed = true
+        }
+      }
+      autoEnvKeys.current = nextAutoKeys
+      return changed ? { ...previous, verifier_env: next } : previous
+    })
+  }, [verifierEnv.data, verifierEnv.dataUpdatedAt, canDetectEnv, setConfig])
+  const selectedJudge = modelApis.data?.find((model) => model.id === config.judge_model_api_id)
+  const managedVerifierKeys = new Set(
+    config.judge_model_api_id && !config.disable_verification
+      ? ['JUDGE_API_KEY', 'JUDGE_MODEL', 'JUDGE_PROVIDER', 'JUDGE_API_PROTOCOL',
+        ...(selectedJudge?.base_url ? ['JUDGE_BASE_URL'] : [])]
+      : [],
+  )
+  const verifierEnvHints: Record<string, string> = {}
+  const verifierEnvPlaceholders: Record<string, string> = {}
+  for (const field of verifierEnv.data?.variables ?? []) {
+    const managed = managedVerifierKeys.has(field.key) || managedVerifierKeys.has(field.source_variable ?? '')
+    const hint = managed ? '由所选 Judge 模型自动注入；填写后覆盖模型配置'
+      : field.required ? '必填：任务没有默认值，请填写实际值'
+      : field.conflicting_defaults ? '可选：各任务默认值不同，留空沿用各自配置'
+      : field.secret && field.has_task_value ? '可选：任务已设置密钥，留空沿用；密钥不回显'
+      : field.default ? `可选：默认 ${field.default}，填写后覆盖`
+      : '可选：默认空值，可留空，无需用 1 占位'
+    verifierEnvHints[field.key] = `${hint} · 来源 ${field.tasks.length} 个 task.toml`
+    verifierEnvPlaceholders[field.key] = managed ? '由 Judge 模型自动注入'
+      : field.required ? '请填写实际值'
+      : field.default ? `默认：${field.default}` : '可留空'
+  }
   const judgeRequired =
     source === 'uploaded' && Boolean(selectedDataset?.rewardkit) && !config.disable_verification
   const harborReady = toolchain.data?.find((row) => row.key === 'harbor-cli')?.python_ok ?? true
@@ -404,6 +466,16 @@ export default function SubmitVerify() {
     if (!config.dataset_id && !config.tasks_path && !config.registry_dataset) out.push('请选择要评测的任务集')
     if (agentInfo?.needs_model && !config.model && !config.model_api_id) out.push(`agent ${config.agent} 需要选择或填写模型`)
     if (judgeRequired && !config.judge_model_api_id) out.push('该任务集是 reward-kit 格式，请选择 judge 模型')
+    if (!config.disable_verification) {
+      const missing = (verifierEnv.data?.variables ?? [])
+        .filter((field) => field.required && !managedVerifierKeys.has(field.key)
+          && !managedVerifierKeys.has(field.source_variable ?? '')
+          && !config.verifier_env[field.key]?.trim() && !config.agent_env[field.key]?.trim()
+          && !(field.source_variable && (config.verifier_env[field.source_variable]?.trim()
+            || config.agent_env[field.source_variable]?.trim())))
+        .map((field) => field.key)
+      if (missing.length) out.push(`请填写任务要求的 Verifier 环境变量：${missing.join(' / ')}`)
+    }
     if (!config.model_api_id) {
       const missingKeys = Object.entries(config.agent_env)
         .filter(([key, value]) => agentInfo?.env_keys.includes(key) && !value)
@@ -411,7 +483,7 @@ export default function SubmitVerify() {
       if (missingKeys.length) out.push(`请填写 ${missingKeys.join(' / ')}（或改为选择平台的模型配置）`)
     }
     return out
-  }, [name, config, agentInfo, judgeRequired])
+  }, [name, config, agentInfo, judgeRequired, verifierEnv.data, modelApis.data])
 
   return (
     <div className="space-y-4">
@@ -802,6 +874,34 @@ export default function SubmitVerify() {
                 </Grid>
               </Advanced>
 
+              <Field
+                label="Verifier 环境变量 (--verifier-env)"
+                hint="选择任务集后自动读取 task.toml 的 [verifier.env]；填写实际值，密钥不要用 1 等短值占位"
+              >
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs text-fg-muted">
+                  <span>
+                    {verifierEnv.isFetching ? '正在检测任务环境变量…'
+                      : verifierEnv.data ? `已检测 ${verifierEnv.data.n_tasks} 个任务 · ${verifierEnv.data.variables.length} 个变量`
+                      : source === 'registry' ? '注册表任务下载前可手动添加变量'
+                      : '选择任务集或填写服务器目录后自动检测'}
+                  </span>
+                  {canDetectEnv && <Button variant="ghost" size="sm" onClick={() => verifierEnv.refetch()}>重新检测</Button>}
+                </div>
+                {verifierEnv.error && <p role="alert" className="mb-2 text-xs text-danger">
+                  {verifierEnv.error instanceof ApiError ? verifierEnv.error.message : '环境变量检测失败，请重新检测'}
+                </p>}
+                {!!verifierEnv.data?.warnings.length && <p className="mb-2 text-xs text-warning">{verifierEnv.data.warnings.join('；')}</p>}
+                <KeyValueEditor
+                  value={config.verifier_env}
+                  onChange={(next) => patch({ verifier_env: next })}
+                  keyPlaceholder="EVAL_API_KEY"
+                  valuePlaceholder="实际值"
+                  rowHints={verifierEnvHints}
+                  valuePlaceholders={verifierEnvPlaceholders}
+                  secretNames={verifierEnv.data?.variables.filter((field) => field.secret).map((field) => field.key)}
+                />
+              </Field>
+
               <Advanced title="进阶：kwargs 与容器环境变量">
                 <Field label="Agent kwargs (--agent-kwarg)">
                   <KeyValueEditor
@@ -810,17 +910,6 @@ export default function SubmitVerify() {
                     secretKeys={false}
                     keyPlaceholder="max_turns"
                     valuePlaceholder="40"
-                  />
-                </Field>
-                <Field
-                  label="Verifier 环境变量 (--verifier-env)"
-                  hint="reward-kit / LLM judge 打分时需要的密钥写在这里；同时会写入 .env 供 task.toml 的 ${VAR} 插值使用"
-                >
-                  <KeyValueEditor
-                    value={config.verifier_env}
-                    onChange={(next) => patch({ verifier_env: next })}
-                    keyPlaceholder="ANTHROPIC_API_KEY"
-                    valuePlaceholder="sk-..."
                   />
                 </Field>
                 <Field label="环境 kwargs (--environment-kwarg)">

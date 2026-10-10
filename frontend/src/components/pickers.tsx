@@ -334,6 +334,9 @@ export function KeyValueEditor({
   valuePlaceholder = 'value',
   secretKeys = true,
   addLabel = '添加一项',
+  rowHints,
+  valuePlaceholders,
+  secretNames = [],
 }: {
   value: Record<string, string>
   onChange: (next: Record<string, string>) => void
@@ -341,6 +344,9 @@ export function KeyValueEditor({
   valuePlaceholder?: string
   secretKeys?: boolean
   addLabel?: string
+  rowHints?: Record<string, string>
+  valuePlaceholders?: Record<string, string>
+  secretNames?: string[]
 }) {
   const entries = Object.entries(value)
 
@@ -362,30 +368,33 @@ export function KeyValueEditor({
   }
 
   const isSecret = (key: string) =>
-    secretKeys && /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key)
+    secretKeys && (/KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key) || secretNames.includes(key))
 
   return (
     <div className="space-y-1.5">
       {entries.map(([key, entryValue], index) => (
-        <div key={index} className="flex items-center gap-1.5">
-          <Input
-            value={key}
-            placeholder={keyPlaceholder}
-            onChange={(event) => update(index, event.target.value, entryValue)}
-            className="num flex-1"
-            aria-label={`键 ${index + 1}`}
-          />
-          <Input
-            value={entryValue}
-            type={isSecret(key) ? 'password' : 'text'}
-            placeholder={valuePlaceholder}
-            onChange={(event) => update(index, key, event.target.value)}
-            className="num flex-[1.4]"
-            aria-label={`值 ${index + 1}`}
-          />
-          <Button variant="ghost" size="icon" onClick={() => remove(index)} aria-label="删除该项">
-            ×
-          </Button>
+        <div key={index} className="space-y-1">
+          <div className="flex items-center gap-1.5">
+            <Input
+              value={key}
+              placeholder={keyPlaceholder}
+              onChange={(event) => update(index, event.target.value, entryValue)}
+              className="num flex-1"
+              aria-label={`键 ${index + 1}`}
+            />
+            <Input
+              value={entryValue}
+              type={isSecret(key) ? 'password' : 'text'}
+              placeholder={valuePlaceholders?.[key] ?? valuePlaceholder}
+              onChange={(event) => update(index, key, event.target.value)}
+              className="num flex-[1.4]"
+              aria-label={`值 ${index + 1}`}
+            />
+            <Button variant="ghost" size="icon" onClick={() => remove(index)} aria-label="删除该项">
+              ×
+            </Button>
+          </div>
+          {rowHints?.[key] && <p className="break-words text-[11px] text-fg-subtle">{rowHints[key]}</p>}
         </div>
       ))}
       <Button

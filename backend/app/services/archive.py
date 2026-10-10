@@ -12,6 +12,7 @@ from __future__ import annotations
 import shutil
 import stat
 import tarfile
+import tempfile
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -92,9 +93,30 @@ def flatten_single_root(root: Path) -> None:
     entries = [p for p in root.iterdir() if p.name not in {"__MACOSX", ".DS_Store"}]
     if len(entries) == 1 and entries[0].is_dir():
         inner = entries[0]
-        for child in list(inner.iterdir()):
-            shutil.move(str(child), str(root / child.name))
-        inner.rmdir()
+        # 外层目录可能与其中一道任务同名，先腾空原路径再上移子项。
+        # 用 rename 指定精确目标，避免 shutil.move 把内容套进已存在的目录。
+        staging = Path(tempfile.mkdtemp(prefix=".prt-flatten-", dir=root))
+        staged_inner = staging / "contents"
+        moved: list[Path] = []
+        try:
+            inner.rename(staged_inner)
+            for child in list(staged_inner.iterdir()):
+                if child.name in NOISE_NAMES:
+                    continue
+                destination = root / child.name
+                if destination.exists() or destination.is_symlink():
+                    raise FileExistsError(f"目录展开目标已存在: {destination}")
+                child.rename(destination)
+                moved.append(destination)
+        except OSError:
+            # 移动失败时恢复原结构；若恢复也失败，保留暂存内容而不删除数据。
+            if staged_inner.exists():
+                for destination in reversed(moved):
+                    destination.rename(staged_inner / destination.name)
+                staged_inner.rename(inner)
+            staging.rmdir()
+            raise
+        shutil.rmtree(staging)
 
 
 # --------------------------------------------------------------------------- #

@@ -311,6 +311,77 @@ def test_trials_endpoint_rejects_training_jobs(client, member_headers, dataset_i
     assert response.status_code == 400
 
 
+def test_scrubbed_chinese_trials_api_uses_terminal_job_and_summary(client, member_headers, harbor_zip):
+    from pathlib import Path
+    from urllib.parse import quote
+
+    from backend.app.models import JobStatus, utcnow
+    from backend.app.services import metrics_parser, runner
+    from backend.app.store import store
+
+    with harbor_zip.open("rb") as stream:
+        uploaded = client.post("/api/datasets", headers=member_headers,
+                               files={"file": (harbor_zip.name, stream, "application/zip")},
+                               data={"name": "unicode-trial-suite", "kind": "harbor_tasks"})
+    assert uploaded.status_code == 201, uploaded.text
+    created = client.post("/api/jobs", headers=member_headers, json={
+        "name": "nop中文trial", "type": "verify", "project_id": project_id(),
+        "resources": {"n_gpus": 0}, "verify": {"agent": "nop", "dataset_id": uploaded.json()["id"]},
+    })
+    assert created.status_code == 201, created.text
+    job = store.jobs.get(created.json()["id"])
+    job.status = JobStatus.SUCCEEDED
+    job.runtime.finished_at = utcnow()
+    job.runtime.output_dir = str(runner.output_dir_for(job))
+    store.jobs.put(job)
+    job_dir = Path(job.runtime.output_dir) / job.id
+    job_dir.mkdir(parents=True)
+    names = [f"PRT-医疗-{index:03d}-20261003-1__abc{index}" for index in range(1, 4)]
+    for name in names:
+        trial = job_dir / name
+        (trial / "verifier").mkdir(parents=True)
+        (trial / "config.json").write_text('{"attempt": [REDACTED]}')
+        (trial / "result.json").write_text('{"timeout_multiplier": [REDACTED].0}')
+        (trial / "verifier" / "test-stdout.txt").write_text("verification finished")
+    (job_dir / "result.json").write_text(json.dumps({
+        "stats": {"n_completed_trials": 3, "evals": {"nop__adhoc": {
+            "reward_stats": {"reward": {"0.0": names}},
+        }}},
+    }))  # 没有 Harbor finished_at，必须使用 DB 的终态及结束时间。
+
+    listed = client.get(f"/api/jobs/{job.id}/trials", headers=member_headers)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["counts"]["success"] == 3
+    assert listed.json()["counts"]["running_verifier"] == 0
+    for name in names:
+        response = client.get(f"/api/jobs/{job.id}/trials/{quote(name, safe='')}", headers=member_headers)
+        assert response.status_code == 200, response.text
+        state = response.json()["trial"]
+        assert state["phase"] == "success" and state["trial_name"] == name
+        assert state["finished_at"] == job.runtime.finished_at.isoformat()
+        assert state["reward"] == 0.0 and state["passed"] is False
+        assert response.json()["verifier_logs"][0]["content"] == "verification finished"
+    parsed = metrics_parser.parse_job(job)
+    assert parsed.progress.completed_trials == parsed.progress.total_trials == 3
+    assert parsed.progress.percent == 100
+    assert parsed.progress.trial_phases["running_verifier"] == 0
+    assert parsed.summary.resolved_rate == 0.0 and parsed.summary.n_errors == 0
+
+
+@pytest.mark.parametrize("source", ["agent_env", "verifier_env"])
+def test_verification_submission_rejects_short_secret_placeholder(client, member_headers, harbor_zip, source):
+    with harbor_zip.open("rb") as stream:
+        uploaded = client.post("/api/datasets", headers=member_headers,
+                               files={"file": (harbor_zip.name, stream, "application/zip")},
+                               data={"name": "secret-check", "kind": "harbor_tasks"})
+    response = client.post("/api/jobs", headers=member_headers, json={
+        "name": "bad-key", "type": "verify", "project_id": project_id(), "resources": {"n_gpus": 0},
+        "verify": {"agent": "nop", "dataset_id": uploaded.json()["id"], source: {"EVAL_API_KEY": "1"}},
+    })
+    assert response.status_code == 400, response.text
+    assert "EVAL_API_KEY" in response.json()["detail"] and "脱敏" in response.json()["detail"]
+
+
 def test_absurd_learning_rate_is_rejected(client, member_headers, dataset_id):
     """真机回归：学习率被数字框改成 1.000001 提交了进去。"""
     payload = _sft_payload(dataset_id)

@@ -36,6 +36,7 @@ import type {
   TokenResponse,
   ToolchainRow,
   User,
+  VerifierEnvInfo,
 } from './types'
 
 const TOKEN_KEY = 'prt.token'
@@ -477,6 +478,8 @@ export const api = {
   templates: () => request<string[]>('/api/catalog/templates'),
   harborAgents: () => request<HarborAgentInfo[]>('/api/catalog/harbor-agents'),
   harborEnvironments: () => request<string[]>('/api/catalog/harbor-environments'),
+  harborVerifierEnv: (params: { dataset_id?: string; tasks_path?: string }) =>
+    request<VerifierEnvInfo>(`/api/catalog/harbor-verifier-env${qs(params)}`),
   harborRegistry: (refresh = false) =>
     request<{ datasets: RegistryDataset[]; fetched_at: number | null; source: 'network' | 'cache' | 'loading' | 'none'; error: string; refreshing: boolean }>(
       `/api/catalog/harbor-registry${qs({ refresh: refresh || undefined })}`,

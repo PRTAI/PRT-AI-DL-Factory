@@ -10,6 +10,9 @@ Harbor 的进度条是 rich Live，在非终端里一个字都不打，所以「
     <trial>/verifier/*                  verifier 开始跑测试
     <trial>/result.json                 结束：有 exception_info = 失败，否则 = 完成（附 reward）
 
+trial 结果损坏时，优先从 job 级 result.json 的 trial_results 或统计桶恢复；
+任务已经结束时，无法恢复的 trial 显示读取错误，不能继续推断为运行中。
+
 尚未在磁盘上出现的 trial 从 job 级 ``lock.json`` 的 trials 清单里补成 pending。
 全部是防御式读取：任何异常都当成「读不到」，绝不能影响正在跑的任务。
 """
@@ -25,7 +28,8 @@ from typing import Any
 
 PHASES = ["pending", "setup_environment", "running_agent", "running_verifier", "success", "failed"]
 _RUNNING = {"setup_environment", "running_agent", "running_verifier"}
-_SAFE_NAME = re.compile(r"^[A-Za-z0-9._\-]+$")
+_SAFE_NAME = re.compile(r"[^/\\\x00-\x1f\x7f]+")
+_TERMINAL = {"succeeded", "failed", "cancelled", "rejected"}
 _TAIL_BYTES = 64_000
 
 
@@ -61,8 +65,11 @@ def _result_file(trial_dir: Path) -> Path | None:
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, ValueError):
+        if path.is_symlink():
+            return None
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return payload if isinstance(payload, dict) else None
+    except (OSError, UnicodeError, ValueError):
         return None
 
 
@@ -80,7 +87,7 @@ def _parse_iso(value: Any) -> datetime | None:
 
 
 def _seconds(block: dict[str, Any] | None) -> float | None:
-    if not block:
+    if not isinstance(block, dict) or not block:
         return None
     start, end = _parse_iso(block.get("started_at")), _parse_iso(block.get("finished_at"))
     if start is None:
@@ -126,8 +133,10 @@ def _from_result(trial_dir: Path, payload: dict[str, Any]) -> TrialState:
         if (seconds := _seconds(payload.get(key))) is not None
     }
     return TrialState(
-        trial_name=payload.get("trial_name") or trial_dir.name,
-        task_name=payload.get("task_name") or trial_dir.name,
+        # 详情路径必须使用真实目录名，不能用可能被 Harbor 脱敏改写的名称。
+        trial_name=trial_dir.name,
+        task_name=(payload.get("task_name") if payload.get("task_name") and isinstance(payload.get("task_name"), str)
+                   and "[REDACTED]" not in payload["task_name"] else trial_dir.name.split("__", 1)[0]),
         phase=phase,
         detail=("通过" if reward is not None and reward >= 1 else "未通过") if phase == "success" else (exception.get("exception_type") or "失败"),
         reward=reward,
@@ -146,12 +155,12 @@ def _from_result(trial_dir: Path, payload: dict[str, Any]) -> TrialState:
     )
 
 
-def _from_live_dir(trial_dir: Path) -> TrialState:
+def _from_live_dir(trial_dir: Path, *, finished_at: str | None = None) -> TrialState:
     config = _read_json(trial_dir / "config.json") or {}
     agent_cfg = config.get("agent") or {}
     task_cfg = config.get("task") or {}
     started_ts = _mtime(trial_dir / "config.json") or _mtime(trial_dir)
-    now = datetime.now(timezone.utc).timestamp()
+    now = (_parse_iso(finished_at) or datetime.now(timezone.utc)).timestamp()
 
     agent_dir = trial_dir / "agent"
     verifier_dir = trial_dir / "verifier"
@@ -195,17 +204,104 @@ def _from_live_dir(trial_dir: Path) -> TrialState:
 
     task_name = task_cfg.get("name") or trial_dir.name.split("__", 1)[0]
     return TrialState(
-        trial_name=config.get("trial_name") or trial_dir.name,
-        task_name=str(task_name),
+        trial_name=trial_dir.name,
+        task_name=str(task_name) if "[REDACTED]" not in str(task_name) else trial_dir.name.split("__", 1)[0],
         phase=phase,
         detail=detail,
         agent=agent_cfg.get("name", ""),
         model=agent_cfg.get("model_name") or "",
         started_at=_iso(started_ts) if started_ts else None,
-        duration_seconds=(now - started_ts) if started_ts else None,
+        finished_at=finished_at,
+        duration_seconds=max(0.0, now - started_ts) if started_ts else None,
         phase_seconds=phase_seconds,
         path=str(trial_dir),
     )
+
+
+@dataclass
+class _JobContext:
+    results: dict[str, dict[str, Any]] = field(default_factory=dict)
+    summaries: dict[str, dict[str, Any]] = field(default_factory=dict)
+    terminal: bool = False
+    finished_at: str | None = None
+
+
+def _job_context(job_dir: Path, job_status: str, finished_at: str | None) -> _JobContext:
+    """任务级结果不在 Harbor 的 trial 脱敏范围内，可用于恢复损坏的 trial。"""
+    payload = _read_json(job_dir / "result.json") or {}
+    end = payload.get("finished_at") or finished_at
+    context = _JobContext(terminal=job_status in _TERMINAL or _parse_iso(end) is not None,
+                          finished_at=end if _parse_iso(end) is not None else None)
+    results = payload.get("trial_results")
+    for result in results if isinstance(results, list) else []:
+        if isinstance(result, dict) and isinstance(result.get("trial_name"), str):
+            context.results[result["trial_name"]] = result
+    stats = payload.get("stats")
+    evaluations = stats.get("evals") if isinstance(stats, dict) else None
+    for evaluation in (evaluations if isinstance(evaluations, dict) else {}).values():
+        if not isinstance(evaluation, dict):
+            continue
+        rewards = evaluation.get("reward_stats")
+        for metric, buckets in (rewards if isinstance(rewards, dict) else {}).items():
+            for value, names in (buckets if isinstance(buckets, dict) else {}).items():
+                try:
+                    reward = float(value)
+                except (TypeError, ValueError):
+                    continue
+                for name in names if isinstance(names, list) else []:
+                    if not isinstance(name, str):
+                        continue
+                    summary = context.summaries.setdefault(name, {})
+                    summary.setdefault("verifier_result", {}).setdefault("rewards", {})[metric] = reward
+        exceptions = evaluation.get("exception_stats")
+        for exception_type, names in (exceptions if isinstance(exceptions, dict) else {}).items():
+            for name in names if isinstance(names, list) else []:
+                if not isinstance(name, str):
+                    continue
+                context.summaries.setdefault(name, {})["exception_info"] = {
+                    "exception_type": exception_type,
+                    "exception_message": "异常类型来自任务级汇总；trial 结果文件无法读取。",
+                }
+    return context
+
+
+def _state_for(trial_dir: Path, context: _JobContext) -> TrialState:
+    result_path = _result_file(trial_dir)
+    result = _read_json(result_path) if result_path else None
+    if result:
+        try:
+            return _from_result(trial_dir, result)
+        except (AttributeError, TypeError, ValueError):
+            pass
+    # 先恢复完整结果，再尝试按真实 trial 名匹配汇总的 reward/exception 桶。
+    recovered = context.results.get(trial_dir.name)
+    if not recovered and (result_path is not None or context.terminal):
+        summary = context.summaries.get(trial_dir.name)
+        if summary:
+            result_ts = _mtime(result_path) if result_path else None
+            recovered = {**summary, "finished_at": context.finished_at or (_iso(result_ts) if result_ts else None)}
+    if recovered:
+        try:
+            state = _from_result(trial_dir, recovered)
+            state.detail += "（从任务汇总恢复）"
+            return state
+        except (AttributeError, TypeError, ValueError):
+            pass
+    end = context.finished_at
+    if context.terminal and not end:
+        end_ts = _mtime(result_path or trial_dir / "config.json") or _mtime(trial_dir)
+        end = _iso(end_ts) if end_ts is not None else None
+    try:
+        state = _from_live_dir(trial_dir, finished_at=end)
+    except (AttributeError, TypeError, ValueError):
+        state = TrialState(trial_name=trial_dir.name, task_name=trial_dir.name.split("__", 1)[0],
+                           phase="setup_environment", detail="解析中", finished_at=end, path=str(trial_dir))
+    if context.terminal:
+        state.phase = "failed"
+        state.detail = "结果文件无法读取" if result_path else "任务已结束，trial 未生成结果"
+        state.exception_type = "TrialResultReadError" if result_path else "TrialInterrupted"
+        state.exception_message = "无法从任务汇总恢复结果；请查看 trial 日志。"
+    return state
 
 
 def _planned_trials(job_dir: Path) -> list[dict[str, Any]]:
@@ -219,23 +315,25 @@ def _planned_trials(job_dir: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def scan(job_dir: Path) -> list[TrialState]:
+def scan(job_dir: Path, *, job_status: str = "", finished_at: str | None = None) -> list[TrialState]:
     """所有 trial 的当前状态（磁盘上有的 + 清单里还没开始的）。"""
     states: list[TrialState] = []
+    context = _job_context(job_dir, job_status, finished_at)
     try:
         dirs = [
             p for p in job_dir.iterdir()
-            if p.is_dir() and ((p / "config.json").is_file() or _result_file(p) is not None)
+            if p.is_dir() and not p.is_symlink() and ((p / "config.json").is_file() or _result_file(p) is not None)
         ]
     except OSError:
         return states
     for trial_dir in sorted(dirs):
-        result_path = _result_file(trial_dir)
-        result = _read_json(result_path) if result_path else None
         try:
-            states.append(_from_result(trial_dir, result) if result else _from_live_dir(trial_dir))
+            states.append(_state_for(trial_dir, context))
         except Exception:  # noqa: BLE001 - 解析永远不能拖垮任务页
-            states.append(TrialState(trial_name=trial_dir.name, task_name=trial_dir.name, phase="setup_environment", detail="解析中", path=str(trial_dir)))
+            states.append(TrialState(trial_name=trial_dir.name, task_name=trial_dir.name.split("__", 1)[0],
+                                     phase="failed" if context.terminal else "setup_environment",
+                                     detail="结果解析失败" if context.terminal else "解析中",
+                                     finished_at=context.finished_at, path=str(trial_dir)))
 
     # 还没落盘的：按任务名把清单里多出来的次数补成 pending。
     # result.json 里的 task_name 可能带数据集前缀（pc-fullstack/xxx），lock 里是裸名，
@@ -251,8 +349,11 @@ def scan(job_dir: Path) -> list[TrialState]:
             if seen.get(name, 0) > 0:
                 seen[name] -= 1
                 continue
-            states.append(TrialState(trial_name=f"{name} (待开始)", task_name=name, phase="pending", detail="排队中",
-                                     agent=row["agent"], model=row["model"]))
+            states.append(TrialState(trial_name=f"{name} (待开始)", task_name=name,
+                                     phase="failed" if context.terminal else "pending",
+                                     detail="任务已结束，trial 未执行" if context.terminal else "排队中",
+                                     exception_type="TrialNotStarted" if context.terminal else None,
+                                     finished_at=context.finished_at, agent=row["agent"], model=row["model"]))
     return states
 
 
@@ -292,8 +393,10 @@ def page(
     page_size: int = 10,
     phase: str = "",
     query: str = "",
+    job_status: str = "",
+    finished_at: str | None = None,
 ) -> dict[str, Any]:
-    states = scan(job_dir)
+    states = scan(job_dir, job_status=job_status, finished_at=finished_at)
     total_counts = counts(states)
     rows = states
     if phase:
@@ -322,6 +425,8 @@ def page(
 
 def _tail(path: Path, limit: int = _TAIL_BYTES) -> str:
     try:
+        if path.is_symlink():
+            return ""
         size = path.stat().st_size
         with path.open("rb") as handle:
             if size > limit:
@@ -332,20 +437,22 @@ def _tail(path: Path, limit: int = _TAIL_BYTES) -> str:
         return ""
 
 
-def detail(job_dir: Path, trial_name: str) -> dict[str, Any] | None:
+def detail(job_dir: Path, trial_name: str, *, job_status: str = "", finished_at: str | None = None) -> dict[str, Any] | None:
     """单个 trial 的详细日志：trial.log、agent 输出、verifier 输出、异常栈。"""
-    if not _SAFE_NAME.match(trial_name):
+    if trial_name in {".", ".."} or not _SAFE_NAME.fullmatch(trial_name):
         return None
-    trial_dir = (job_dir / trial_name).resolve()
+    trial_path = job_dir / trial_name
+    if trial_path.is_symlink():
+        return None
     try:
-        trial_dir.relative_to(job_dir.resolve())
-    except ValueError:
+        trial_dir = trial_path.resolve()
+    except (OSError, RuntimeError):
+        return None
+    if trial_dir.parent != job_dir.resolve():
         return None
     if not (trial_dir / "config.json").is_file() and _result_file(trial_dir) is None:
         return None
-    result_path = _result_file(trial_dir)
-    result = _read_json(result_path) if result_path else None
-    state = _from_result(trial_dir, result) if result else _from_live_dir(trial_dir)
+    state = _state_for(trial_dir, _job_context(job_dir, job_status, finished_at))
 
     agent_dir = trial_dir / "agent"
     agent_logs: list[dict[str, str]] = []
@@ -369,7 +476,7 @@ def detail(job_dir: Path, trial_name: str) -> dict[str, Any] | None:
     files: list[dict[str, Any]] = []
     try:
         for path in sorted(trial_dir.rglob("*")):
-            if path.is_file():
+            if path.is_file() and not path.is_symlink():
                 rel = str(path.relative_to(trial_dir))
                 files.append({"path": rel, "size_bytes": path.stat().st_size})
                 if len(files) >= 200:

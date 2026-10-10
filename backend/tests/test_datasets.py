@@ -70,6 +70,33 @@ def test_upload_harbor_tasks(client, member_headers, harbor_zip):
     assert preview["tasks"][0]["instruction"].startswith("# 任务")
 
 
+@pytest.mark.parametrize("kind", ["harbor_tasks", "sft_alpaca"])
+def test_upload_harbor_wrapper_matches_first_task(client, member_headers, make_zip, kind):
+    from pathlib import Path
+
+    wrapper = "PRT-医疗-001-20261003-1"
+    files = {f"{wrapper}/.DS_Store": "metadata", ".DS_Store": "metadata"}
+    task_names = [f"PRT-医疗-{i:03d}-20261003-1" for i in range(1, 4)]
+    for task_name in task_names:
+        prefix = f"{wrapper}/{task_name}"
+        files.update({
+            f"{prefix}/task.toml": 'version = "1.0"\n',
+            f"{prefix}/instruction.md": "# 医疗任务\n",
+            f"{prefix}/environment/Dockerfile": "FROM ubuntu:24.04\n",
+            f"{prefix}/tests/test.sh": "#!/bin/bash\ntrue\n",
+            f"{prefix}/solution/solve.sh": "#!/bin/bash\ntrue\n",
+        })
+    response = _upload(client, member_headers, make_zip(files), name="medical-suite", kind=kind)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["kind"] == "harbor_tasks"
+    assert body["status"] == "ready"
+    assert body["stats"]["n_tasks"] == 3
+    root = Path(body["root_path"])
+    assert sorted(path.parent.name for path in root.glob("*/task.toml")) == task_names
+    assert not list(root.glob(".prt-flatten-*"))
+
+
 @pytest.mark.parametrize("kind", ["sft_alpaca", "sft_sharegpt", "dpo_pairs", "kto_pairs", "verl_parquet"])
 @pytest.mark.parametrize("prefix", ["harbor-format-data/qa001-capacity-audit", "qa001-capacity-audit"])
 def test_harbor_contract_is_not_validated_as_training_json(client, member_headers, make_zip, kind, prefix):

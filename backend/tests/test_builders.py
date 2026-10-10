@@ -361,6 +361,53 @@ def test_harbor_oracle_needs_no_model(tmp_path, harbor_dataset, monkeypatch):
     assert any("oracle" in note for note in result.notes)
 
 
+@pytest.mark.parametrize("value", ["1", "12", "abc", "true", "false", "null", "1.0", "123456789"])
+def test_harbor_rejects_dangerous_secret_placeholders(tmp_path, harbor_dataset, monkeypatch, value):
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(
+        dataset_id=harbor_dataset.id, agent="nop",
+        verifier_env={"EVAL_API_KEY": value, "EVAL_API_BASE": "1"},
+    ))
+    with pytest.raises(BuildError, match="EVAL_API_KEY.*脱敏"):
+        harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    assert not (tmp_path / "w" / ".env").exists()
+
+
+def test_harbor_allows_local_auth_sentinel_and_non_secret_numbers(tmp_path, harbor_dataset, monkeypatch):
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(
+        dataset_id=harbor_dataset.id, agent="nop", agent_env={"OPENAI_API_KEY": "EMPTY"},
+        verifier_env={"EVAL_API_KEY": "sk-real-secret", "BATCH_SIZE": "1"},
+    ))
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    assert "OPENAI_API_KEY=EMPTY" in result.command and "BATCH_SIZE=1" in result.command
+    assert "sk-real-secret" not in result.masked_command_line()
+
+
+def test_harbor_acknowledges_optional_task_variables_without_overriding_defaults(tmp_path, harbor_dataset, monkeypatch):
+    from io import StringIO
+    from dotenv import dotenv_values
+
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    monkeypatch.delenv("EVAL_API_KEY", raising=False)
+    monkeypatch.delenv("TIMEOUT", raising=False)
+    for name, timeout in [("demo", "30"), ("other", "60")]:
+        task = Path(harbor_dataset.root_path) / name
+        task.mkdir(exist_ok=True)
+        (task / "task.toml").write_text(
+            '[verifier.env]\nEVAL_API_KEY = "${EVAL_API_KEY:-}"\n'
+            f'TIMEOUT = "${{TIMEOUT:-{timeout}}}"\nREQUIRED_TOKEN = "${{REQUIRED_TOKEN}}"\n',
+        )
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(dataset_id=harbor_dataset.id, agent="nop"))
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    env_path = Path(result.command[result.command.index("--env-file") + 1])
+    declared = dotenv_values(stream=StringIO(env_path.read_text()))
+    assert declared == {"EVAL_API_KEY": None, "TIMEOUT": None}
+    assert "REQUIRED_TOKEN" not in declared
+    assert "EVAL_API_KEY" not in result.env
+    assert not any(part.startswith("EVAL_API_KEY=") for part in result.command)
+
+
 def test_harbor_agent_without_model_rejected(tmp_path, harbor_dataset, monkeypatch):
     _fake_harbor_bin(monkeypatch, tmp_path)
     job = _job(
