@@ -19,7 +19,14 @@ from fastapi.staticfiles import StaticFiles
 
 from .api import api_router, ws_router
 from .config import REPO_ROOT, settings
-from .services import deployment_service, export_service, model_api_service, project_service, user_service
+from .services import (
+    deployment_service,
+    export_service,
+    model_api_service,
+    project_service,
+    review_service,
+    user_service,
+)
 from .services.monitor import monitor
 from .services.scheduler import scheduler
 
@@ -54,6 +61,8 @@ async def lifespan(app: FastAPI):
     # 否则会一直挂在 serving/running 上并且白占着 GPU 账。
     deployment_service.reconcile()
     export_service.reconcile()
+    # 样例审核跑在事件循环里，没有子进程可以接管，重启就等于中断。
+    review_service.reconcile()
     logger.info("%s %s ready", settings.app_name, settings.app_version)
     try:
         yield

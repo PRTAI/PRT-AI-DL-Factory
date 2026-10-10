@@ -18,6 +18,7 @@ from ..models import (
     ModelDownload,
     Notification,
     Project,
+    ReviewTask,
     SystemSettings,
     User,
 )
@@ -39,6 +40,7 @@ class Store:
         self.projects: JsonCollection[Project] = JsonCollection(db / "projects.json", Project)
         self.deployments: JsonCollection[Deployment] = JsonCollection(db / "deployments.json", Deployment)
         self.exports: JsonCollection[ExportTask] = JsonCollection(db / "exports.json", ExportTask)
+        self.reviews: JsonCollection[ReviewTask] = JsonCollection(db / "reviews.json", ReviewTask)
         # 里面有明文 API Key：文件是 0600（见 json_store 的写入），接口层永远只返回尾号
         self.model_apis: JsonCollection[ModelApiConfig] = JsonCollection(
             db / "model_apis.json", ModelApiConfig, mode=0o600

@@ -15,6 +15,8 @@ import Datasets from '@/pages/Datasets'
 import Models from '@/pages/Models'
 import Projects from '@/pages/Projects'
 import Deployments from '@/pages/Deployments'
+import Review from '@/pages/Review'
+import ReviewDetail from '@/pages/ReviewDetail'
 import Admin from '@/pages/Admin'
 import ProfileSettings from '@/pages/ProfileSettings'
 import Docs from '@/pages/Docs'
@@ -101,6 +103,9 @@ export default function App() {
         <Route path="/datasets" element={<Datasets />} />
         <Route path="/models" element={<Models />} />
         <Route path="/deployments" element={<Deployments />} />
+        {/* 审核不是训练任务，项目归属可选，所以不套 ProjectGate */}
+        <Route path="/review" element={<Review />} />
+        <Route path="/review/:reviewId" element={<ReviewDetail />} />
         <Route
           path="/admin"
           element={

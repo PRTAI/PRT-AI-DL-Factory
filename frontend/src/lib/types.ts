@@ -96,6 +96,7 @@ export interface Dataset {
   error: string
   lf_dataset_names: string[]
   tags: string[]
+  rewardkit: boolean
 }
 
 export interface ModelEntry {
@@ -295,6 +296,9 @@ export interface VerifyConfig {
   verifier_env: Record<string, string>
   environment_kwargs: Record<string, string>
   verifier_kwargs: Record<string, string>
+  /** reward-kit 套件的 LLM judge：平台注入 JUDGE_API_KEY/BASE_URL/MODEL/PROVIDER/API_PROTOCOL */
+  judge_model_api_id: string
+  judge_api_protocol: 'anthropic' | 'openai'
   environment_cpus?: number | null
   environment_memory_mb?: number | null
   environment_gpus?: number | null
@@ -809,4 +813,76 @@ export interface TrialDetail {
   agent_logs: { name: string; content: string }[]
   verifier_logs: { name: string; content: string }[]
   files: { path: string; size_bytes: number }[]
+}
+
+// ------------------------------------------------------------ 样例审核 ----
+export type ReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type ReviewStage = 'pending' | 'collecting' | 'planning' | 'checking' | 'reporting' | 'done'
+export type ReviewVerdict = 'pass' | 'fail' | 'needs_review'
+export type CheckStatus = 'pending' | 'running' | 'done' | 'failed' | 'dropped'
+
+export interface ReviewCheck {
+  code: string
+  title: string
+  source: string
+  requirement: string
+  quote: string
+  how_to_judge: string
+  views: string[]
+  status: CheckStatus
+  /** quote 在需求文档里定位不到时的丢弃原因 */
+  drop_reason: string
+  n_fail: number
+  n_pass: number
+  n_needs_review: number
+  error: string
+}
+
+export interface ReviewFinding {
+  check_code: string
+  task_id: string
+  rel_path: string
+  verdict: ReviewVerdict
+  problems: string[]
+}
+
+export interface ReviewStats {
+  n_tasks: number
+  n_pass: number
+  n_fail: number
+  n_needs_review: number
+  n_checks: number
+  n_checks_done: number
+  n_findings: number
+}
+
+export interface ReviewTask {
+  id: string
+  workspace: string
+  name: string
+  supplier: string
+  spec_title: string
+  prompt: string
+  model_api_id: string
+  model_label: string
+  owner_id: string
+  owner_email: string
+  project_id: string
+  status: ReviewStatus
+  stage: ReviewStage
+  created_at: string
+  updated_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  work_dir: string
+  archive_name: string
+  archive_bytes: number
+  doc_names: string[]
+  report_path: string
+  stats: ReviewStats
+  checks: ReviewCheck[]
+  /** 平台替用户做的取舍（丢弃的质检项、被忽略的返回…），原样展示 */
+  notes: string[]
+  error: string
+  usage: Record<string, number>
 }

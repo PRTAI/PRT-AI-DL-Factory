@@ -76,6 +76,16 @@ class Settings(BaseSettings):
     # single-user install can opt out; the UI surfaces it as a system setting.
     require_approval: bool = True
 
+    # ------------------------------------------------------ 样例审核（质检） ---
+    # 审核不占 GPU，只花模型 API 额度，所以自己限流而不是走 GPU 调度队列。
+    review_concurrency: int = 4           # 同时在跑的 subagent 数
+    review_batch_tasks: int = 20          # 一个 subagent 一次判定多少道题
+    review_max_tasks: int = 500           # 单次审核最多受检题数，超出即拒绝
+    review_evidence_bytes: int = 8000     # 每份证据文本截断长度
+    review_batch_chars: int = 60_000      # 一次 subagent 请求里证据 JSON 的字符上限
+    review_llm_timeout_seconds: float = 300.0
+    review_max_doc_chars: int = 120_000   # 需求文档送进 prompt 的上限
+
     @field_validator(
         "data_root",
         "models_root",
@@ -88,7 +98,11 @@ class Settings(BaseSettings):
     @classmethod
     def _expand(cls, value: object) -> object:
         if isinstance(value, str):
-            return Path(os.path.expanduser(value))
+            path = Path(os.path.expanduser(value))
+            # 相对路径（如 .env 里的 PRT_DATA_ROOT=./data）按仓库根解析成绝对路径。
+            # 子进程的 cwd 是 job 目录，若把 ./data/jobs/<id>/.env 这样的相对路径塞进
+            # 命令行，会被再拼接一次（harbor: "Env file not found"），--jobs-dir 同理。
+            return path if path.is_absolute() else REPO_ROOT / path
         return value
 
     # ------------------------------------------------------- derived paths ---
@@ -129,6 +143,14 @@ class Settings(BaseSettings):
         return self.data_root / "exports"
 
     @property
+    def reviews_dir(self) -> Path:
+        return self.data_root / "reviews"
+
+    @property
+    def prebuilds_dir(self) -> Path:
+        return self.data_root / "prebuilds"
+
+    @property
     def resources_dir(self) -> Path:
         return Path(__file__).resolve().parent / "resources"
 
@@ -144,6 +166,8 @@ class Settings(BaseSettings):
             self.audit_dir,
             self.deployments_dir,
             self.exports_dir,
+            self.reviews_dir,
+            self.prebuilds_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 

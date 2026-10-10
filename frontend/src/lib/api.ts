@@ -24,6 +24,8 @@ import type {
   ModelApi,
   ModelProviderInfo,
   RegistryDataset,
+  ReviewFinding,
+  ReviewTask,
   TrialDetail,
   TrialPage,
   Project,
@@ -120,6 +122,64 @@ const qs = (params: Record<string, unknown>) => {
   }
   const rendered = search.toString()
   return rendered ? `?${rendered}` : ''
+}
+
+/**
+ * 带 token 的附件下载。文件名优先用后端 `Content-Disposition` 里的
+ * `filename*=UTF-8''…`（返修报告的名字是中文，走 `filename=` 会乱码）。
+ */
+async function downloadAttachment(path: string, fallback: string) {
+  const response = await fetch(path, { headers: { Authorization: `Bearer ${getToken() ?? ''}` } })
+  if (!response.ok) {
+    throw new ApiError(response.status, extractDetail(safeParse(await response.text())) ?? '下载失败')
+  }
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  const blob = await response.blob()
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = encoded ? decodeURIComponent(encoded) : fallback
+  anchor.click()
+  URL.revokeObjectURL(url)
+}
+
+function uploadWithProgress<T>(
+  method: string,
+  path: string,
+  form: FormData,
+  onProgress?: (percent: number) => void,
+) {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open(method, path)
+    const token = getToken()
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(Math.round((event.loaded / event.total) * 100))
+      }
+    }
+    xhr.onload = () => {
+      const payload = safeParse(xhr.responseText)
+      if (xhr.status >= 200 && xhr.status < 300) resolve(payload as T)
+      else reject(new ApiError(xhr.status, extractDetail(payload) ?? `上传失败 (${xhr.status})`))
+    }
+    xhr.onerror = () => reject(new ApiError(0, '网络错误，上传失败'))
+    xhr.send(form)
+  })
+}
+
+export interface Prebuild {
+  id: string
+  dataset_id: string
+  task: string
+  command: string
+  status: 'running' | 'succeeded' | 'failed'
+  return_code: number | null
+  created_at: string
+  finished_at: string | null
+  log?: string
 }
 
 export const api = {
@@ -280,25 +340,17 @@ export const api = {
     ),
   datasetSpecs: () => request<{ version: number; specs: DatasetSpec[] }>('/api/datasets/specs'),
   uploadDataset: (form: FormData, onProgress?: (percent: number) => void) =>
-    new Promise<Dataset>((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      xhr.open('POST', '/api/datasets')
-      const token = getToken()
-      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && onProgress) {
-          onProgress(Math.round((event.loaded / event.total) * 100))
-        }
-      }
-      xhr.onload = () => {
-        const payload = safeParse(xhr.responseText)
-        if (xhr.status >= 200 && xhr.status < 300) resolve(payload as Dataset)
-        else reject(new ApiError(xhr.status, extractDetail(payload) ?? `上传失败 (${xhr.status})`))
-      }
-      xhr.onerror = () => reject(new ApiError(0, '网络错误，上传失败'))
-      xhr.send(form)
-    }),
-  updateDataset: (id: string, payload: { name?: string; description?: string; tags?: string[] }) =>
+    uploadWithProgress<Dataset>('POST', '/api/datasets', form, onProgress),
+  /** 重新上传压缩包替换数据集内容，id 不变 */
+  replaceDatasetFile: (id: string, form: FormData, onProgress?: (percent: number) => void) =>
+    uploadWithProgress<Dataset>('PUT', `/api/datasets/${id}/file`, form, onProgress),
+  startPrebuild: (datasetId: string, task: string) =>
+    request<Prebuild>(`/api/datasets/${datasetId}/prebuild`, { method: 'POST', body: JSON.stringify({ task }) }),
+  prebuild: (buildId: string) => request<Prebuild>(`/api/datasets/prebuilds/${buildId}`),
+  updateDataset: (
+    id: string,
+    payload: { name?: string; description?: string; tags?: string[]; rewardkit?: boolean },
+  ) =>
     request<Dataset>(`/api/datasets/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteDataset: (id: string) => request<void>(`/api/datasets/${id}`, { method: 'DELETE' }),
 
@@ -350,6 +402,39 @@ export const api = {
   cancelExport: (id: string) => request<ExportTask>(`/api/exports/${id}/cancel`, { method: 'POST' }),
   deleteExport: (id: string, purgeFiles = false) =>
     request<void>(`/api/exports/${id}${qs({ purge_files: purgeFiles })}`, { method: 'DELETE' }),
+
+  // ------------------------------------------------------------ reviews ----
+  reviews: (params: { mine_only?: boolean; project_id?: string } = {}) =>
+    request<ReviewTask[]>(`/api/reviews${qs(params)}`),
+  review: (id: string) => request<ReviewTask>(`/api/reviews/${id}`),
+  reviewFindings: (id: string) => request<ReviewFinding[]>(`/api/reviews/${id}/findings`),
+  // 压缩包可能很大，照 uploadDataset 用 XHR 才能拿到上传进度
+  createReview: (form: FormData, onProgress?: (percent: number) => void) =>
+    new Promise<ReviewTask>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/reviews')
+      const token = getToken()
+      if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          onProgress(Math.round((event.loaded / event.total) * 100))
+        }
+      }
+      xhr.onload = () => {
+        const payload = safeParse(xhr.responseText)
+        if (xhr.status >= 200 && xhr.status < 300) resolve(payload as ReviewTask)
+        else reject(new ApiError(xhr.status, extractDetail(payload) ?? `提交失败 (${xhr.status})`))
+      }
+      xhr.onerror = () => reject(new ApiError(0, '网络错误，提交失败'))
+      xhr.send(form)
+    }),
+  downloadReviewReport: (id: string) =>
+    downloadAttachment(`/api/reviews/${id}/report.docx`, `${id}.docx`),
+  downloadReviewArchive: (id: string) =>
+    downloadAttachment(`/api/reviews/${id}/archive`, `${id}.zip`),
+  cancelReview: (id: string) => request<ReviewTask>(`/api/reviews/${id}/cancel`, { method: 'POST' }),
+  deleteReview: (id: string, purgeFiles = false) =>
+    request<void>(`/api/reviews/${id}${qs({ purge_files: purgeFiles })}`, { method: 'DELETE' }),
 
   // ------------------------------------------------------------ system ----
   systemMetrics: () => request<SystemMetrics>('/api/system/metrics'),

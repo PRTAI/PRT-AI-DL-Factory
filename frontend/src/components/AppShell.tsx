@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bell,
   BookOpen,
+  ClipboardCheck,
   Database,
   ExternalLink,
   FlaskConical,
@@ -50,6 +51,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
       { to: '/jobs', label: '任务列表', Icon: ListChecks },
       { to: '/submit/train', label: '提交训练', Icon: GraduationCap },
       { to: '/submit/verify', label: '提交评测', Icon: FlaskConical },
+      { to: '/review', label: '样例审核', Icon: ClipboardCheck },
     ],
   },
   {
