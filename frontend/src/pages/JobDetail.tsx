@@ -246,10 +246,22 @@ export default function JobDetail() {
               </Button>
             )}
             {canControl && ['succeeded', 'failed', 'cancelled', 'rejected'].includes(data.status) && (
-              <Button variant="secondary" size="sm" loading={resubmit.isPending} onClick={() => resubmit.mutate()}>
-                <Repeat className="h-3.5 w-3.5" aria-hidden />
-                重跑
-              </Button>
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  title="载入这次的配置到提交页，修改后再提交"
+                  onClick={() =>
+                    navigate(`${data.type === 'verify' ? '/submit/verify' : '/submit/train'}?rerun=${data.id}`)
+                  }
+                >
+                  <Repeat className="h-3.5 w-3.5" aria-hidden />
+                  编辑后重跑
+                </Button>
+                <Button variant="ghost" size="sm" loading={resubmit.isPending} onClick={() => resubmit.mutate()}>
+                  原样重跑
+                </Button>
+              </>
             )}
             {canControl && exportable.data?.exportable && (
               <Button

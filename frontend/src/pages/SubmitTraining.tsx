@@ -1,11 +1,12 @@
 import * as React from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { ChevronDown, Cpu, Database, Rocket, Server, Settings2 } from 'lucide-react'
+import { ChevronDown, Cpu, Database, Eraser, Rocket, Server, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { AlgorithmInfo, DatasetKind, ModelEntry, RLConfig, SFTConfig, TrainStage } from '@/lib/types'
 import { useProject } from '@/lib/store'
+import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
 import {
   Badge,
@@ -198,9 +199,20 @@ const Grid = ({ children, cols = 3 }: { children: React.ReactNode; cols?: 2 | 3 
 )
 
 /* -------------------------------------------------------------------------- */
+const DRAFT = 'submit-train'
+
 export default function SubmitTraining() {
   const navigate = useNavigate()
-  const { projectId } = useProject()
+  const { projectId, setProject } = useProject()
+  const [searchParams] = useSearchParams()
+  // 任务详情页「重跑」带过来的源任务：用它的配置预填表单，改完再提交
+  const rerunId = searchParams.get('rerun')
+  const rerunSource = useQuery({
+    queryKey: ['job', rerunId],
+    queryFn: () => api.job(rerunId!),
+    enabled: Boolean(rerunId),
+    retry: false,
+  })
 
   const algorithms = useQuery({ queryKey: ['algorithms'], queryFn: () => api.algorithms() })
   const templates = useQuery({ queryKey: ['templates'], queryFn: () => api.templates() })
@@ -208,17 +220,59 @@ export default function SubmitTraining() {
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
   const projectName = projects.data?.find((row) => row.project.id === projectId)?.project.name
 
-  const [name, setName] = React.useState('')
-  const [note, setNote] = React.useState('')
-  const [tags, setTags] = React.useState('')
-  const [algorithm, setAlgorithm] = React.useState<TrainStage>('sft')
-  const [nGpus, setNGpus] = React.useState(1)
-  const [priority, setPriority] = React.useState(0)
-  const [envVars, setEnvVars] = React.useState<Record<string, string>>({})
-  const [sft, setSft] = React.useState<SFTConfig>(DEFAULT_SFT)
-  const [rl, setRl] = React.useState<RLConfig>(DEFAULT_RL)
-  const [selectedModel, setSelectedModel] = React.useState<ModelEntry | null>(null)
+  // 草稿缓存：切页面再回来不用重填（提交成功后清掉）
+  const [name, setName] = useDraftState(DRAFT, 'name', '')
+  const [note, setNote] = useDraftState(DRAFT, 'note', '')
+  const [tags, setTags] = useDraftState(DRAFT, 'tags', '')
+  const [algorithm, setAlgorithm] = useDraftState<TrainStage>(DRAFT, 'algorithm', 'sft')
+  const [nGpus, setNGpus] = useDraftState(DRAFT, 'nGpus', 1)
+  const [priority, setPriority] = useDraftState(DRAFT, 'priority', 0)
+  const [envVars, setEnvVars] = useDraftState<Record<string, string>>(DRAFT, 'envVars', {})
+  const [sft, setSft] = useDraftState<SFTConfig>(DRAFT, 'sft', DEFAULT_SFT)
+  const [rl, setRl] = useDraftState<RLConfig>(DRAFT, 'rl', DEFAULT_RL)
+  const [selectedModel, setSelectedModel] = useDraftState<ModelEntry | null>(DRAFT, 'selectedModel', null)
+  const [parentJobId, setParentJobId] = useDraftState<string | null>(DRAFT, 'parentJobId', null)
   const [error, setError] = React.useState<string | null>(null)
+
+  const resetForm = () => {
+    setName('')
+    setNote('')
+    setTags('')
+    setAlgorithm('sft')
+    setNGpus(1)
+    setPriority(0)
+    setEnvVars({})
+    setSft(DEFAULT_SFT)
+    setRl(DEFAULT_RL)
+    setSelectedModel(null)
+    setParentJobId(null)
+    setError(null)
+  }
+
+  const appliedRerun = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    const job = rerunSource.data
+    if (!job || appliedRerun.current === job.id) return
+    appliedRerun.current = job.id
+    setName(`${job.name.replace(/ \(重跑\)/g, '').trim()} (重跑)`)
+    setNote(job.note ?? '')
+    setTags(job.tags.join(','))
+    setNGpus(job.resources.n_gpus)
+    setPriority(job.resources.priority)
+    setEnvVars(job.resources.env ?? {})
+    setSelectedModel(null)
+    setParentJobId(job.id)
+    if (job.rl) {
+      setRl({ ...DEFAULT_RL, ...job.rl })
+      setAlgorithm(job.rl.algorithm as TrainStage)
+    } else if (job.sft) {
+      setSft({ ...DEFAULT_SFT, ...job.sft })
+      setAlgorithm(job.sft.stage)
+    }
+    if (job.project_id && job.project_id !== projectId) setProject(job.project_id)
+    toast.info(`已载入任务「${job.name}」的配置，修改后提交即可重跑`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rerunSource.data])
 
   const trainingAlgorithms = (algorithms.data ?? []).filter((item) => item.job_type !== 'verify')
   const current: AlgorithmInfo | undefined = trainingAlgorithms.find((item) => item.id === algorithm)
@@ -266,11 +320,13 @@ export default function SubmitTraining() {
         resources: { n_gpus: nGpus, priority, env: cleanKv(envVars) },
         sft: isRl ? null : sft,
         rl: isRl ? rl : null,
+        parent_job_id: parentJobId,
       }
       return api.createJob(payload)
     },
     onSuccess: (job) => {
       toast.success(job.status === 'pending_review' ? '已提交，等待管理员审核' : '已提交并进入排队')
+      clearDraft(DRAFT)
       navigate(`/jobs/${job.id}`)
     },
     onError: (exception) => setError(exception instanceof ApiError ? exception.message : '提交失败'),
@@ -293,9 +349,17 @@ export default function SubmitTraining() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="提交训练任务"
+        title={rerunId ? "编辑配置并重跑" : "提交训练任务"}
         description="SFT / 偏好对齐 / 强化学习，平台会按框架生成命令并在审核通过后自动排队执行"
-        actions={<CompatDocButton defaultFramework={isRl ? (rl.framework as 'verl') : 'llamafactory'} />}
+        actions={
+          <>
+            <Button variant="ghost" size="sm" onClick={resetForm} title="表单内容会自动缓存，点这里恢复成默认值">
+              <Eraser className="h-3.5 w-3.5" aria-hidden />
+              清空草稿
+            </Button>
+            <CompatDocButton defaultFramework={isRl ? (rl.framework as 'verl') : 'llamafactory'} />
+          </>
+        }
       />
 
       <ProjectBar />
