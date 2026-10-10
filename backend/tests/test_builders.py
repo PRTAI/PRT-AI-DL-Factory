@@ -22,6 +22,7 @@ from backend.app.models import (
     Framework,
     Job,
     JobType,
+    ModelApiConfig,
     ResourceSpec,
     RLConfig,
     SFTConfig,
@@ -378,6 +379,82 @@ def test_harbor_requires_task_source(tmp_path, monkeypatch):
         harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
 
 
+def _rewardkit_dataset(harbor_dataset) -> Dataset:
+    harbor_dataset.rewardkit = True
+    store.datasets.put(harbor_dataset)
+    return harbor_dataset
+
+
+def test_harbor_judge_env_injection(tmp_path, harbor_dataset, monkeypatch):
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    dataset = _rewardkit_dataset(harbor_dataset)
+    judge = ModelApiConfig(
+        name="judge-openai", provider="openai", model="gpt-5", api_key="sk-judge-secret", base_url=""
+    )
+    store.model_apis.put(judge)
+    job = _job(
+        JobType.VERIFY,
+        Framework.HARBOR,
+        verify=VerifyConfig(
+            dataset_id=dataset.id,
+            agent="oracle",
+            judge_model_api_id=judge.id,
+            judge_api_protocol="openai",
+        ),
+    )
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    command = result.command
+
+    # 只注入这 5 个 JUDGE_*
+    assert "JUDGE_MODEL=gpt-5" in command
+    assert "JUDGE_PROVIDER=openai" in command
+    assert "JUDGE_API_PROTOCOL=openai" in command
+    assert "JUDGE_API_KEY=sk-judge-secret" in command
+    # base_url 为空 => 不发（不回退默认值）
+    assert not any(part.startswith("JUDGE_BASE_URL=") for part in command)
+    # 不注入 provider 的标准变量（任务侧 test.sh 自己映射）
+    assert not any(part.startswith("OPENAI_API_KEY=") for part in command)
+    # 密钥掩码；其余 4 个可读
+    assert "sk-judge-secret" not in result.masked_command_line()
+    assert result.masked_env()["JUDGE_API_KEY"] == "***"
+    assert result.masked_env()["JUDGE_MODEL"] == "gpt-5"
+    # .env 0600 供 task.toml 的 ${VAR} 插值
+    env_file = tmp_path / "w" / ".env"
+    assert env_file.is_file()
+    assert "JUDGE_API_KEY=sk-judge-secret" in env_file.read_text(encoding="utf-8")
+
+
+def test_harbor_judge_env_user_override_wins(tmp_path, harbor_dataset, monkeypatch):
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    dataset = _rewardkit_dataset(harbor_dataset)
+    judge = ModelApiConfig(name="judge-a", provider="anthropic", model="claude-x", api_key="sk-a")
+    store.model_apis.put(judge)
+    config = VerifyConfig(
+        dataset_id=dataset.id,
+        agent="oracle",
+        judge_model_api_id=judge.id,
+        verifier_env={"JUDGE_MODEL": "override-model"},
+    )
+    result = harbor_builder.build(_job(JobType.VERIFY, Framework.HARBOR, verify=config), tmp_path / "w", tmp_path / "o")
+    assert "JUDGE_MODEL=override-model" in result.command
+    assert "JUDGE_MODEL=claude-x" not in result.command
+
+
+def test_harbor_rewardkit_without_judge_rejected(tmp_path, harbor_dataset, monkeypatch):
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    dataset = _rewardkit_dataset(harbor_dataset)
+    job = _job(
+        JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(dataset_id=dataset.id, agent="oracle")
+    )
+    with pytest.raises(BuildError, match="reward-kit"):
+        harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+
+    # 跳过 verifier 时既不要求也不注入 judge
+    job.verify.disable_verification = True
+    result = harbor_builder.build(job, tmp_path / "w2", tmp_path / "o2")
+    assert not any(part.startswith("JUDGE_") for part in result.command)
+
+
 def test_generated_trl_scripts_are_valid_python(tmp_path, harbor_dataset, parquet_dataset):
     """生成的训练脚本必须能被 Python 编译。
 
@@ -481,3 +558,16 @@ def test_trl_harbor_mode_makes_harbor_importable(tmp_path, harbor_dataset):
     plain_job = _job(JobType.RL, Framework.TRL, rl=plain)
     with pytest.raises(BuildError):
         trl_builder.build(plain_job, tmp_path / "w2", tmp_path / "o")  # DPO 不吃 harbor_tasks
+
+
+# --------------------------------------------------------------------------- #
+# 路径必须是绝对路径（否则 harbor 会把 --env-file / --jobs-dir 再拼接一次）
+# --------------------------------------------------------------------------- #
+def test_relative_data_root_is_resolved_absolute():
+    from backend.app.config import REPO_ROOT, Settings
+
+    settings = Settings(data_root="./data")
+    assert settings.data_root.is_absolute()
+    assert settings.data_root == REPO_ROOT / "data"
+    assert settings.jobs_dir.is_absolute()
+    assert settings.outputs_dir.is_absolute()

@@ -195,14 +195,11 @@ class ResolvedModel:
     notes: list[str] = field(default_factory=list)
 
 
-def resolve(config_id: str, *, model_style: str) -> ResolvedModel:
-    """把一条模型配置翻译成 Harbor 能吃的 ``--model`` + 标准环境变量。
+def require_ready(config_id: str) -> ModelApiConfig:
+    """取出模型配置并确认可用（已启用且填了密钥），否则抛 400。
 
-    ``model_style``：
-    * ``litellm`` —— terminus / mini-swe-agent 这类走 litellm 的 agent，模型名要带
-      ``provider/`` 前缀才知道用哪家协议；
-    * ``bare``    —— codex / claude-code 这类 CLI，模型名原样传给 CLI 自己的
-      ``--model``，加了前缀反而会被当成模型名的一部分发给 API。
+    调用方需要裸字段（``model_id`` / ``provider`` / ``base_url``）时用它，
+    不要走 ``resolve()`` —— 后者会顺带生成一整套标准环境变量。
     """
     item = get(config_id)
     if not item.enabled:
@@ -212,6 +209,19 @@ def resolve(config_id: str, *, model_style: str) -> ResolvedModel:
             status.HTTP_400_BAD_REQUEST,
             detail=f"模型配置「{item.name}」还没有填 API Key，请管理员在「平台管理 → 模型 API」里补上",
         )
+    return item
+
+
+def resolve(config_id: str, *, model_style: str) -> ResolvedModel:
+    """把一条模型配置翻译成 Harbor 能吃的 ``--model`` + 标准环境变量。
+
+    ``model_style``：
+    * ``litellm`` —— terminus / mini-swe-agent 这类走 litellm 的 agent，模型名要带
+      ``provider/`` 前缀才知道用哪家协议；
+    * ``bare``    —— codex / claude-code 这类 CLI，模型名原样传给 CLI 自己的
+      ``--model``，加了前缀反而会被当成模型名的一部分发给 API。
+    """
+    item = require_ready(config_id)
 
     spec = PROVIDERS[item.provider]
     key_envs: list[str] = list(spec["api_key_envs"])  # type: ignore[arg-type]

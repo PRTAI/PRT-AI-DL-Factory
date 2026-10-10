@@ -206,6 +206,43 @@ def test_submit_rejects_model_config_without_key(client, member_headers, harbor_
     assert "API Key" in response.json()["detail"]
 
 
+def test_verify_rewardkit_requires_judge(client, admin_headers, member_headers, harbor_zip):
+    """reward-kit 数据集：不选 judge 模型直接 400；选了才放行；跳过 verifier 则免检。"""
+    from .conftest import project_id
+
+    with open(harbor_zip, "rb") as handle:
+        dataset_id = client.post(
+            "/api/datasets", headers=member_headers,
+            files={"file": ("harbor-rk.zip", handle, "application/zip")},
+            data={"name": "rk-tasks", "kind": "harbor_tasks", "rewardkit": "true"},
+        ).json()["id"]
+
+    judge = client.post(
+        "/api/model-apis", headers=admin_headers,
+        json={"name": "judge-qwen", "provider": "openai", "api_key": "sk-judge-xyz"},
+    ).json()
+
+    def submit(**verify_extra):
+        return client.post(
+            "/api/jobs", headers=member_headers,
+            json={"name": "rk-verify", "type": "verify", "project_id": project_id(),
+                  "resources": {"n_gpus": 0},
+                  "verify": {"dataset_id": dataset_id, "agent": "oracle", **verify_extra}},
+        )
+
+    missing = submit()
+    assert missing.status_code == 400
+    assert "judge" in missing.json()["detail"].lower()
+
+    ok = submit(judge_model_api_id=judge["id"], judge_api_protocol="openai")
+    assert ok.status_code == 201, ok.text
+    assert ok.json()["verify"]["judge_model_api_id"] == judge["id"]
+
+    # 跳过 verifier 就不需要 judge
+    skipped = submit(disable_verification=True)
+    assert skipped.status_code == 201, skipped.text
+
+
 def test_presets_endpoint_is_gone_but_algorithms_stay(client, member_headers):
     assert client.get("/api/catalog/presets", headers=member_headers).status_code == 404
     algorithms = client.get("/api/catalog/algorithms", headers=member_headers).json()

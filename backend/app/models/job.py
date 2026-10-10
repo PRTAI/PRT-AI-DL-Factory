@@ -249,6 +249,12 @@ class VerifyConfig(Base):
     environment_kwargs: dict[str, str] = Field(default_factory=dict)  # --environment-kwarg
     verifier_kwargs: dict[str, str] = Field(default_factory=dict)  # --verifier-kwarg
 
+    # reward-kit 套件（数据集打了 rewardkit 标记）的 LLM judge。平台按此注入
+    # JUDGE_API_KEY / JUDGE_BASE_URL / JUDGE_MODEL / JUDGE_PROVIDER /
+    # JUDGE_API_PROTOCOL 到 verifier 容器（tests/test.sh 自行读取）。
+    judge_model_api_id: str = ""
+    judge_api_protocol: Literal["anthropic", "openai"] = "anthropic"
+
     # Emitted as --override-cpus / --override-memory-mb / --override-gpus
     environment_cpus: int | None = None
     environment_memory_mb: int | None = None

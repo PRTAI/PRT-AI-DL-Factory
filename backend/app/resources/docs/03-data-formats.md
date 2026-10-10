@@ -156,6 +156,21 @@ judge 需要的 API Key 填在提交评测页的「Verifier 环境变量」里�
 `--verifier-env` 传入，并写入 0600 的 `.env` 供 `task.toml` 中 `${VAR}` 插值解析。
 密钥不会出现在日志与命令记录中。
 
+**如果任务集用的是 reward-kit**：上传时勾选「是否为 reward-kit 格式」。之后提交评测时
+会出现一个必填的 **judge 模型**选择（从平台维护的模型配置里选）和一个 judge 协议下拉。
+平台把选中的模型注入成下面这 5 个变量（值为空的键不发，不补默认值）：
+
+| 变量 | 取值 |
+|---|---|
+| `JUDGE_API_KEY` | 模型配置的 API Key |
+| `JUDGE_BASE_URL` | 模型配置的 base_url（为空则不发） |
+| `JUDGE_MODEL` | 模型配置的裸模型名 |
+| `JUDGE_PROVIDER` | 模型配置的 provider（openai / anthropic / dashscope …） |
+| `JUDGE_API_PROTOCOL` | 提交页选的 anthropic / openai |
+
+任务的 `tests/test.sh` 自己把这几个映射到 `ANTHROPIC_*` / `OPENAI_*` 并设置
+`REWARDKIT_MODEL`，所以平台不需要注入 provider 的标准变量。
+
 ---
 
 ## verl parquet

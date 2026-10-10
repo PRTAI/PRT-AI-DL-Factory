@@ -1,11 +1,13 @@
 import * as React from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Brain, ChevronDown, Database, FlaskConical, Globe, KeyRound, Rocket, Settings2 } from 'lucide-react'
+import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Globe, KeyRound, Rocket, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import type { DeploymentEndpoint, ModelApi, RegistryDataset, VerifyConfig } from '@/lib/types'
+import type { Prebuild } from '@/lib/api'
+import type { Dataset, DeploymentEndpoint, ModelApi, RegistryDataset, VerifyConfig } from '@/lib/types'
 import { useProject } from '@/lib/store'
+import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
 import {
   Badge,
@@ -48,6 +50,8 @@ const DEFAULT_VERIFY: VerifyConfig = {
   verifier_env: {},
   environment_kwargs: {},
   verifier_kwargs: {},
+  judge_model_api_id: '',
+  judge_api_protocol: 'anthropic',
   environment_cpus: null,
   environment_memory_mb: null,
   environment_gpus: null,
@@ -76,10 +80,12 @@ function ModelApiPicker({
   value,
   onChange,
   supportsEffort,
+  allowManual = true,
 }: {
   value: string
   onChange: (item: ModelApi | null) => void
   supportsEffort: boolean
+  allowManual?: boolean
 }) {
   const models = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
   const rows = (models.data ?? []).filter((m) => m.enabled)
@@ -87,10 +93,12 @@ function ModelApiPicker({
   return (
     <div className="space-y-1.5">
       <Select
-        value={value || 'manual'}
+        value={value || (allowManual ? 'manual' : '')}
         onValueChange={(next) => onChange(next === 'manual' ? null : rows.find((m) => m.id === next) ?? null)}
         options={[
-          { value: 'manual', label: '手动填写模型与密钥', description: '下方自己填 litellm 模型名和 agent 环境变量' },
+          ...(allowManual
+            ? [{ value: 'manual', label: '手动填写模型与密钥', description: '下方自己填 litellm 模型名和 agent 环境变量' }]
+            : []),
           ...rows.map((m) => ({
             value: m.id,
             label: m.ready ? m.name : `${m.name}（未配置密钥）`,
@@ -99,7 +107,7 @@ function ModelApiPicker({
           })),
         ]}
       />
-      {current && (
+      {allowManual && current && (
         <p className="text-[11px] leading-relaxed text-fg-subtle">
           运行时注入 {current.env_names.join(' / ')}；密钥不会出现在命令记录与日志里。
           {!supportsEffort && ' 该 agent 不支持思考模式，下面的选择会被忽略。'}
@@ -243,11 +251,21 @@ const Grid = ({ children, cols = 3 }: { children: React.ReactNode; cols?: 2 | 3 
   <div className={cn('grid gap-3', cols === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-3')}>{children}</div>
 )
 
+const DRAFT = 'submit-verify'
+
 export default function SubmitVerify() {
   const navigate = useNavigate()
   const { projectId, setProject } = useProject()
   const [searchParams] = useSearchParams()
   const fromJobId = searchParams.get('from')
+  // 任务详情页「重跑」带过来的源评测任务：预填它的配置，改完再提交
+  const rerunId = searchParams.get('rerun')
+  const rerunSource = useQuery({
+    queryKey: ['job', rerunId],
+    queryFn: () => api.job(rerunId!),
+    enabled: Boolean(rerunId),
+    retry: false,
+  })
 
   const agents = useQuery({ queryKey: ['harbor-agents'], queryFn: () => api.harborAgents() })
   const environments = useQuery({ queryKey: ['harbor-envs'], queryFn: () => api.harborEnvironments() })
@@ -261,20 +279,60 @@ export default function SubmitVerify() {
     retry: false,
   })
 
-  const [name, setName] = React.useState('')
-  const [note, setNote] = React.useState('')
-  const [tags, setTags] = React.useState('')
-  const [nGpus, setNGpus] = React.useState(0)
-  const [config, setConfig] = React.useState<VerifyConfig>(DEFAULT_VERIFY)
-  const [source, setSource] = React.useState<'uploaded' | 'registry' | 'path'>('uploaded')
-  const [taskFilter, setTaskFilter] = React.useState('')
-  const [excludeFilter, setExcludeFilter] = React.useState('')
+  // 草稿缓存：切页面再回来不用重填（提交成功后清掉）
+  const [name, setName] = useDraftState(DRAFT, 'name', '')
+  const [note, setNote] = useDraftState(DRAFT, 'note', '')
+  const [tags, setTags] = useDraftState(DRAFT, 'tags', '')
+  const [nGpus, setNGpus] = useDraftState(DRAFT, 'nGpus', 0)
+  const [config, setConfig] = useDraftState<VerifyConfig>(DRAFT, 'config', DEFAULT_VERIFY)
+  const [source, setSource] = useDraftState<'uploaded' | 'registry' | 'path'>(DRAFT, 'source', 'uploaded')
+  const [taskFilter, setTaskFilter] = useDraftState(DRAFT, 'taskFilter', '')
+  const [excludeFilter, setExcludeFilter] = useDraftState(DRAFT, 'excludeFilter', '')
+  const [parentJobId, setParentJobId] = useDraftState<string | null>(DRAFT, 'parentJobId', null)
   const [error, setError] = React.useState<string | null>(null)
+
+  const resetForm = () => {
+    setName('')
+    setNote('')
+    setTags('')
+    setNGpus(0)
+    setConfig(DEFAULT_VERIFY)
+    setSource('uploaded')
+    setTaskFilter('')
+    setExcludeFilter('')
+    setParentJobId(null)
+    setError(null)
+  }
+
+  const appliedRerun = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    const job = rerunSource.data
+    if (!job?.verify || appliedRerun.current === job.id) return
+    appliedRerun.current = job.id
+    const verify = job.verify
+    setName(`${job.name.replace(/ \(重跑\)/g, '').trim()} (重跑)`)
+    setNote(job.note ?? '')
+    setTags(job.tags.join(','))
+    setNGpus(job.resources.n_gpus)
+    setConfig({ ...DEFAULT_VERIFY, ...verify })
+    setSource(verify.registry_dataset ? 'registry' : verify.tasks_path && !verify.dataset_id ? 'path' : 'uploaded')
+    setTaskFilter((verify.task_names ?? []).join(','))
+    setExcludeFilter((verify.exclude_task_names ?? []).join(','))
+    setParentJobId(job.id)
+    if (job.project_id && job.project_id !== projectId) setProject(job.project_id)
+    toast.info(`已载入评测「${job.name}」的配置，修改后提交即可重跑`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rerunSource.data])
 
   const patch = (values: Partial<VerifyConfig>) => setConfig((previous) => ({ ...previous, ...values }))
   const agentInfo = agents.data?.find((item) => item.name === config.agent)
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
   const modelApiName = modelApis.data?.find((m) => m.id === config.model_api_id)?.name
+  // DatasetPicker（components/pickers.tsx）用同一个 queryKey，直接复用缓存
+  const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
+  const selectedDataset = datasets.data?.find((d) => d.id === config.dataset_id)
+  const judgeRequired =
+    source === 'uploaded' && Boolean(selectedDataset?.rewardkit) && !config.disable_verification
   const harborReady = toolchain.data?.find((row) => row.key === 'harbor-cli')?.python_ok ?? true
   const dockerRow = toolchain.data?.find((row) => row.key === 'docker')
   const dockerBlocked = config.environment_type === 'docker' && dockerRow ? dockerRow.status !== 'ready' : false
@@ -330,10 +388,11 @@ export default function SubmitVerify() {
           environment_kwargs: cleanKv(config.environment_kwargs),
           verifier_kwargs: cleanKv(config.verifier_kwargs),
         },
-        parent_job_id: fromJobId ?? null,
+        parent_job_id: fromJobId ?? parentJobId,
       }),
     onSuccess: (job) => {
       toast.success(job.status === 'pending_review' ? '已提交，等待管理员审核' : '已提交并进入排队')
+      clearDraft(DRAFT)
       navigate(`/jobs/${job.id}`)
     },
     onError: (exception) => setError(exception instanceof ApiError ? exception.message : '提交失败'),
@@ -344,6 +403,7 @@ export default function SubmitVerify() {
     if (!name.trim()) out.push('请填写任务名称')
     if (!config.dataset_id && !config.tasks_path && !config.registry_dataset) out.push('请选择要评测的任务集')
     if (agentInfo?.needs_model && !config.model && !config.model_api_id) out.push(`agent ${config.agent} 需要选择或填写模型`)
+    if (judgeRequired && !config.judge_model_api_id) out.push('该任务集是 reward-kit 格式，请选择 judge 模型')
     if (!config.model_api_id) {
       const missingKeys = Object.entries(config.agent_env)
         .filter(([key, value]) => agentInfo?.env_keys.includes(key) && !value)
@@ -351,14 +411,22 @@ export default function SubmitVerify() {
       if (missingKeys.length) out.push(`请填写 ${missingKeys.join(' / ')}（或改为选择平台的模型配置）`)
     }
     return out
-  }, [name, config, agentInfo])
+  }, [name, config, agentInfo, judgeRequired])
 
   return (
     <div className="space-y-4">
       <PageHeader
-        title="提交评测任务"
+        title={rerunId ? '编辑配置并重跑' : '提交评测任务'}
         description="基于 Harbor framework 在沙箱中运行 agent 并按任务 verifier 打分"
-        actions={<CompatDocButton defaultFramework="harbor" label="Harbor 说明" />}
+        actions={
+          <>
+            <Button variant="ghost" size="sm" onClick={resetForm} title="表单内容会自动缓存，点这里恢复成默认值">
+              <Eraser className="h-3.5 w-3.5" aria-hidden />
+              清空草稿
+            </Button>
+            <CompatDocButton defaultFramework="harbor" label="Harbor 说明" />
+          </>
+        }
       />
 
       <ProjectBar
@@ -459,6 +527,7 @@ export default function SubmitVerify() {
                   emptyHint="请在「数据集」页上传 harbor_tasks 类型的压缩包（tasks/<task>/task.toml）。"
                 />
               )}
+              {source === 'uploaded' && selectedDataset && <PrebuildPanel dataset={selectedDataset} />}
               {source === 'registry' && (
                 <RegistryPicker value={config.registry_dataset} onChange={(ref) => patch({ registry_dataset: ref })} />
               )}
@@ -473,6 +542,38 @@ export default function SubmitVerify() {
               )}
             </CardBody>
           </Card>
+
+          {judgeRequired && (
+            <Card>
+              <CardHeader
+                title="Judge 模型（reward-kit 打分）"
+                description="该任务集是 reward-kit 格式：平台按下面的选择注入 JUDGE_API_KEY / JUDGE_BASE_URL / JUDGE_MODEL / JUDGE_PROVIDER / JUDGE_API_PROTOCOL，任务的 tests/test.sh 自行读取"
+                icon={<Bot className="h-4 w-4" aria-hidden />}
+              />
+              <CardBody className="space-y-4">
+                <Field label="judge 模型" required hint="作为 LLM judge 的模型端点；密钥与 base_url 由平台注入">
+                  <ModelApiPicker
+                    value={config.judge_model_api_id}
+                    supportsEffort={false}
+                    allowManual={false}
+                    onChange={(item) => patch({ judge_model_api_id: item?.id ?? '' })}
+                  />
+                </Field>
+                <Field label="judge 协议" required hint="写进 JUDGE_API_PROTOCOL；必须与任务的 judge 客户端一致">
+                  <Select
+                    value={config.judge_api_protocol}
+                    onValueChange={(value) =>
+                      patch({ judge_api_protocol: value as VerifyConfig['judge_api_protocol'] })
+                    }
+                    options={[
+                      { value: 'anthropic', label: 'anthropic', description: '走 Anthropic 协议（claude-code judge 的默认）' },
+                      { value: 'openai', label: 'openai', description: '走 OpenAI 兼容协议' },
+                    ]}
+                  />
+                </Field>
+              </CardBody>
+            </Card>
+          )}
 
           <Card>
             <CardHeader title="Agent 与模型" icon={<Bot className="h-4 w-4" aria-hidden />} />
@@ -656,7 +757,9 @@ export default function SubmitVerify() {
                   label="跳过 verifier"
                   hint="只跑 agent 不打分，用于调试环境"
                   checked={config.disable_verification}
-                  onCheckedChange={(checked) => patch({ disable_verification: checked })}
+                  onCheckedChange={(checked) =>
+                    patch({ disable_verification: checked, ...(checked ? { judge_model_api_id: '' } : {}) })
+                  }
                 />
                 <ToggleRow
                   label="强制重建镜像"
@@ -826,4 +929,82 @@ function splitList(value: string): string[] {
 
 function cleanKv(values: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(values).filter(([key, value]) => key.trim() && value !== ''))
+}
+
+/* -------------------------------------------------------------------------- */
+/** 挑一个任务先把它的 docker 环境 build 一遍：提前暴露 Dockerfile 问题，并预热层缓存。 */
+function PrebuildPanel({ dataset }: { dataset: Dataset }) {
+  const tasks = dataset.files.filter((file) => file.role === 'tasks').map((file) => file.path)
+  const [task, setTask] = React.useState('')
+  const [buildId, setBuildId] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    setTask(tasks[0] ?? '')
+    setBuildId(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataset.id])
+
+  const start = useMutation({
+    mutationFn: () => api.startPrebuild(dataset.id, task),
+    onSuccess: (build) => {
+      setBuildId(build.id)
+      toast.info(`开始预构建 ${build.task}`)
+    },
+    onError: (exception) => toast.error(exception instanceof ApiError ? exception.message : '预构建启动失败'),
+  })
+  const status = useQuery({
+    queryKey: ['prebuild', buildId],
+    queryFn: () => api.prebuild(buildId!),
+    enabled: Boolean(buildId),
+    refetchInterval: (query) => ((query.state.data as Prebuild | undefined)?.status === 'running' ? 2000 : false),
+  })
+  const build = status.data
+  const logRef = React.useRef<HTMLPreElement>(null)
+  React.useEffect(() => {
+    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
+  }, [build?.log])
+
+  if (!tasks.length) return null
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-bg-elevated p-3">
+      <div className="flex items-center gap-1.5 text-[13px] font-medium text-fg">
+        <Container className="h-3.5 w-3.5" aria-hidden />
+        预构建容器
+      </div>
+      <p className="text-[11px] text-fg-muted">
+        挑一个任务先 build 它的 environment（Dockerfile / docker-compose / docker_image），提前发现镜像问题，
+        正式评测时也能复用 docker 层缓存。不占 GPU、不走审核。
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-[240px] flex-1">
+          <Select value={task} onValueChange={setTask} options={tasks.map((path) => ({ value: path, label: path }))} />
+        </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!task || build?.status === 'running'}
+          loading={start.isPending}
+          onClick={() => start.mutate()}
+        >
+          <Container className="h-3.5 w-3.5" aria-hidden />
+          预构建
+        </Button>
+      </div>
+      {build && (
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2 text-[11px]">
+            <Badge tone={build.status === 'succeeded' ? 'success' : build.status === 'failed' ? 'danger' : 'info'}>
+              {build.status === 'succeeded' ? '构建成功' : build.status === 'failed' ? `构建失败 (${build.return_code})` : '构建中…'}
+            </Badge>
+            <code className="num truncate text-fg-subtle">{build.command}</code>
+          </div>
+          <pre
+            ref={logRef}
+            className="num max-h-56 overflow-auto rounded bg-card p-2 text-[11px] leading-relaxed text-fg-muted"
+          >
+            {build.log || '（暂无输出）'}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
 }

@@ -51,6 +51,10 @@ class Dataset(Base):
     lf_dataset_names: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
+    # Harbor reward-kit 套件：任务的 tests/test.sh 用 reward-kit 调 LLM judge 打分，
+    # 评测时平台需要注入 JUDGE_* 环境变量（见 builders/harbor.py）。
+    rewardkit: bool = False
+
 
 class DatasetCreate(Base):
     name: str
@@ -63,3 +67,4 @@ class DatasetUpdate(Base):
     name: str | None = None
     description: str | None = None
     tags: list[str] | None = None
+    rewardkit: bool | None = None

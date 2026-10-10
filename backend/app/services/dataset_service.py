@@ -10,8 +10,6 @@ from __future__ import annotations
 
 import json
 import shutil
-import tarfile
-import zipfile
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -30,7 +28,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from . import audit_service
+from . import archive, audit_service
 
 CHUNK = 4 * 1024 * 1024
 DATA_SUFFIXES = (".json", ".jsonl")
@@ -41,55 +39,10 @@ MAX_PREVIEW_CHARS = 600
 # --------------------------------------------------------------------------- #
 # Archive handling
 # --------------------------------------------------------------------------- #
-def _is_within(base: Path, target: Path) -> bool:
-    try:
-        target.resolve().relative_to(base.resolve())
-        return True
-    except ValueError:
-        return False
-
-
-def _safe_extract(archive: Path, dest: Path) -> None:
-    """Extract zip/tar defending against path traversal and symlink escapes."""
-    dest.mkdir(parents=True, exist_ok=True)
-    if zipfile.is_zipfile(archive):
-        with zipfile.ZipFile(archive) as zf:
-            for member in zf.infolist():
-                name = member.filename
-                if name.startswith("/") or ".." in Path(name).parts:
-                    raise HTTPException(
-                        status.HTTP_400_BAD_REQUEST, detail=f"压缩包包含非法路径: {name}"
-                    )
-                target = dest / name
-                if not _is_within(dest, target):
-                    raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"压缩包越界: {name}")
-            zf.extractall(dest)
-        return
-
-    if tarfile.is_tarfile(archive):
-        with tarfile.open(archive) as tf:
-            for member in tf.getmembers():
-                if member.issym() or member.islnk():
-                    raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="压缩包包含符号链接，已拒绝")
-                target = dest / member.name
-                if member.name.startswith("/") or ".." in Path(member.name).parts or not _is_within(dest, target):
-                    raise HTTPException(
-                        status.HTTP_400_BAD_REQUEST, detail=f"压缩包包含非法路径: {member.name}"
-                    )
-            tf.extractall(dest)  # noqa: S202 - members validated above
-        return
-
-    raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="仅支持 .zip / .tar / .tar.gz 压缩包")
-
-
-def _flatten_single_root(root: Path) -> None:
-    """``foo.zip`` that contains a single ``foo/`` directory is unwrapped."""
-    entries = [p for p in root.iterdir() if p.name not in {"__MACOSX", ".DS_Store"}]
-    if len(entries) == 1 and entries[0].is_dir():
-        inner = entries[0]
-        for child in list(inner.iterdir()):
-            shutil.move(str(child), str(root / child.name))
-        inner.rmdir()
+# 路径穿越/符号链接防护与样例审核共用一份实现，见 services/archive.py。
+_is_within = archive.is_within
+_safe_extract = archive.safe_extract
+_flatten_single_root = archive.flatten_single_root
 
 
 # --------------------------------------------------------------------------- #
@@ -368,12 +321,58 @@ def create_from_upload(
     tags: list[str],
     filename: str,
     stream: BinaryIO,
+    rewardkit: bool = False,
     owner: User,
 ) -> Dataset:
     dataset_id = new_id("ds")
-    archive_path = settings.uploads_dir / f"{dataset_id}{_archive_suffix(filename)}"
+    archive_path = _receive_archive(dataset_id, filename, stream)
     root = settings.datasets_dir / dataset_id
+    dataset = Dataset(
+        id=dataset_id,
+        name=name.strip() or dataset_id,
+        kind=kind,
+        description=description,
+        tags=tags,
+        owner_id=owner.id,
+        owner_email=owner.email,
+        status=DatasetStatus.EXTRACTING,
+        root_path=str(root),
+        archive_name=filename,
+        archive_bytes=archive_path.stat().st_size,
+        # reward-kit 只对 Harbor 任务树有意义，别的类型一律 False（后端兜底）
+        rewardkit=bool(rewardkit) if kind == DatasetKind.HARBOR_TASKS else False,
+    )
+    store.datasets.put(dataset)
 
+    try:
+        _ingest(dataset, archive_path, root)
+    except HTTPException as exc:
+        dataset.status = DatasetStatus.INVALID
+        dataset.error = str(exc.detail)
+        store.datasets.put(dataset)
+        raise
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+    store.datasets.put(dataset)
+    audit_service.record(
+        "dataset.create",
+        actor=owner,
+        target_type="dataset",
+        target_id=dataset.id,
+        summary=f"上传数据集 {dataset.name} ({kind.value})",
+        detail={
+            "records": dataset.stats.n_records,
+            "tasks": dataset.stats.n_tasks,
+            "rewardkit": dataset.rewardkit,
+        },
+    )
+    return dataset
+
+
+def _receive_archive(dataset_id: str, filename: str, stream: BinaryIO) -> Path:
+    """把上传流落到 uploads 目录，超限/为空直接拒绝。"""
+    archive_path = settings.uploads_dir / f"{dataset_id}-{new_id('up')}{_archive_suffix(filename)}"
     total = 0
     limit = settings.max_upload_mb * 1024 * 1024
     with archive_path.open("wb") as handle:
@@ -394,32 +393,24 @@ def create_from_upload(
     if total == 0:
         archive_path.unlink(missing_ok=True)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="上传内容为空")
+    return archive_path
 
-    dataset = Dataset(
-        id=dataset_id,
-        name=name.strip() or dataset_id,
-        kind=kind,
-        description=description,
-        tags=tags,
-        owner_id=owner.id,
-        owner_email=owner.email,
-        status=DatasetStatus.EXTRACTING,
-        root_path=str(root),
-        archive_name=filename,
-        archive_bytes=total,
-    )
-    store.datasets.put(dataset)
 
+def _ingest(dataset: Dataset, archive_path: Path, root: Path) -> None:
+    """解压 + 按类型校验，结果写回 ``dataset``（不落库）。失败抛 HTTPException。"""
     try:
         _safe_extract(archive_path, root)
         _flatten_single_root(root)
         dataset.status = DatasetStatus.VALIDATING
         store.datasets.put(dataset)
 
-        stats, files, extra = VALIDATORS[kind](root)
+        stats, files, extra = VALIDATORS[dataset.kind](root)
         dataset.stats = stats
         dataset.files = files
         dataset.status = DatasetStatus.READY
+        dataset.error = ""
+        dataset.root_path = str(root)
+        dataset.lf_dataset_names = []
         dataset.updated_at = utcnow()
 
         lf_entries = {k: v for k, v in extra.items() if not k.startswith("_")}
@@ -430,29 +421,82 @@ def create_from_upload(
             dataset.root_path = extra["_harbor_tasks_root"]
         if "_verl_train_files" in extra:
             _write_meta(root, {"train_files": extra["_verl_train_files"], "val_files": extra["_verl_val_files"]})
-    except HTTPException as exc:
-        dataset.status = DatasetStatus.INVALID
-        dataset.error = str(exc.detail)
-        store.datasets.put(dataset)
+    except HTTPException:
         raise
     except Exception as exc:  # pragma: no cover
-        dataset.status = DatasetStatus.INVALID
-        dataset.error = f"{type(exc).__name__}: {exc}"
-        store.datasets.put(dataset)
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=dataset.error) from exc
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"{type(exc).__name__}: {exc}") from exc
+
+
+def replace_file(
+    dataset_id: str,
+    *,
+    filename: str,
+    stream: BinaryIO,
+    kind: DatasetKind | None = None,
+    actor: User,
+) -> Dataset:
+    """用新压缩包替换数据集内容，id 不变（已有任务引用不受影响）。
+
+    lf 的 dataset_info.json 里写的是绝对路径，所以新内容必须解压回原目录：
+    旧目录先挪到旁边，校验失败就挪回来，数据集保持原样可用。
+    """
+    dataset = get_dataset(dataset_id)
+    if dataset.owner_id != actor.id and not actor.is_admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="只能修改自己上传的数据集")
+    in_use = _active_jobs_using(dataset_id)
+    if in_use:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=f"数据集正被 {len(in_use)} 个进行中的任务使用，暂不能替换文件"
+        )
+
+    archive_path = _receive_archive(dataset_id, filename, stream)
+    root = settings.datasets_dir / dataset_id
+    backup = settings.datasets_dir / f"{dataset_id}.bak-{new_id('r')}"
+    original = dataset.model_copy(deep=True)
+    if root.exists():
+        root.rename(backup)
+
+    candidate = dataset.model_copy(deep=True)
+    if kind is not None:
+        candidate.kind = kind
+        if kind != DatasetKind.HARBOR_TASKS:
+            candidate.rewardkit = False
+    candidate.status = DatasetStatus.EXTRACTING
+    candidate.archive_name = filename
+    candidate.archive_bytes = archive_path.stat().st_size
+    try:
+        _ingest(candidate, archive_path, root)
+    except HTTPException:
+        shutil.rmtree(root, ignore_errors=True)
+        if backup.exists():
+            backup.rename(root)
+        store.datasets.put(original)
+        raise
     finally:
         archive_path.unlink(missing_ok=True)
 
-    store.datasets.put(dataset)
+    shutil.rmtree(backup, ignore_errors=True)
+    store.datasets.put(candidate)
     audit_service.record(
-        "dataset.create",
-        actor=owner,
+        "dataset.replace",
+        actor=actor,
         target_type="dataset",
-        target_id=dataset.id,
-        summary=f"上传数据集 {dataset.name} ({kind.value})",
-        detail={"records": dataset.stats.n_records, "tasks": dataset.stats.n_tasks},
+        target_id=dataset_id,
+        summary=f"替换数据集 {candidate.name} 的文件为 {filename}",
+        detail={"records": candidate.stats.n_records, "tasks": candidate.stats.n_tasks},
     )
-    return dataset
+    return candidate
+
+
+def _active_jobs_using(dataset_id: str) -> list[Any]:
+    return store.jobs.find(
+        lambda j: j.status.is_active
+        and (
+            (j.sft and dataset_id in (j.sft.dataset_ids + j.sft.eval_dataset_ids))
+            or (j.rl and dataset_id in {j.rl.dataset_id, j.rl.eval_dataset_id})
+            or (j.verify and j.verify.dataset_id == dataset_id)
+        )
+    )
 
 
 def _archive_suffix(filename: str) -> str:
@@ -534,14 +578,7 @@ def delete_dataset(dataset_id: str, *, actor: User, purge: bool = True) -> None:
     if dataset.owner_id != actor.id and not actor.is_admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="只能删除自己上传的数据集")
 
-    in_use = store.jobs.find(
-        lambda j: j.status.is_active
-        and (
-            (j.sft and dataset_id in (j.sft.dataset_ids + j.sft.eval_dataset_ids))
-            or (j.rl and dataset_id in {j.rl.dataset_id, j.rl.eval_dataset_id})
-            or (j.verify and j.verify.dataset_id == dataset_id)
-        )
-    )
+    in_use = _active_jobs_using(dataset_id)
     if in_use:
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail=f"数据集正被 {len(in_use)} 个进行中的任务使用，无法删除"

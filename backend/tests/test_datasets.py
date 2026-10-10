@@ -7,13 +7,14 @@ import json
 import zipfile
 
 
-def _upload(client, headers, path, *, name, kind):
+def _upload(client, headers, path, *, name, kind, **extra):
     with open(path, "rb") as handle:
+        data = {"name": name, "kind": kind, "description": "pytest", "tags": "test", **extra}
         return client.post(
             "/api/datasets",
             headers=headers,
             files={"file": (path.name, handle, "application/zip")},
-            data={"name": name, "kind": kind, "description": "pytest", "tags": "test"},
+            data=data,
         )
 
 
@@ -48,6 +49,36 @@ def test_upload_harbor_tasks(client, member_headers, harbor_zip):
     preview = client.get(f"/api/datasets/{body['id']}/preview", headers=member_headers).json()
     assert preview["kind"] == "harbor_tasks"
     assert preview["tasks"][0]["instruction"].startswith("# 任务")
+
+
+def test_upload_harbor_rewardkit_flag(client, member_headers, harbor_zip):
+    # 默认关（老客户端不带这个字段也要能上传）
+    plain = _upload(client, member_headers, harbor_zip, name="plain", kind="harbor_tasks")
+    assert plain.status_code == 201, plain.text
+    assert plain.json()["rewardkit"] is False
+
+    flagged = _upload(
+        client, member_headers, harbor_zip, name="rk", kind="harbor_tasks", rewardkit="true"
+    )
+    assert flagged.status_code == 201, flagged.text
+    assert flagged.json()["rewardkit"] is True
+
+    # PATCH 往返：能把已上传的数据集改成 reward-kit，也能改回去
+    dataset_id = flagged.json()["id"]
+    off = client.patch(
+        f"/api/datasets/{dataset_id}", headers=member_headers, json={"rewardkit": False}
+    )
+    assert off.status_code == 200, off.text
+    assert off.json()["rewardkit"] is False
+
+
+def test_alpaca_cannot_be_rewardkit(client, member_headers, alpaca_zip):
+    # reward-kit 只对 harbor_tasks 有意义，别的类型后端直接落 False
+    response = _upload(
+        client, member_headers, alpaca_zip, name="alpaca-rk", kind="sft_alpaca", rewardkit="true"
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["rewardkit"] is False
 
 
 def test_alpaca_missing_fields_rejected(client, member_headers, make_zip):
@@ -106,3 +137,65 @@ def test_list_and_delete(client, member_headers, make_zip):
     assert any(d["id"] == created["id"] for d in listed)
     assert client.delete(f"/api/datasets/{created['id']}", headers=member_headers).status_code == 204
     assert client.get(f"/api/datasets/{created['id']}", headers=member_headers).status_code == 404
+
+
+def test_replace_file_keeps_id_and_rolls_back_on_invalid(client, member_headers, make_zip):
+    one = make_zip({"train.json": json.dumps([{"instruction": "a", "output": "b"}])}, "one.zip")
+    created = _upload(client, member_headers, one, name="swap", kind="sft_alpaca").json()
+    assert created["stats"]["n_records"] == 1
+
+    def _replace(path):
+        with open(path, "rb") as handle:
+            return client.put(
+                f"/api/datasets/{created['id']}/file",
+                headers=member_headers,
+                files={"file": (path.name, handle, "application/zip")},
+            )
+
+    rows = [{"instruction": "a", "output": "b"}] * 3
+    three = make_zip({"train.json": json.dumps(rows)}, "three.zip")
+    replaced = _replace(three)
+    assert replaced.status_code == 200, replaced.text
+    body = replaced.json()
+    assert body["id"] == created["id"]
+    assert body["stats"]["n_records"] == 3
+    assert body["archive_name"] == "three.zip"
+
+    bad = make_zip({"train.json": json.dumps([{"foo": "bar"}])}, "bad.zip")
+    assert _replace(bad).status_code == 400
+    after = client.get(f"/api/datasets/{created['id']}", headers=member_headers).json()
+    assert after["status"] == "ready"
+    assert after["stats"]["n_records"] == 3
+    preview = client.get(f"/api/datasets/{created['id']}/preview", headers=member_headers)
+    assert preview.status_code == 200
+
+
+def test_prebuild_runs_docker_build_for_selected_task(client, member_headers, harbor_zip, monkeypatch):
+    from backend.app.services import prebuild_service
+
+    created = _upload(client, member_headers, harbor_zip, name="pb", kind="harbor_tasks").json()
+    task = created["files"][0]["path"]
+    seen: list[list[str]] = []
+    real_command = prebuild_service.build_command
+
+    def fake_command(task_dir, tag):
+        seen.append(real_command(task_dir, tag))
+        return ["true"]  # 测试机不一定能连 docker，只验证选中的命令
+
+    monkeypatch.setattr(prebuild_service, "build_command", fake_command)
+
+    started = client.post(f"/api/datasets/{created['id']}/prebuild", headers=member_headers, json={"task": task})
+    assert started.status_code == 200, started.text
+    assert seen[0][1] == "build" and seen[0][-1].endswith("/environment")
+
+    import time
+
+    for _ in range(50):
+        state = client.get(f"/api/datasets/prebuilds/{started.json()['id']}", headers=member_headers).json()
+        if state["status"] != "running":
+            break
+        time.sleep(0.05)
+    assert state["status"] == "succeeded"
+
+    bad = client.post(f"/api/datasets/{created['id']}/prebuild", headers=member_headers, json={"task": "../../etc"})
+    assert bad.status_code == 400

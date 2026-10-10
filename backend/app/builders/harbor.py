@@ -18,6 +18,7 @@ Mapping from the submission form:
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -31,13 +32,34 @@ _NO_MODEL_AGENTS = {"oracle", "nop"}
 
 
 def resolve_harbor_bin() -> str:
-    configured = settings.harbor_bin
-    if configured and (shutil.which(configured) or Path(configured).is_file()):
-        return shutil.which(configured) or configured
+    configured = (settings.harbor_bin or "harbor").strip()
+    found = shutil.which(configured)
+    if found:
+        return found
+    if Path(configured).is_file():
+        return configured
+    # 裸名不在 PATH 上：Harbor CLI 装在它自己的 conda 环境里（平台跑在
+    # prt-ai-dl-factory 环境，PATH 上没有它）。按框架解释器的同一套约定，
+    # 用 PRT_HARBOR_PYTHON 推断同目录下的 harbor，省得每台机器都配绝对路径。
+    sibling = _sibling_of_harbor_python(configured)
+    if sibling:
+        return sibling
     raise BuildError(
-        "未找到 harbor 命令。请在部署环境安装 Harbor（例如 `uv tool install harbor`）"
-        "或在系统设置中配置 PRT_HARBOR_BIN 指向可执行文件。"
+        f"未找到 harbor 命令（{configured!r}）。请把 PRT_HARBOR_BIN 配成绝对路径"
+        "（例如 /home/user/.conda/envs/harbor/bin/harbor），或设置 PRT_HARBOR_PYTHON "
+        "指向 harbor 环境的解释器，平台会自动使用同目录下的 harbor。"
     )
+
+
+def _sibling_of_harbor_python(name: str) -> str | None:
+    """``<PRT_HARBOR_PYTHON 所在目录>/<name>`` —— 若存在且可执行则返回。"""
+    python = (settings.harbor_python or "").strip()
+    if not python or os.sep not in python:
+        return None
+    candidate = Path(python).resolve().parent / name
+    if candidate.is_file() and os.access(candidate, os.X_OK):
+        return str(candidate)
+    return None
 
 
 def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
@@ -52,6 +74,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
 
     # ---- task source -----------------------------------------------------
     sources = 0
+    dataset = None
     if config.dataset_id:
         dataset = store.datasets.get(config.dataset_id)
         if dataset is None:
@@ -125,12 +148,32 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if config.n_tasks:
         command += ["--n-tasks", str(config.n_tasks)]
 
+    # ---- reward-kit judge ------------------------------------------------
+    # reward-kit 套件的 tests/test.sh 从 JUDGE_* 读 judge 配置。平台只注入这 5 个，
+    # 值为空的跳过（不发默认值），标准 provider 变量由任务侧的 test.sh 自行映射。
+    judge_env: dict[str, str] = {}
+    if dataset is not None and dataset.rewardkit and not config.disable_verification and not config.judge_model_api_id:
+        raise BuildError("该任务集是 reward-kit 格式，请选择 judge 模型（用于注入 JUDGE_* 环境变量）")
+    if config.judge_model_api_id and not config.disable_verification:
+        judge = model_api_service.require_ready(config.judge_model_api_id)
+        judge_env = {
+            "JUDGE_API_KEY": judge.api_key.strip(),
+            "JUDGE_BASE_URL": judge.base_url.strip(),
+            "JUDGE_MODEL": judge.model_id,  # 裸模型名，不带 litellm provider/ 前缀
+            "JUDGE_PROVIDER": judge.provider,
+            "JUDGE_API_PROTOCOL": config.judge_api_protocol,
+        }
+        judge_env = {key: value for key, value in judge_env.items() if value}
+        notes.append(f"judge 模型「{judge.name}」→ JUDGE_MODEL={judge.model_id}，协议 {config.judge_api_protocol}")
+
     # ---- kwargs / env ----------------------------------------------------
-    # 用户手填的 agent_env 优先于模型配置注入的（万一要临时覆盖 base_url）
+    # 用户手填的 agent_env 优先于模型配置注入的（万一要临时覆盖 base_url）；
+    # verifier_env 同理，手填优先于 judge 模型注入的 JUDGE_*。
     agent_env = {**injected_env, **config.agent_env}
+    verifier_env = {**judge_env, **config.verifier_env}
     command += kv_flags("--agent-env", agent_env)
     command += kv_flags("--agent-kwarg", agent_kwargs)
-    command += kv_flags("--verifier-env", config.verifier_env)
+    command += kv_flags("--verifier-env", verifier_env)
     command += kv_flags("--environment-kwarg", config.environment_kwargs)
     command += kv_flags("--verifier-kwarg", config.verifier_kwargs)
 
@@ -166,7 +209,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
 
     # A .env file lets task.toml's ${VAR} interpolation resolve (that is how
     # reward-kit judge tasks pick up their API keys). Written 0600.
-    secrets_map = {**agent_env, **config.verifier_env}
+    secrets_map = {**agent_env, **verifier_env}
     if secrets_map:
         env_path = work_dir / ".env"
         work_dir.mkdir(parents=True, exist_ok=True)

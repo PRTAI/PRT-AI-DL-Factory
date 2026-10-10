@@ -530,7 +530,7 @@ def model_compat_doc() -> dict[str, Any]:
                     "评测数据必须是 Harbor 任务树（task.toml + instruction.md + environment/ + tests/）。",
                     "oracle 用于任务自检，nop 用于确认任务不可被空解通过，正式评测请选真实 agent。",
                     "pass@k 由 --n-attempts 控制，并发由 --n-concurrent 控制。",
-                    "reward-kit judge：在 tests/ 提供 reward.toml + criteria.py，judge 用的 API Key 通过环境变量注入。",
+                    "reward-kit judge：在 tests/ 提供 reward.toml + criteria.py；上传任务集时勾选 reward-kit 开关，提交评测时选 judge 模型，平台注入 JUDGE_* 环境变量。",
                     "沙箱后端：" + ", ".join(harbor.get("environments", [])),
                 ],
                 "table": None,

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile, status
 
 from ..deps import CurrentUser
 from ..models import Dataset, DatasetKind, DatasetUpdate
-from ..services import dataset_service, resources_service
+from ..services import dataset_service, prebuild_service, resources_service
 
 router = APIRouter(prefix="/datasets", tags=["datasets"])
 
@@ -35,6 +35,7 @@ async def upload_dataset(
     kind: DatasetKind = Form(...),
     description: str = Form(default=""),
     tags: str = Form(default=""),
+    rewardkit: bool = Form(default=False),
 ) -> Dataset:
     if not file.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="缺少文件名")
@@ -46,6 +47,7 @@ async def upload_dataset(
         tags=tag_list,
         filename=file.filename,
         stream=file.file,
+        rewardkit=rewardkit,
         owner=user,
     )
 
@@ -65,6 +67,30 @@ def update_dataset(dataset_id: str, payload: DatasetUpdate, user: CurrentUser) -
     return dataset_service.update_dataset(dataset_id, payload, actor=user)
 
 
+@router.put("/{dataset_id}/file", response_model=Dataset, summary="重新上传文件替换数据集内容")
+async def replace_dataset_file(
+    dataset_id: str,
+    user: CurrentUser,
+    file: UploadFile = File(..., description="zip / tar.gz 压缩包"),
+    kind: DatasetKind | None = Form(default=None),
+) -> Dataset:
+    if not file.filename:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="缺少文件名")
+    return dataset_service.replace_file(
+        dataset_id, filename=file.filename, stream=file.file, kind=kind, actor=user
+    )
+
+
 @router.delete("/{dataset_id}", status_code=204, summary="删除数据集")
 def delete_dataset(dataset_id: str, user: CurrentUser) -> None:
     dataset_service.delete_dataset(dataset_id, actor=user)
+
+
+@router.post("/{dataset_id}/prebuild", summary="预构建某个 Harbor 任务的容器")
+def start_prebuild(dataset_id: str, user: CurrentUser, task: str = Body(..., embed=True)) -> dict[str, Any]:
+    return prebuild_service.start(dataset_id, task, actor=user)
+
+
+@router.get("/prebuilds/{build_id}", summary="预构建进度与日志")
+def get_prebuild(build_id: str, user: CurrentUser) -> dict[str, Any]:
+    return prebuild_service.get(build_id, actor=user)

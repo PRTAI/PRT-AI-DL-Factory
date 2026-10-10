@@ -228,6 +228,16 @@ def _validate_verify(payload: JobCreate) -> None:
                 status.HTTP_400_BAD_REQUEST,
                 detail=f"评测需要 harbor_tasks 类型的数据集，当前为 {dataset.kind.value}",
             )
+        if dataset.rewardkit and not config.disable_verification:
+            from . import model_api_service
+
+            if not config.judge_model_api_id:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="该任务集是 reward-kit 格式，请选择 judge 模型（用于注入 JUDGE_* 环境变量）",
+                )
+            # 提交时就把「judge 没填密钥 / 已停用」挡下来
+            model_api_service.require_ready(config.judge_model_api_id)
     if config.model_api_id:
         # 提交时就把「没填密钥 / 已停用」挡下来，别等排队到了才失败
         from . import model_api_service, resources_service

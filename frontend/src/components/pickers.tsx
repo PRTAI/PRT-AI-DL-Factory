@@ -251,6 +251,7 @@ export function DatasetPicker({
                   {dataset.name}
                 </span>
                 <Badge>{dataset.kind}</Badge>
+                {dataset.rewardkit && <Badge tone="primary">reward-kit</Badge>}
               </div>
               <div className="mt-0.5 flex flex-wrap gap-x-3 text-[11px] text-fg-subtle">
                 {dataset.stats.n_tasks > 0 && <span>{formatNumber(dataset.stats.n_tasks)} 个任务</span>}

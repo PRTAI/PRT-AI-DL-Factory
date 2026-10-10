@@ -4,7 +4,7 @@ import { Database, FlaskConical, GraduationCap, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/store'
-import type { DatasetKind, DatasetSpec } from '@/lib/types'
+import type { Dataset, DatasetKind, DatasetSpec } from '@/lib/types'
 import { cn, formatBytes, formatNumber, formatRelative } from '@/lib/utils'
 import {
   Badge,
@@ -25,6 +25,7 @@ import {
   Td,
   Textarea,
   Th,
+  ToggleRow,
   Tr,
 } from '@/components/ui'
 import { PageHeader } from '@/components/common'
@@ -34,6 +35,7 @@ export default function Datasets() {
   const queryClient = useQueryClient()
   const [uploadOpen, setUploadOpen] = React.useState(false)
   const [previewId, setPreviewId] = React.useState<string | null>(null)
+  const [editing, setEditing] = React.useState<Dataset | null>(null)
   // 训练数据 / 评测数据：harbor_tasks 是评测用的任务树（做 agentic RL 时也能训），其余都是训练格式
   const [category, setCategory] = React.useState<'all' | 'train' | 'verify'>('all')
 
@@ -163,6 +165,9 @@ export default function Datasets() {
                     <div className="flex items-center gap-x-3">
                       <LinkButton onClick={() => setPreviewId(dataset.id)}>预览</LinkButton>
                       {(user?.role === 'admin' || dataset.owner_id === user?.id) && (
+                        <LinkButton onClick={() => setEditing(dataset)}>修改</LinkButton>
+                      )}
+                      {(user?.role === 'admin' || dataset.owner_id === user?.id) && (
                         <LinkButton
                           tone="danger"
                           onClick={() => {
@@ -200,6 +205,17 @@ export default function Datasets() {
         specs={specs.data?.specs ?? []}
         onUploaded={() => queryClient.invalidateQueries({ queryKey: ['datasets'] })}
       />
+      <UploadDialog
+        open={Boolean(editing)}
+        editing={editing}
+        onOpenChange={(open) => !open && setEditing(null)}
+        specs={specs.data?.specs ?? []}
+        onUploaded={() => {
+          queryClient.invalidateQueries({ queryKey: ['datasets'] })
+          queryClient.invalidateQueries({ queryKey: ['dataset'] })
+          queryClient.invalidateQueries({ queryKey: ['dataset-preview'] })
+        }}
+      />
       <PreviewDialog datasetId={previewId} onClose={() => setPreviewId(null)} />
     </div>
   )
@@ -211,7 +227,10 @@ function UploadDialog({
   onOpenChange,
   specs,
   onUploaded,
+  editing = null,
 }: {
+  /** 传入时为「修改」模式：预填信息，压缩包可选（选了就替换内容，id 不变） */
+  editing?: Dataset | null
   open: boolean
   onOpenChange: (open: boolean) => void
   specs: DatasetSpec[]
@@ -221,6 +240,7 @@ function UploadDialog({
   const [kind, setKind] = React.useState<DatasetKind>('sft_alpaca')
   const [description, setDescription] = React.useState('')
   const [tags, setTags] = React.useState('')
+  const [rewardkit, setRewardkit] = React.useState(false)
   const [file, setFile] = React.useState<File | null>(null)
   const [progress, setProgress] = React.useState(0)
   const [error, setError] = React.useState<string | null>(null)
@@ -228,16 +248,57 @@ function UploadDialog({
 
   const spec = specs.find((item) => item.kind === kind)
 
+  React.useEffect(() => {
+    if (!open || !editing) return
+    setName(editing.name)
+    setKind(editing.kind)
+    setDescription(editing.description)
+    setTags(editing.tags.join(','))
+    setRewardkit(editing.rewardkit)
+    setFile(null)
+    setProgress(0)
+    setError(null)
+  }, [open, editing])
+
   const reset = () => {
     setName('')
     setDescription('')
     setTags('')
+    setRewardkit(false)
     setFile(null)
     setProgress(0)
     setError(null)
   }
 
+  const submitEdit = async (target: Dataset) => {
+    setError(null)
+    setUploading(true)
+    try {
+      if (file) {
+        const form = new FormData()
+        form.append('file', file)
+        form.append('kind', kind)
+        await api.replaceDatasetFile(target.id, form, setProgress)
+      }
+      const updated = await api.updateDataset(target.id, {
+        name: name.trim() || target.name,
+        description,
+        tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
+        rewardkit: kind === 'harbor_tasks' ? rewardkit : false,
+      })
+      toast.success(file ? `已替换文件并更新：${updated.name}` : `已更新：${updated.name}`)
+      onUploaded()
+      onOpenChange(false)
+      reset()
+    } catch (exception) {
+      setError(exception instanceof ApiError ? exception.message : '保存失败')
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const submit = async () => {
+    if (editing) return submitEdit(editing)
     if (!file) return
     setError(null)
     setUploading(true)
@@ -247,6 +308,8 @@ function UploadDialog({
     form.append('kind', kind)
     form.append('description', description)
     form.append('tags', tags)
+    // 后端 bool 表单字段不能收空串，永远显式发 true/false
+    if (kind === 'harbor_tasks') form.append('rewardkit', rewardkit ? 'true' : 'false')
     try {
       const dataset = await api.uploadDataset(form, setProgress)
       toast.success(
@@ -272,27 +335,48 @@ function UploadDialog({
         if (!next) reset()
       }}
       width="max-w-2xl"
-      title="上传数据集"
-      description="选择格式后，平台会在解压时按该格式的必需字段做校验；不通过会直接告诉你缺什么。"
+      title={editing ? `修改数据集「${editing.name}」` : '上传数据集'}
+      description={
+        editing
+          ? '可以只改名称/描述/标签；重新选择压缩包会替换数据集内容（id 不变，校验不通过时保留原内容）。'
+          : '选择格式后，平台会在解压时按该格式的必需字段做校验；不通过会直接告诉你缺什么。'
+      }
       footer={
         <>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             取消
           </Button>
-          <Button variant="primary" disabled={!file} loading={uploading} onClick={submit}>
-            上传并校验
+          <Button variant="primary" disabled={!editing && !file} loading={uploading} onClick={submit}>
+            {editing ? (file ? '替换文件并保存' : '保存') : '上传并校验'}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
-        <Field label="数据格式" required hint={spec?.summary}>
+        <Field
+          label="数据格式"
+          required
+          hint={editing && !file ? '更换格式需要同时重新上传压缩包' : spec?.summary}
+        >
           <Select
             value={kind}
-            onValueChange={(value) => setKind(value as DatasetKind)}
+            disabled={Boolean(editing) && !file}
+            onValueChange={(value) => {
+              setKind(value as DatasetKind)
+              if (value !== 'harbor_tasks') setRewardkit(false)
+            }}
             options={specs.map((item) => ({ value: item.kind, label: item.title, description: item.summary }))}
           />
         </Field>
+
+        {kind === 'harbor_tasks' && (
+          <ToggleRow
+            label="是否为 reward-kit 格式"
+            hint="任务的 tests/test.sh 通过 reward-kit 调 LLM judge 打分；启用后提交评测时必须选择一个 judge 模型，平台会注入 JUDGE_* 环境变量"
+            checked={rewardkit}
+            onCheckedChange={setRewardkit}
+          />
+        )}
 
         {spec && (
           <div className="rounded-lg border border-border bg-bg-elevated p-3">
@@ -313,7 +397,15 @@ function UploadDialog({
           </div>
         )}
 
-        <Field label="压缩包" required hint="支持 .zip / .tar / .tar.gz">
+        <Field
+          label={editing ? '替换压缩包（可选）' : '压缩包'}
+          required={!editing}
+          hint={
+            editing
+              ? `当前：${editing.archive_name || '—'} · 不选则保留原内容；被进行中的任务使用时不能替换`
+              : '支持 .zip / .tar / .tar.gz'
+          }
+        >
           <input
             type="file"
             accept=".zip,.tar,.tar.gz,.tgz"
