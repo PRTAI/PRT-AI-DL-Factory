@@ -28,7 +28,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from . import archive, audit_service, project_service
+from . import archive, audit_service, harbor_compat, project_service
 
 CHUNK = 4 * 1024 * 1024
 DATA_SUFFIXES = (".json", ".jsonl")
@@ -198,6 +198,9 @@ def _validate_harbor_tasks(root: Path) -> tuple[DatasetStats, list[DatasetFileIn
             detail="未找到任何 task.toml，请确认是 Harbor 任务树（tasks/<task>/task.toml）",
         )
     stats = DatasetStats(n_tasks=len(task_files))
+    adapted = harbor_compat.prepare_rewardkit_tasks(root)
+    if adapted:
+        stats.warnings.append(f"已为 {adapted} 个 reward-kit 任务启用无挂载权限时的独立工作区副本隔离")
     infos: list[DatasetFileInfo] = []
     missing_instruction: list[str] = []
     missing_tests: list[str] = []

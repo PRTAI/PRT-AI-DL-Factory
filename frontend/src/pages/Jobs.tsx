@@ -124,6 +124,17 @@ export default function Jobs() {
   })
 
   const items = jobs.data?.items ?? []
+  const [downloading, setDownloading] = React.useState<string[]>([])
+  const downloadJob = async (id: string) => {
+    setDownloading((ids) => [...ids, id])
+    try {
+      await api.downloadJob(id)
+    } catch (error) {
+      toast.error(error instanceof ApiError ? error.message : '导出下载失败')
+    } finally {
+      setDownloading((ids) => ids.filter((item) => item !== id))
+    }
+  }
   // 待审提醒要用**全量**计数：它是在催管理员去审，不该被当前筛选条件缩小
   const overview = useQuery({
     queryKey: ['job-overview', ''],
@@ -332,6 +343,13 @@ export default function Jobs() {
                         <Link to={`/jobs/${job.id}`} className="link text-xs">
                           详情
                         </Link>
+                        <LinkButton
+                          disabled={downloading.includes(job.id)}
+                          onClick={() => downloadJob(job.id)}
+                          title="下载 ZIP：任务配置、日志、指标与当前产物"
+                        >
+                          {downloading.includes(job.id) ? '打包中…' : '导出下载'}
+                        </LinkButton>
                         {user?.role === 'admin' && job.status === 'pending_review' && (
                           <>
                             <LinkButton

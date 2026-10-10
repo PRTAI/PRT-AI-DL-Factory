@@ -308,6 +308,7 @@ export const api = {
     anchor.click()
     URL.revokeObjectURL(url)
   },
+  downloadJob: (id: string) => downloadAttachment(`/api/jobs/${id}/export`, `${id}.zip`),
   reviewJob: (id: string, approve: boolean, comment = '') =>
     request<Job>(`/api/jobs/${id}/review`, {
       method: 'POST',

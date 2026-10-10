@@ -24,7 +24,7 @@ from pathlib import Path
 
 from ..config import settings
 from ..models import DatasetKind, Job, VerifyConfig
-from ..services import model_api_service, resources_service
+from ..services import harbor_compat, model_api_service, resources_service
 from ..store import store
 from .base import BuildError, BuildResult, kv_flags
 
@@ -98,6 +98,14 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         raise BuildError("请选择要评测的 Harbor 任务集")
     if sources > 1:
         raise BuildError("同时指定了多个任务来源，请只保留一个")
+    local_root = Path(dataset.root_path) if dataset is not None else Path(config.tasks_path) if config.tasks_path else None
+    if local_root is not None:
+        try:
+            adapted = harbor_compat.prepare_rewardkit_tasks(local_root)
+        except OSError as exc:
+            raise BuildError("无法更新 reward-kit 兼容入口，请检查任务目录写权限或重新上传数据集") from exc
+        if adapted:
+            notes.append(f"已适配 {adapted} 个 reward-kit 任务：无挂载权限时保留独立副本隔离")
 
     # ---- agent / model ---------------------------------------------------
     command += ["--agent", config.agent]

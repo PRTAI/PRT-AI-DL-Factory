@@ -70,6 +70,10 @@ export default function JobDetail() {
   const tabParam = searchParams.get('tab')
   const [rejectOpen, setRejectOpen] = React.useState(false)
   const [rejectComment, setRejectComment] = React.useState('')
+  const download = useMutation({
+    mutationFn: () => api.downloadJob(jobId!),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : '导出下载失败'),
+  })
 
   const job = useQuery({
     queryKey: ['job', jobId],
@@ -226,6 +230,16 @@ export default function JobDetail() {
             <Button variant="outline" size="sm" onClick={() => { job.refetch(); metrics.refetch(); staticLog.refetch() }}>
               <RefreshCw className={cn('h-3.5 w-3.5', job.isFetching && 'animate-spin')} aria-hidden />
               刷新
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={download.isPending}
+              onClick={() => download.mutate()}
+              title="下载 ZIP：任务配置、日志、指标与当前产物"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden />
+              导出下载
             </Button>
             {user?.role === 'admin' && data.status === 'pending_review' && (
               <>

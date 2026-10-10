@@ -6,10 +6,11 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Query
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 
 from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
-from ..services import job_service
+from ..services import job_download_service, job_service
 from ..services.scheduler import gpu_snapshot
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -76,6 +77,15 @@ def get_metrics(job_id: str, user: CurrentUser) -> dict[str, Any]:
 @router.get("/{job_id}/artifacts", summary="产物列表")
 def get_artifacts(job_id: str, user: CurrentUser) -> list[dict[str, Any]]:
     return job_service.job_artifacts(job_id, actor=user)
+
+
+@router.get("/{job_id}/export", summary="导出下载任务 ZIP（配置、日志、指标与产物）")
+def export_job(job_id: str, user: CurrentUser) -> FileResponse:
+    target, filename = job_download_service.prepare_download(job_id, actor=user)
+    return FileResponse(
+        target, filename=filename, media_type="application/zip",
+        background=BackgroundTask(target.unlink, missing_ok=True),
+    )
 
 
 @router.get("/{job_id}/artifacts/download", summary="下载单个产物文件")
