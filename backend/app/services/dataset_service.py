@@ -310,6 +310,18 @@ VALIDATORS = {
 }
 
 
+def _has_harbor_layout(root: Path) -> bool:
+    """识别单题、平铺任务集或 tasks/ 任务集，避免把题目附件当训练 JSON。"""
+    for pattern in ("task.toml", "*/task.toml", "tasks/*/task.toml"):
+        for task_file in root.glob(pattern):
+            task_dir = task_file.parent
+            if task_file.is_file() and (
+                (task_dir / "instruction.md").is_file() or (task_dir / "environment").is_dir()
+            ):
+                return True
+    return False
+
+
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
@@ -339,8 +351,8 @@ def create_from_upload(
         root_path=str(root),
         archive_name=filename,
         archive_bytes=archive_path.stat().st_size,
-        # reward-kit 只对 Harbor 任务树有意义，别的类型一律 False（后端兜底）
-        rewardkit=bool(rewardkit) if kind == DatasetKind.HARBOR_TASKS else False,
+        # 解压识别实际格式后，再决定 reward-kit 是否适用。
+        rewardkit=bool(rewardkit),
     )
     store.datasets.put(dataset)
 
@@ -360,7 +372,7 @@ def create_from_upload(
         actor=owner,
         target_type="dataset",
         target_id=dataset.id,
-        summary=f"上传数据集 {dataset.name} ({kind.value})",
+        summary=f"上传数据集 {dataset.name} ({dataset.kind.value})",
         detail={
             "records": dataset.stats.n_records,
             "tasks": dataset.stats.n_tasks,
@@ -401,10 +413,19 @@ def _ingest(dataset: Dataset, archive_path: Path, root: Path) -> None:
     try:
         _safe_extract(archive_path, root)
         _flatten_single_root(root)
+        requested_kind = dataset.kind
+        if dataset.kind not in {DatasetKind.HARBOR_TASKS, DatasetKind.RAW} and _has_harbor_layout(root):
+            dataset.kind = DatasetKind.HARBOR_TASKS
+        if dataset.kind != DatasetKind.HARBOR_TASKS:
+            dataset.rewardkit = False
         dataset.status = DatasetStatus.VALIDATING
         store.datasets.put(dataset)
 
         stats, files, extra = VALIDATORS[dataset.kind](root)
+        if dataset.kind != requested_kind:
+            stats.warnings.insert(
+                0, f"检测到 Harbor 任务树，已将数据格式从 {requested_kind.value} 自动更正为 harbor_tasks"
+            )
         dataset.stats = stats
         dataset.files = files
         dataset.status = DatasetStatus.READY
@@ -459,8 +480,6 @@ def replace_file(
     candidate = dataset.model_copy(deep=True)
     if kind is not None:
         candidate.kind = kind
-        if kind != DatasetKind.HARBOR_TASKS:
-            candidate.rewardkit = False
     candidate.status = DatasetStatus.EXTRACTING
     candidate.archive_name = filename
     candidate.archive_bytes = archive_path.stat().st_size

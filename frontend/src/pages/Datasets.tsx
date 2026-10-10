@@ -274,19 +274,24 @@ function UploadDialog({
     setError(null)
     setUploading(true)
     try {
+      let savedKind = kind
+      let savedRewardkit = rewardkit
       if (file) {
         const form = new FormData()
         form.append('file', file)
         form.append('kind', kind)
-        await api.replaceDatasetFile(target.id, form, setProgress)
+        const replaced = await api.replaceDatasetFile(target.id, form, setProgress)
+        savedKind = replaced.kind
+        if (replaced.kind !== kind) savedRewardkit = replaced.rewardkit
       }
       const updated = await api.updateDataset(target.id, {
         name: name.trim() || target.name,
         description,
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-        rewardkit: kind === 'harbor_tasks' ? rewardkit : false,
+        rewardkit: savedKind === 'harbor_tasks' ? savedRewardkit : false,
       })
-      toast.success(file ? `已替换文件并更新：${updated.name}` : `已更新：${updated.name}`)
+      const detected = savedKind !== kind ? '（已自动识别为 Harbor 任务树）' : ''
+      toast.success(file ? `已替换文件并更新：${updated.name}${detected}` : `已更新：${updated.name}`)
       onUploaded()
       onOpenChange(false)
       reset()
@@ -315,7 +320,7 @@ function UploadDialog({
       toast.success(
         `上传成功：${dataset.name}（${dataset.stats.n_tasks || dataset.stats.n_records} ${
           dataset.stats.n_tasks ? '个任务' : '条样本'
-        }）`,
+        }）${dataset.kind !== kind ? ' · 已自动识别为 Harbor 任务树' : ''}`,
       )
       onUploaded()
       onOpenChange(false)
@@ -339,7 +344,7 @@ function UploadDialog({
       description={
         editing
           ? '可以只改名称/描述/标签；重新选择压缩包会替换数据集内容（id 不变，校验不通过时保留原内容）。'
-          : '选择格式后，平台会在解压时按该格式的必需字段做校验；不通过会直接告诉你缺什么。'
+          : 'Harbor 任务树会自动识别；其余数据按所选格式校验，不通过会提示缺少的字段。'
       }
       footer={
         <>

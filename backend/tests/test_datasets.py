@@ -6,6 +6,24 @@ import io
 import json
 import zipfile
 
+import pytest
+
+
+def _harbor_contract_zip(make_zip, *, prefix="harbor-format-data/qa001-capacity-audit"):
+    return make_zip(
+        {
+            f"{prefix}/task.toml": 'version = "1.0"\n',
+            f"{prefix}/instruction.md": "# 成交容量审计\n",
+            f"{prefix}/environment/Dockerfile": "FROM ubuntu:24.04\n",
+            f"{prefix}/environment/input_files/audit_contract.json": json.dumps(
+                {"schema_version": 3, "aggregation": "股票×交易日", "amount_unit": "yuan"}
+            ),
+            f"{prefix}/tests/test.sh": "#!/bin/bash\necho 1.0 > /logs/verifier/reward.txt\n",
+            f"{prefix}/solution/solve.sh": "#!/bin/bash\necho audit\n",
+        },
+        "harbor-contract.zip",
+    )
+
 
 def _upload(client, headers, path, *, name, kind, **extra):
     with open(path, "rb") as handle:
@@ -49,6 +67,107 @@ def test_upload_harbor_tasks(client, member_headers, harbor_zip):
     preview = client.get(f"/api/datasets/{body['id']}/preview", headers=member_headers).json()
     assert preview["kind"] == "harbor_tasks"
     assert preview["tasks"][0]["instruction"].startswith("# 任务")
+
+
+@pytest.mark.parametrize("kind", ["sft_alpaca", "sft_sharegpt", "dpo_pairs", "kto_pairs", "verl_parquet"])
+@pytest.mark.parametrize("prefix", ["harbor-format-data/qa001-capacity-audit", "qa001-capacity-audit"])
+def test_harbor_contract_is_not_validated_as_training_json(client, member_headers, make_zip, kind, prefix):
+    path = _harbor_contract_zip(make_zip, prefix=prefix)
+    response = _upload(client, member_headers, path, name="capacity-audit", kind=kind)
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["kind"] == "harbor_tasks"
+    assert body["status"] == "ready"
+    assert body["stats"]["n_tasks"] == 1
+    assert body["stats"]["n_records"] == 0
+    assert body["lf_dataset_names"] == []
+    assert kind in body["stats"]["warnings"][0]
+    preview = client.get(f"/api/datasets/{body['id']}/preview", headers=member_headers).json()
+    assert preview["kind"] == "harbor_tasks"
+    assert preview["tasks"][0]["instruction"].startswith("# 成交容量审计")
+
+
+def test_harbor_suite_with_default_format_keeps_task_root(client, member_headers, harbor_zip):
+    from pathlib import Path
+
+    response = _upload(client, member_headers, harbor_zip, name="auto-suite", kind="sft_alpaca")
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["kind"] == "harbor_tasks"
+    assert body["stats"]["n_tasks"] == 3
+    assert len(list(Path(body["root_path"]).glob("*/task.toml"))) == 3
+
+
+def test_harbor_auto_detection_keeps_explicit_rewardkit(client, member_headers, make_zip):
+    response = _upload(
+        client, member_headers, _harbor_contract_zip(make_zip),
+        name="auto-rk", kind="sft_alpaca", rewardkit="true",
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["rewardkit"] is True
+
+
+def test_raw_harbor_upload_stays_raw(client, member_headers, make_zip):
+    response = _upload(client, member_headers, _harbor_contract_zip(make_zip), name="raw-suite", kind="raw")
+    assert response.status_code == 201, response.text
+    assert response.json()["kind"] == "raw"
+
+
+def test_unrelated_task_config_does_not_change_training_format(client, member_headers, make_zip):
+    path = make_zip({
+        "train.json": json.dumps([{"instruction": "a", "output": "b"}]),
+        "config/task.toml": 'version = "1.0"\n',
+    })
+    response = _upload(client, member_headers, path, name="training-config", kind="sft_alpaca")
+    assert response.status_code == 201, response.text
+    assert response.json()["kind"] == "sft_alpaca"
+
+
+@pytest.mark.parametrize("missing", ["instruction.md", "environment/Dockerfile"])
+def test_detected_harbor_still_requires_task_structure(client, member_headers, make_zip, missing):
+    files = {
+        "qa001/task.toml": 'version = "1.0"\n',
+        "qa001/instruction.md": "# 审计\n",
+        "qa001/environment/Dockerfile": "FROM ubuntu:24.04\n",
+        "qa001/environment/input_files/audit_contract.json": "{}",
+    }
+    del files[f"qa001/{missing}"]
+    if missing.startswith("environment/"):
+        del files["qa001/environment/input_files/audit_contract.json"]
+    response = _upload(client, member_headers, make_zip(files), name="incomplete-suite", kind="sft_alpaca")
+    assert response.status_code == 400
+    assert ("environment/" if missing.startswith("environment/") else missing) in response.json()["detail"]
+
+
+def test_replace_file_auto_detects_harbor_and_rolls_back(client, member_headers, make_zip):
+    from pathlib import Path
+
+    training = make_zip({"train.json": json.dumps([{"instruction": "a", "output": "b"}])})
+    created = _upload(client, member_headers, training, name="replace-suite", kind="sft_alpaca").json()
+    dataset_id = created["id"]
+    harbor = _harbor_contract_zip(make_zip)
+
+    def replace(path):
+        with path.open("rb") as handle:
+            return client.put(
+                f"/api/datasets/{dataset_id}/file", headers=member_headers,
+                files={"file": (path.name, handle, "application/zip")},
+            )
+
+    response = replace(harbor)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id"] == dataset_id
+    assert body["kind"] == "harbor_tasks"
+    assert body["lf_dataset_names"] == []
+    assert not (Path(body["root_path"]) / "dataset_info.json").exists()
+    invalid = make_zip({"qa001/task.toml": 'version = "1.0"\n'}, "invalid-suite.zip")
+    assert replace(invalid).status_code == 400
+    after = client.get(f"/api/datasets/{dataset_id}", headers=member_headers).json()
+    assert after["kind"] == "harbor_tasks"
+    assert after["status"] == "ready"
+    assert after["stats"]["n_tasks"] == 1
+    assert len(list(Path(after["root_path"]).rglob("task.toml"))) == 1
 
 
 def test_upload_harbor_rewardkit_flag(client, member_headers, harbor_zip):
