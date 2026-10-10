@@ -149,6 +149,11 @@ FROM ubuntu:24.04
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 ```
 
+reward-kit 任务集在上传时勾选「是否为 reward-kit 格式」后，提交评测时会多出一个必填的
+**judge 模型**选择。平台从平台维护的模型配置里取值，注入 `JUDGE_API_KEY` / `JUDGE_BASE_URL` /
+`JUDGE_MODEL` / `JUDGE_PROVIDER` / `JUDGE_API_PROTOCOL`（只注入这 5 个，空的键不发），
+具体协议由提交页的「judge 协议」下拉决定。
+
 ### 2.6 verl parquet
 
 ```
