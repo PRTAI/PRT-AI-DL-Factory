@@ -1,0 +1,54 @@
+[
+  {
+    "id": "alibaba", "label": "阿里云百炼", "description": "通义千问 · 普通 API（北京）",
+    "endpoints": {"openai": "https://dashscope.aliyuncs.com/compatible-mode/v1", "responses": "https://dashscope.aliyuncs.com/compatible-mode/v1", "anthropic": "https://dashscope.aliyuncs.com/apps/anthropic"},
+    "models": [
+      {"model": "qwen3.8-max", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "qwen3.8-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "qwen3.7-plus", "protocols": ["openai", "anthropic", "responses"]}
+    ],
+    "sources": ["https://help.aliyun.com/zh/model-studio/base-url", "https://help.aliyun.com/zh/model-studio/anthropic-api-messages", "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-responses"]
+  },
+  {
+    "id": "tencent", "label": "腾讯云 TokenHub", "description": "混元与聚合模型 · 普通 API",
+    "endpoints": {"openai": "https://tokenhub.tencentmaas.com/v1", "responses": "https://tokenhub.tencentmaas.com/v1", "anthropic": "https://tokenhub.tencentmaas.com"},
+    "models": [
+      {"model": "hy3", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "deepseek-v4-pro", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "glm-5.3", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "kimi-k3", "protocols": ["openai", "anthropic", "responses"]}
+    ],
+    "sources": ["https://cloud.tencent.com/document/product/1823/130079", "https://cloud.tencent.com/document/product/1823/131903", "https://cloud.tencent.com/document/product/1823/133532"]
+  },
+  {
+    "id": "volcengine", "label": "字节 · 火山方舟", "description": "豆包 Seed · 普通 API（北京）",
+    "endpoints": {"openai": "https://ark.cn-beijing.volces.com/api/v3", "responses": "https://ark.cn-beijing.volces.com/api/v3", "anthropic": "https://ark.cn-beijing.volces.com/api/compatible"},
+    "models": [
+      {"model": "doubao-seed-2-1-pro-260915", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "doubao-seed-2-1-lite-260915", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "doubao-seed-evolving", "protocols": ["openai", "anthropic", "responses"]}
+    ],
+    "sources": ["https://docs.volcengine.com/docs/ark/model-list?lang=zh", "https://docs.volcengine.com/docs/ark/base-url-and-authentication?lang=zh", "https://docs.volcengine.com/docs/ark/integrate-third-party-tools?lang=zh"]
+  },
+  {
+    "id": "deepseek", "label": "DeepSeek", "description": "DeepSeek 官方 · 普通 API",
+    "endpoints": {"openai": "https://api.deepseek.com", "responses": "https://api.deepseek.com", "anthropic": "https://api.deepseek.com/anthropic"},
+    "models": [
+      {"model": "deepseek-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "deepseek-v4-pro", "protocols": ["openai", "anthropic", "responses"]}
+    ],
+    "sources": ["https://api-docs.deepseek.com/", "https://api-docs.deepseek.com/guides/anthropic_api", "https://api-docs.deepseek.com/guides/responses_api/"]
+  },
+  {
+    "id": "atlascloud", "label": "AtlasCloud", "description": "第三方聚合平台 · 普通 API",
+    "endpoints": {"openai": "https://api.atlascloud.ai/v1", "responses": "https://api.atlascloud.ai/v1", "anthropic": "https://api.atlascloud.ai"},
+    "models": [
+      {"model": "deepseek-ai/deepseek-v4.1-flash", "protocols": ["openai"]},
+      {"model": "deepseek-ai/deepseek-v4-pro-0813", "protocols": ["openai"]},
+      {"model": "openai/gpt-6.1-sol", "protocols": ["openai"]},
+      {"model": "deepseek-ai/deepseek-v3.2", "protocols": ["openai", "anthropic", "responses"]}
+    ],
+    "sources": ["https://www.atlascloud.ai/docs/llm-protocols", "https://www.atlascloud.ai/models/llm"]
+  },
+  {"id": "custom", "label": "自定义平台", "description": "自定义兼容地址与模型", "endpoints": {}, "models": [], "sources": []}
+]

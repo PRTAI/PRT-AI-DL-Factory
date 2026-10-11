@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import tomllib
 from pathlib import Path
 
 from ..config import settings
@@ -31,6 +32,33 @@ from ..store import store
 from .base import BuildError, BuildResult, kv_flags
 
 _NO_MODEL_AGENTS = {"oracle", "nop"}
+
+
+def _codex_config(source: str, base_url: str) -> str:
+    """合并 Harbor 支持的 JSON/原生 TOML 来源，并明确选择 Responses。"""
+    try:
+        if source.strip().startswith("{"):
+            native = json.loads(source)
+        elif source.strip():
+            with Path(source).expanduser().open("rb") as handle:
+                native = tomllib.load(handle)
+        else:
+            native = {}
+    except (OSError, ValueError) as exc:
+        raise BuildError("Codex config 必须是有效 JSON 对象或可读取的 TOML 文件路径") from exc
+    if not isinstance(native, dict) or not isinstance(native.get("model_providers", {}), dict):
+        raise BuildError("Codex config 与 model_providers 必须是 JSON 对象")
+    native["model_provider"] = "prt"
+    native.setdefault("model_providers", {})["prt"] = {
+        "name": "PRT Model API", "base_url": base_url,
+        "env_key": "OPENAI_API_KEY", "wire_api": "responses",
+        "requires_openai_auth": False, "supports_websockets": False,
+    }
+    native.setdefault("web_search", "disabled")
+    try:
+        return json.dumps(native, ensure_ascii=False)
+    except TypeError as exc:
+        raise BuildError("Codex TOML 配置包含无法转换为 JSON 的值") from exc
 
 
 def validate_secret_env(env: dict[str, str]) -> None:
@@ -85,6 +113,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     config: VerifyConfig = job.verify  # type: ignore[assignment]
     if config is None:
         raise BuildError("缺少评测配置")
+    wire_protocol = model_api_service.agent_protocol(config.agent, config.agent_api_protocol)
 
     binary = resolve_harbor_bin()
     notes: list[str] = []
@@ -133,7 +162,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if config.model_api_id:
         # 平台维护的模型配置：--model 与密钥/base_url 都由后端按 Harbor 的标准环境变量注入
         resolved = model_api_service.resolve(
-            config.model_api_id, model_style=resources_service.model_style_for(config.agent)
+            config.model_api_id, model_style=resources_service.model_style_for(config.agent),
+            protocol=wire_protocol,
         )
         command += ["--model", resolved.model]
         injected_env = resolved.env
@@ -182,7 +212,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if dataset is not None and dataset.rewardkit and not config.disable_verification and not config.judge_model_api_id:
         raise BuildError("该任务集是 reward-kit 格式，请选择 judge 模型（用于注入 JUDGE_* 环境变量）")
     if config.judge_model_api_id and not config.disable_verification:
-        judge = model_api_service.require_ready(config.judge_model_api_id)
+        judge = model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol)
         judge_env = {
             "JUDGE_API_KEY": judge.api_key.strip(),
             "JUDGE_BASE_URL": judge.base_url.strip(),
@@ -198,6 +228,13 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     # verifier_env 同理，手填优先于 judge 模型注入的 JUDGE_*。
     agent_env = {**injected_env, **config.agent_env}
     verifier_env = {**judge_env, **config.verifier_env}
+    if config.agent == "codex":
+        # Harbor 接受内联 JSON config，并写入每个 trial 的 CODEX_HOME/config.toml。
+        # 自定义 provider 明确走 Responses，不能仅依赖 OPENAI_BASE_URL。
+        agent_kwargs["config"] = _codex_config(
+            agent_kwargs.get("config", ""),
+            agent_env.get("OPENAI_BASE_URL") or agent_env.get("OPENAI_API_BASE") or "https://api.openai.com/v1",
+        )
     for env_source in (agent_env, verifier_env, job.resources.env):
         validate_secret_env(env_source)
     command += kv_flags("--agent-env", agent_env)

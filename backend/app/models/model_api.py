@@ -83,6 +83,52 @@ PROVIDERS: dict[str, dict[str, object]] = {
 ProviderName = Literal[
     "openai", "anthropic", "dashscope", "google", "openrouter", "deepseek", "xai", "moonshot"
 ]
+ApiProtocol = Literal["openai", "anthropic", "responses"]
+PlatformVendor = Literal["alibaba", "tencent", "volcengine", "deepseek", "atlascloud", "custom"]
+
+
+class ModelPlatformConfig(Base):
+    id: str = Field(default_factory=lambda: new_id("plt"))
+    vendor: PlatformVendor
+    name: str
+    access_mode: str = "standard"
+    api_key: str = ""
+    endpoints: dict[ApiProtocol, str] = Field(default_factory=dict)
+    enabled: bool = True
+    presets_seeded: bool = False
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+    created_by: str = ""
+    updated_by: str = ""
+
+
+class ModelPlatformPublic(Base):
+    id: str
+    vendor: PlatformVendor
+    name: str
+    access_mode: str
+    endpoints: dict[ApiProtocol, str]
+    enabled: bool
+    has_api_key: bool
+    api_key_masked: str
+    updated_at: datetime
+    updated_by: str
+
+
+class ModelPlatformCreate(Base):
+    vendor: PlatformVendor
+    name: str = Field(default="", max_length=100)
+    access_mode: str = "standard"
+    api_key: str = ""
+    endpoints: dict[ApiProtocol, str] | None = None
+    enabled: bool = True
+
+
+class ModelPlatformUpdate(Base):
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    api_key: str | None = None
+    endpoints: dict[ApiProtocol, str] | None = None
+    enabled: bool | None = None
 
 # 思考模式。Harbor 各 agent 接受的集合不一样，builder 会按 agent 收敛（见 resources_service）。
 ReasoningEffort = Literal["", "low", "medium", "high", "xhigh", "max"]
@@ -93,8 +139,12 @@ class ModelApiConfig(Base):
     id: str = Field(default_factory=lambda: new_id("mdl"))
     name: str  # 平台里显示的名字，也是默认的模型标识，例如 gpt-5.6-sol
     provider: ProviderName = "openai"
+    platform_id: str = ""
+    supported_protocols: list[ApiProtocol] = Field(default_factory=list)
     # 真正发给 agent 的模型标识；留空用 name。litellm 系 agent 会自动加 provider/ 前缀。
     model: str = ""
+    # 新平台模型填写服务器标识；旧配置可能已经包含 LiteLLM 客户端前缀。
+    model_is_server_id: bool = False
     base_url: str = ""
     api_key: str = ""  # 明文只存在 db 文件里（文件权限 0600），接口永不返回
     extra_env: dict[str, str] = Field(default_factory=dict)  # 额外要注入的变量
@@ -138,6 +188,12 @@ class ModelApiPublic(Base):
     updated_by: str
     # 会注入哪些标准环境变量（给用户看，明白平台替他做了什么）
     env_names: list[str]
+    platform_id: str = ""
+    platform_name: str = ""
+    vendor: PlatformVendor = "custom"
+    vendor_label: str = "自定义平台"
+    supported_protocols: list[ApiProtocol] = Field(default_factory=list)
+    endpoints: dict[ApiProtocol, str] = Field(default_factory=dict)
 
     @classmethod
     def of(cls, item: ModelApiConfig) -> "ModelApiPublic":
@@ -173,8 +229,10 @@ class ModelApiPublic(Base):
 
 
 class ModelApiCreate(Base):
-    name: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=256)
     provider: ProviderName = "openai"
+    platform_id: str = ""
+    supported_protocols: list[ApiProtocol] | None = None
     model: str = ""
     base_url: str = ""
     api_key: str = ""
@@ -187,6 +245,7 @@ class ModelApiCreate(Base):
 class ModelApiUpdate(Base):
     name: str | None = None
     provider: ProviderName | None = None
+    supported_protocols: list[ApiProtocol] | None = None
     model: str | None = None
     base_url: str | None = None
     # None = 不改；"" = 清空；其他 = 覆盖

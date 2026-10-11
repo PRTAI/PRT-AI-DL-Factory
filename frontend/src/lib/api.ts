@@ -23,6 +23,8 @@ import type {
   Notification,
   ModelApi,
   ModelProviderInfo,
+  ModelPlatform,
+  PlatformCatalog,
   RegistryDataset,
   ReviewFinding,
   ReviewTask,
@@ -487,6 +489,11 @@ export const api = {
 
   // --------------------------------------------------------- model apis ----
   modelApis: () => request<ModelApi[]>('/api/model-apis'),
+  modelPlatforms: () => request<ModelPlatform[]>('/api/model-apis/platforms'),
+  platformCatalog: () => request<PlatformCatalog[]>('/api/model-apis/platform-catalog'),
+  createModelPlatform: (payload: Record<string, unknown>) => request<ModelPlatform>('/api/model-apis/platforms', { method: 'POST', body: JSON.stringify(payload) }),
+  updateModelPlatform: (id: string, payload: Record<string, unknown>) => request<ModelPlatform>(`/api/model-apis/platforms/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteModelPlatform: (id: string) => request<void>(`/api/model-apis/platforms/${id}`, { method: 'DELETE' }),
   modelProviders: () => request<ModelProviderInfo[]>('/api/model-apis/providers'),
   createModelApi: (payload: Record<string, unknown>) =>
     request<ModelApi>('/api/model-apis', { method: 'POST', body: JSON.stringify(payload) }),

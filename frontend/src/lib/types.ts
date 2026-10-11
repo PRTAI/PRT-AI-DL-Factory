@@ -281,6 +281,7 @@ export interface VerifyConfig {
   agent: string
   /** 平台维护的模型配置；选了它就不用手填 model / 密钥 */
   model_api_id: string
+  agent_api_protocol?: '' | 'openai' | 'anthropic'
   model: string
   /** 思考模式；空 = 不下发，交给 agent 默认 */
   reasoning_effort: '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -748,6 +749,35 @@ export interface ModelApi {
   created_by: string
   updated_by: string
   env_names: string[]
+  platform_id: string
+  platform_name: string
+  vendor: PlatformVendor
+  vendor_label: string
+  supported_protocols: ApiProtocol[]
+  endpoints: Partial<Record<ApiProtocol, string>>
+}
+
+export type ApiProtocol = 'openai' | 'anthropic' | 'responses'
+export type PlatformVendor = 'alibaba' | 'tencent' | 'volcengine' | 'deepseek' | 'atlascloud' | 'custom'
+export interface ModelPlatform {
+  id: string
+  vendor: PlatformVendor
+  name: string
+  access_mode: string
+  endpoints: Partial<Record<ApiProtocol, string>>
+  enabled: boolean
+  has_api_key: boolean
+  api_key_masked: string
+  updated_at: string
+  updated_by: string
+}
+export interface PlatformCatalog {
+  id: PlatformVendor
+  label: string
+  description: string
+  endpoints: Partial<Record<ApiProtocol, string>>
+  models: { model: string; protocols: ApiProtocol[] }[]
+  sources: string[]
 }
 
 export interface ModelProviderInfo {

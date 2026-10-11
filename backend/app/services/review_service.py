@@ -240,6 +240,8 @@ def _model_api_or_400(model_api_id: str) -> ModelApiConfig:
     config = store.model_apis.get(model_api_id)
     if config is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="模型 API 配置不存在")
+    from . import model_api_service
+    config = model_api_service.effective(config)
     if not config.ready:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
@@ -329,6 +331,7 @@ async def run_review(review_id: str) -> None:
     store.reviews.update(review_id, start)
 
     try:
+        config = _model_api_or_400(item.model_api_id)
         manifest = await asyncio.to_thread(_stage_collect, review_id)
         if not manifest["tasks"]:
             raise HTTPException(

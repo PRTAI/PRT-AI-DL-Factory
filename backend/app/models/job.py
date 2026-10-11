@@ -228,6 +228,7 @@ class VerifyConfig(Base):
     # 二选一：选平台维护的模型配置（推荐，密钥与 base_url 由后端按 Harbor 的标准
     # 环境变量注入），或者手填 litellm 风格的模型名 + 自己在 agent_env 里给密钥。
     model_api_id: str = ""
+    agent_api_protocol: Literal["", "openai", "anthropic"] = ""
     model: str = ""
     # 思考模式：留空表示不下发，交给 agent 自己的默认值。各 agent 接受的集合不同，
     # builder 会收敛到该 agent 支持的最近一档并在 notes 里说明。

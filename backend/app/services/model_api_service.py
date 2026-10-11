@@ -22,7 +22,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from . import audit_service
+from . import audit_service, model_platform_service
 
 # 首批要有的四个模型。provider 是「协议」：中转站基本都走 OpenAI 兼容，
 # Claude 系走 Anthropic 协议（claude-code 只认 ANTHROPIC_*）。
@@ -53,15 +53,15 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
 
 
 def seed_defaults() -> int:
-    """首次启动时把四个默认模型放进去（已存在同名的不动）。"""
+    """初始化预置目录，并迁移旧配置；不复活用户已删除的模型。"""
     existing = {item.name for item in store.model_apis.all()}
     created = 0
-    for spec in DEFAULT_MODELS:
+    for spec in DEFAULT_MODELS if not existing and not store.model_platforms.count() else []:
         if spec["name"] in existing:
             continue
         store.model_apis.put(ModelApiConfig(created_by="system", updated_by="system", **spec))
         created += 1
-    return created
+    return created + model_platform_service.seed_and_migrate()
 
 
 # --------------------------------------------------------------------------- #
@@ -71,8 +71,60 @@ def list_public(*, include_disabled: bool = True) -> list[ModelApiPublic]:
     items = store.model_apis.all()
     if not include_disabled:
         items = [i for i in items if i.enabled]
-    items.sort(key=lambda i: (not i.ready, i.provider, i.name.lower()))
-    return [ModelApiPublic.of(i) for i in items]
+    rows = [public(i) for i in items]
+    rows.sort(key=lambda i: (not i.ready, i.vendor, i.name.lower()))
+    return rows
+
+
+def protocols(item: ModelApiConfig) -> list[str]:
+    if item.supported_protocols or item.platform_id:
+        return list(item.supported_protocols)
+    return ["anthropic"] if item.provider == "anthropic" else ["openai", "responses"] if item.provider == "openai" else ["openai"] if item.provider in {"dashscope", "deepseek", "openrouter"} else []
+
+
+def effective(item: ModelApiConfig, protocol: str | None = None) -> ModelApiConfig:
+    resolved = item.model_copy(deep=True)
+    if protocol and protocol not in protocols(item):
+        raise HTTPException(400, f"模型「{item.name}」不支持所选接口 {protocol}")
+    if item.platform_id:
+        platform = model_platform_service.get(item.platform_id)
+        selected = protocol or ("anthropic" if item.provider == "anthropic" else "openai")
+        if not protocol and protocols(item) and selected not in protocols(item):
+            selected = protocols(item)[0]
+            resolved.provider = "anthropic" if selected == "anthropic" else "openai"
+        if protocol and not platform.endpoints.get(selected):
+            raise HTTPException(400, f"平台「{platform.name}」未配置所选接口地址 {protocol}")
+        resolved.api_key = platform.api_key
+        resolved.base_url = platform.endpoints.get(selected, item.base_url)
+        resolved.enabled = item.enabled and platform.enabled
+    if protocol:
+        resolved.provider = "anthropic" if protocol == "anthropic" else "openai"
+    elif item.platform_id and item.provider in {"dashscope", "deepseek", "openrouter"}:
+        resolved.provider = "openai"
+    return resolved
+
+
+def public(item: ModelApiConfig) -> ModelApiPublic:
+    result = ModelApiPublic.of(effective(item))
+    result.platform_id = item.platform_id
+    result.supported_protocols = protocols(item)
+    if item.platform_id:
+        platform = model_platform_service.get(item.platform_id)
+        result.platform_name, result.vendor = platform.name, platform.vendor
+        result.vendor_label = model_platform_service.spec(platform.vendor)["label"]
+        result.endpoints = dict(platform.endpoints)
+        result.supported_protocols = [p for p in result.supported_protocols if result.endpoints.get(p)]
+    else:
+        result.platform_name = "自定义配置"
+        result.endpoints = {p: item.base_url or str(PROVIDERS[item.provider]["default_base_url"]) for p in result.supported_protocols}
+    return result
+
+
+def agent_protocol(agent: str, requested: str = "") -> str | None:
+    forced = "anthropic" if agent == "claude-code" else "responses" if agent == "codex" else None
+    if forced and requested and requested != ("openai" if forced == "responses" else forced):
+        raise HTTPException(400, f"{agent} 必须使用 {'OpenAI' if forced == 'responses' else 'Anthropic'} 接口")
+    return forced or requested or None
 
 
 def get(config_id: str) -> ModelApiConfig:
@@ -102,12 +154,26 @@ def providers() -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 def create(payload: ModelApiCreate, *, actor: User) -> ModelApiConfig:
     name = payload.name.strip()
-    if store.model_apis.first(lambda i: i.name.lower() == name.lower()):
+    if not name:
+        raise HTTPException(400, "模型名称不能为空")
+    if store.model_apis.first(lambda i: i.name.lower() == name.lower() and (not payload.platform_id or i.platform_id == payload.platform_id)):
         raise HTTPException(status.HTTP_409_CONFLICT, detail=f"已存在同名模型配置：{name}")
+    supported = payload.supported_protocols
+    if payload.platform_id:
+        platform = model_platform_service.get(payload.platform_id)
+        if payload.api_key or payload.base_url or payload.extra_env:
+            raise HTTPException(400, "共享平台模型的密钥和地址请在平台配置中修改")
+        preset = next((p for p in model_platform_service.spec(platform.vendor)["models"] if p["model"] == (payload.model.strip() or name)), None)
+        supported = supported if supported is not None else (preset["protocols"] if preset else list(platform.endpoints))
+        if not supported:
+            raise HTTPException(400, "请先为平台配置接口地址")
     item = ModelApiConfig(
         name=name,
-        provider=payload.provider,
+        platform_id=payload.platform_id,
+        supported_protocols=supported or [],
+        provider=("openai" if "openai" in (supported or []) else "anthropic") if payload.platform_id else payload.provider,
         model=payload.model.strip(),
+        model_is_server_id=bool(payload.platform_id),
         base_url=payload.base_url.strip(),
         api_key=payload.api_key.strip(),
         extra_env={k.strip(): v for k, v in payload.extra_env.items() if k.strip()},
@@ -132,10 +198,14 @@ def create(payload: ModelApiCreate, *, actor: User) -> ModelApiConfig:
 def update(config_id: str, payload: ModelApiUpdate, *, actor: User) -> ModelApiConfig:
     item = get(config_id)
     data = payload.model_dump(exclude_unset=True)
+    if item.platform_id and any(data.get(key) is not None for key in ("api_key", "base_url", "provider")):
+        raise HTTPException(400, "该模型复用平台配置，请在平台中修改密钥或地址")
     if "name" in data and data["name"] is not None:
         new_name = data["name"].strip()
+        if not new_name:
+            raise HTTPException(400, "模型名称不能为空")
         clash = store.model_apis.first(
-            lambda i: i.id != item.id and i.name.lower() == new_name.lower()
+            lambda i: i.id != item.id and i.name.lower() == new_name.lower() and (not item.platform_id or i.platform_id == item.platform_id)
         )
         if clash:
             raise HTTPException(status.HTTP_409_CONFLICT, detail=f"已存在同名模型配置：{new_name}")
@@ -146,6 +216,10 @@ def update(config_id: str, payload: ModelApiUpdate, *, actor: User) -> ModelApiC
                 setattr(row, key, data[key].strip())
         if data.get("provider") is not None:
             row.provider = data["provider"]
+        if data.get("supported_protocols") is not None:
+            row.supported_protocols = data["supported_protocols"]
+        if row.platform_id and data.get("model") is not None:
+            row.model_is_server_id = True
         # api_key: None=不改，""=清空，其他=覆盖 —— 编辑表单不回显密钥，
         # 所以「没动这一栏」必须表示保留原值。
         if data.get("api_key") is not None:
@@ -195,13 +269,14 @@ class ResolvedModel:
     notes: list[str] = field(default_factory=list)
 
 
-def require_ready(config_id: str) -> ModelApiConfig:
+def require_ready(config_id: str, protocol: str | None = None) -> ModelApiConfig:
     """取出模型配置并确认可用（已启用且填了密钥），否则抛 400。
 
     调用方需要裸字段（``model_id`` / ``provider`` / ``base_url``）时用它，
     不要走 ``resolve()`` —— 后者会顺带生成一整套标准环境变量。
     """
-    item = get(config_id)
+    original = get(config_id)
+    item = effective(original)
     if not item.enabled:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"模型配置「{item.name}」已停用")
     if not item.api_key.strip():
@@ -209,10 +284,10 @@ def require_ready(config_id: str) -> ModelApiConfig:
             status.HTTP_400_BAD_REQUEST,
             detail=f"模型配置「{item.name}」还没有填 API Key，请管理员在「平台管理 → 模型 API」里补上",
         )
-    return item
+    return effective(original, protocol) if protocol else item
 
 
-def resolve(config_id: str, *, model_style: str) -> ResolvedModel:
+def resolve(config_id: str, *, model_style: str, protocol: str | None = None) -> ResolvedModel:
     """把一条模型配置翻译成 Harbor 能吃的 ``--model`` + 标准环境变量。
 
     ``model_style``：
@@ -221,7 +296,7 @@ def resolve(config_id: str, *, model_style: str) -> ResolvedModel:
     * ``bare``    —— codex / claude-code 这类 CLI，模型名原样传给 CLI 自己的
       ``--model``，加了前缀反而会被当成模型名的一部分发给 API。
     """
-    item = require_ready(config_id)
+    item = require_ready(config_id, protocol)
 
     spec = PROVIDERS[item.provider]
     key_envs: list[str] = list(spec["api_key_envs"])  # type: ignore[arg-type]
@@ -240,7 +315,9 @@ def resolve(config_id: str, *, model_style: str) -> ResolvedModel:
 
     model = item.model_id
     litellm_prefix = "openai" if item.provider == "dashscope" and base_url.endswith("/v1") else item.provider
-    if model_style == "litellm" and "/" not in model:
+    # 聚合平台的 anthropic/xxx 等是服务器模型标识，需保留在客户端协议前缀之后。
+    needs_prefix = item.model_is_server_id or "/" not in model
+    if model_style == "litellm" and needs_prefix:
         model = f"{litellm_prefix}/{model}"
 
     notes = [

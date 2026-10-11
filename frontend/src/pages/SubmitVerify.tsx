@@ -5,10 +5,11 @@ import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Glo
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { Prebuild } from '@/lib/api'
-import type { Dataset, DeploymentEndpoint, ModelApi, RegistryDataset, VerifyConfig } from '@/lib/types'
+import type { ApiProtocol, Dataset, DeploymentEndpoint, ModelApi, RegistryDataset, VerifyConfig } from '@/lib/types'
 import { useProject } from '@/lib/store'
 import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
+import { supportsProtocol } from '@/lib/model-api'
 import {
   Badge,
   Button,
@@ -35,6 +36,7 @@ const DEFAULT_VERIFY: VerifyConfig = {
   registry_dataset: '',
   agent: 'oracle',
   model_api_id: '',
+  agent_api_protocol: '',
   model: '',
   reasoning_effort: '',
   agent_import_path: '',
@@ -75,49 +77,41 @@ const EFFORT_OPTIONS = [
   { value: 'max', label: 'max', description: '最深思考，最慢最贵' },
 ]
 
-/** 平台维护的模型配置：选了它，密钥与 base_url 由后端按 Harbor 标准变量注入。 */
-function ModelApiPicker({
-  value,
-  onChange,
-  supportsEffort,
-  allowManual = true,
-}: {
+/** 协议已确定后，按平台、模型逐级选择；密钥由后台注入。 */
+function ModelApiPicker({ value, onChange, protocol, allowManual = true }: {
   value: string
   onChange: (item: ModelApi | null) => void
-  supportsEffort: boolean
+  protocol: ApiProtocol
   allowManual?: boolean
 }) {
   const models = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
-  const rows = (models.data ?? []).filter((m) => m.enabled)
+  const rows = (models.data ?? []).filter((m) => m.enabled && supportsProtocol(m, protocol))
   const current = rows.find((m) => m.id === value)
-  return (
-    <div className="space-y-1.5">
-      <Select
-        value={value || (allowManual ? 'manual' : '')}
-        onValueChange={(next) => onChange(next === 'manual' ? null : rows.find((m) => m.id === next) ?? null)}
-        options={[
-          ...(allowManual
-            ? [{ value: 'manual', label: '手动填写模型与密钥', description: '下方自己填 litellm 模型名和 agent 环境变量' }]
-            : []),
-          ...rows.map((m) => ({
-            value: m.id,
-            label: m.ready ? m.name : `${m.name}（未配置密钥）`,
-            description: `${m.provider}${m.base_url ? ` · ${m.base_url}` : ''}`,
-            disabled: !m.ready,
-          })),
-        ]}
-      />
-      {allowManual && current && (
-        <p className="text-[11px] leading-relaxed text-fg-subtle">
-          运行时注入 {current.env_names.join(' / ')}；密钥不会出现在命令记录与日志里。
-          {!supportsEffort && ' 该 agent 不支持思考模式，下面的选择会被忽略。'}
-        </p>
-      )}
-      {!rows.length && !models.isLoading && (
-        <p className="text-[11px] text-fg-subtle">还没有模型配置，管理员可在「平台管理 → 模型 API」添加。</p>
-      )}
+  const [vendor, setVendor] = React.useState('')
+  const previousProtocol = React.useRef(protocol)
+  React.useEffect(() => {
+    if (current) setVendor(current.vendor)
+    else if (previousProtocol.current !== protocol) setVendor('')
+    previousProtocol.current = protocol
+  }, [protocol, current?.vendor])
+  const vendors = [...new Map(rows.map((m) => [m.vendor, m.vendor_label])).entries()]
+  const shown = rows.filter((m) => m.vendor === vendor)
+  return <div className="space-y-2">
+    <div className="grid gap-3 sm:grid-cols-2">
+      <Field label="平台" required>
+        <Select value={vendor} placeholder="先选择平台" onValueChange={(next) => { setVendor(next); onChange(null) }} options={[
+          ...vendors.map(([id, label]) => ({ value: id, label, disabled: !rows.some((m) => m.vendor === id && m.ready) })),
+          ...(allowManual ? [{ value: 'manual', label: '手动填写', description: '使用下方模型标识和环境变量' }] : []),
+        ]} />
+      </Field>
+      <Field label="模型" required>
+        <Select value={current?.id ?? ''} disabled={!vendor || vendor === 'manual'} placeholder={vendor ? '再选择模型' : '请先选择平台'} onValueChange={(next) => onChange(rows.find((m) => m.id === next) ?? null)} options={shown.map((m) => ({ value: m.id, label: m.name, description: `${m.platform_name}${m.ready ? '' : ' · 未配置密钥'}`, disabled: !m.ready }))} />
+      </Field>
     </div>
-  )
+    {current && <div className="flex items-center justify-between gap-2"><p className="min-w-0 break-all text-[11px] text-fg-subtle">共用「{current.platform_name}」的平台密钥 · {current.endpoints[protocol]}</p><Button size="sm" variant="ghost" onClick={() => onChange(null)}>清除选择</Button></div>}
+    {!rows.length && !models.isLoading && <p className="text-[11px] text-fg-subtle">暂无符合此接口的模型，请在「平台管理 → 模型 API」配置。</p>}
+    {models.error && <p className="text-xs text-danger">{models.error.message}</p>}
+  </div>
 }
 
 /** Harbor 官方注册表里的数据集（terminal-bench 等），运行时需要联网 clone。 */
@@ -327,6 +321,18 @@ export default function SubmitVerify() {
   const patch = (values: Partial<VerifyConfig>) => setConfig((previous) => ({ ...previous, ...values }))
   const agentInfo = agents.data?.find((item) => item.name === config.agent)
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
+  const agentProtocol = config.agent === 'claude-code' ? 'anthropic' : config.agent === 'codex' ? 'openai' : config.agent_api_protocol || 'openai'
+  const agentWireProtocol: ApiProtocol = config.agent === 'codex' ? 'responses' : agentProtocol
+  React.useEffect(() => {
+    if (!modelApis.data) return
+    setConfig((prev) => {
+      const agent = modelApis.data!.find((m) => m.id === prev.model_api_id)
+      const judge = modelApis.data!.find((m) => m.id === prev.judge_model_api_id)
+      const clearAgent = Boolean(agent && !supportsProtocol(agent, agentWireProtocol))
+      const clearJudge = Boolean(judge && !supportsProtocol(judge, prev.judge_api_protocol))
+      return clearAgent || clearJudge ? { ...prev, ...(clearAgent ? { model_api_id: '', model: '' } : {}), ...(clearJudge ? { judge_model_api_id: '' } : {}) } : prev
+    })
+  }, [agentWireProtocol, config.judge_api_protocol, modelApis.data, setConfig])
   const modelApiName = modelApis.data?.find((m) => m.id === config.model_api_id)?.name
   // DatasetPicker（components/pickers.tsx）用同一个 queryKey，直接复用缓存
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
@@ -375,7 +381,7 @@ export default function SubmitVerify() {
   const managedVerifierKeys = new Set(
     config.judge_model_api_id && !config.disable_verification
       ? ['JUDGE_API_KEY', 'JUDGE_MODEL', 'JUDGE_PROVIDER', 'JUDGE_API_PROTOCOL',
-        ...(selectedJudge?.base_url ? ['JUDGE_BASE_URL'] : [])]
+        ...(selectedJudge?.endpoints?.[config.judge_api_protocol] ? ['JUDGE_BASE_URL'] : [])]
       : [],
   )
   const verifierEnvHints: Record<string, string> = {}
@@ -442,6 +448,7 @@ export default function SubmitVerify() {
         resources: { n_gpus: nGpus, priority: 0, env: {} },
         verify: {
           ...config,
+          agent_api_protocol: agentProtocol,
           task_names: splitList(taskFilter),
           exclude_task_names: splitList(excludeFilter),
           agent_env: cleanKv(config.agent_env),
@@ -616,34 +623,18 @@ export default function SubmitVerify() {
             </CardBody>
           </Card>
 
-          {judgeRequired && (
+          {!config.disable_verification && (
             <Card>
               <CardHeader
-                title="Judge 模型（reward-kit 打分）"
-                description="该任务集是 reward-kit 格式：平台按下面的选择注入 JUDGE_API_KEY / JUDGE_BASE_URL / JUDGE_MODEL / JUDGE_PROVIDER / JUDGE_API_PROTOCOL，任务的 tests/test.sh 自行读取"
+                title={judgeRequired ? 'Judge 模型（reward-kit 打分）' : 'Judge 模型（可选）'}
+                description="任务使用 LLM 打分时，平台按所选接口注入 JUDGE_API_KEY / JUDGE_BASE_URL / JUDGE_MODEL / JUDGE_PROVIDER / JUDGE_API_PROTOCOL；reward-kit 任务需要选择 Judge。"
                 icon={<Bot className="h-4 w-4" aria-hidden />}
               />
               <CardBody className="space-y-4">
-                <Field label="judge 模型" required hint="作为 LLM judge 的模型端点；密钥与 base_url 由平台注入">
-                  <ModelApiPicker
-                    value={config.judge_model_api_id}
-                    supportsEffort={false}
-                    allowManual={false}
-                    onChange={(item) => patch({ judge_model_api_id: item?.id ?? '' })}
-                  />
+                <Field label="Judge 接口" required hint="先选择接口，再选择支持该接口的平台与模型">
+                  <Select value={config.judge_api_protocol} onValueChange={(value) => patch({ judge_api_protocol: value as VerifyConfig['judge_api_protocol'] })} options={[{ value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }]} />
                 </Field>
-                <Field label="judge 协议" required hint="写进 JUDGE_API_PROTOCOL；必须与任务的 judge 客户端一致">
-                  <Select
-                    value={config.judge_api_protocol}
-                    onValueChange={(value) =>
-                      patch({ judge_api_protocol: value as VerifyConfig['judge_api_protocol'] })
-                    }
-                    options={[
-                      { value: 'anthropic', label: 'anthropic', description: '走 Anthropic 协议（claude-code judge 的默认）' },
-                      { value: 'openai', label: 'openai', description: '走 OpenAI 兼容协议' },
-                    ]}
-                  />
-                </Field>
+                <ModelApiPicker value={config.judge_model_api_id} protocol={config.judge_api_protocol} allowManual={false} onChange={(item) => patch({ judge_model_api_id: item?.id ?? '' })} />
               </CardBody>
             </Card>
           )}
@@ -654,7 +645,7 @@ export default function SubmitVerify() {
               <Field label="Agent" required hint={agentInfo?.description}>
                 <Select
                   value={config.agent}
-                  onValueChange={(value) => patch({ agent: value })}
+                  onValueChange={(value) => patch({ agent: value, agent_api_protocol: value === 'claude-code' ? 'anthropic' : 'openai' })}
                   options={(agents.data ?? []).map((agent) => ({
                     value: agent.name,
                     label: agent.recommended ? `${agent.name} ★` : agent.name,
@@ -665,13 +656,10 @@ export default function SubmitVerify() {
 
               {agentInfo?.needs_model && (
                 <>
-                  <Field label="模型" required hint="平台维护的模型配置，全员共享；密钥由管理员在平台管理里填">
-                    <ModelApiPicker
-                      value={config.model_api_id}
-                      supportsEffort={(agentInfo?.effort_levels?.length ?? 0) > 0}
-                      onChange={(item) => patch({ model_api_id: item?.id ?? '', model: item ? '' : config.model })}
-                    />
+                  <Field label="模型接口" required hint={config.agent === 'claude-code' || config.agent === 'codex' ? `${config.agent} 已自动选择对应接口` : '先选择接口，再选择平台与模型'}>
+                    <Select value={agentProtocol} disabled={config.agent === 'claude-code' || config.agent === 'codex'} onValueChange={(value) => patch({ agent_api_protocol: value as VerifyConfig['agent_api_protocol'] })} options={[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }]} />
                   </Field>
+                  <ModelApiPicker value={config.model_api_id} protocol={agentWireProtocol} onChange={(item) => patch({ model_api_id: item?.id ?? '', model: item ? '' : config.model })} />
 
                   <Field
                     label={

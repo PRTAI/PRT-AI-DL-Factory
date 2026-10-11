@@ -15,6 +15,7 @@ from ..models import (
     ExportTask,
     Job,
     ModelApiConfig,
+    ModelPlatformConfig,
     ModelDownload,
     Notification,
     Project,
@@ -44,6 +45,9 @@ class Store:
         # 里面有明文 API Key：文件是 0600（见 json_store 的写入），接口层永远只返回尾号
         self.model_apis: JsonCollection[ModelApiConfig] = JsonCollection(
             db / "model_apis.json", ModelApiConfig, mode=0o600
+        )
+        self.model_platforms: JsonCollection[ModelPlatformConfig] = JsonCollection(
+            db / "model_platforms.json", ModelPlatformConfig, mode=0o600
         )
         self.settings_doc: JsonDocument[SystemSettings] = JsonDocument(
             db / "settings.json", SystemSettings

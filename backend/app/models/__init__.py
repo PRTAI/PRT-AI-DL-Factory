@@ -54,6 +54,10 @@ from .model_api import (
     ModelApiCreate,
     ModelApiPublic,
     ModelApiUpdate,
+    ModelPlatformConfig,
+    ModelPlatformPublic,
+    ModelPlatformCreate,
+    ModelPlatformUpdate,
     ReasoningEffort,
 )
 from .model_registry import ModelDownload, ModelDownloadRequest, ModelEntry
@@ -137,6 +141,10 @@ __all__ = [
     "ModelApiCreate",
     "ModelApiPublic",
     "ModelApiUpdate",
+    "ModelPlatformConfig",
+    "ModelPlatformPublic",
+    "ModelPlatformCreate",
+    "ModelPlatformUpdate",
     "ReasoningEffort",
     "ModelDownload",
     "ModelDownloadRequest",
