@@ -61,6 +61,7 @@ const DEFAULT_VERIFY: VerifyConfig = {
   agent_timeout_multiplier: null,
   verifier_timeout_multiplier: null,
   disable_verification: false,
+  use_platform_image: false,
   force_build: false,
   export_traces: false,
   sharegpt: false,
@@ -264,6 +265,7 @@ export default function SubmitVerify() {
   const agents = useQuery({ queryKey: ['harbor-agents'], queryFn: () => api.harborAgents() })
   const environments = useQuery({ queryKey: ['harbor-envs'], queryFn: () => api.harborEnvironments() })
   const toolchain = useQuery({ queryKey: ['toolchain'], queryFn: () => api.toolchain() })
+  const platformImage = useQuery({ queryKey: ['harbor-image'], queryFn: api.harborImage })
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects() })
   const projectName = projects.data?.find((row) => row.project.id === projectId)?.project.name
   const suggestion = useQuery({
@@ -470,6 +472,10 @@ export default function SubmitVerify() {
   const problems = React.useMemo(() => {
     const out: string[] = []
     if (!name.trim()) out.push('请填写任务名称')
+    if (config.use_platform_image) {
+      if (!platformImage.data?.ready) out.push('平台 Harbor 镜像未就绪，请先在平台管理构建')
+      if (config.environment_type !== 'docker' || config.registry_dataset) out.push('平台镜像仅支持 Docker 环境和上传或服务器本地任务集')
+    }
     if (!config.dataset_id && !config.tasks_path && !config.registry_dataset) out.push('请选择要评测的任务集')
     if (agentInfo?.needs_model && !config.model && !config.model_api_id) out.push(`agent ${config.agent} 需要选择或填写模型`)
     if (judgeRequired && !config.judge_model_api_id) out.push('该任务集是 reward-kit 格式，请选择 judge 模型')
@@ -490,7 +496,7 @@ export default function SubmitVerify() {
       if (missingKeys.length) out.push(`请填写 ${missingKeys.join(' / ')}（或改为选择平台的模型配置）`)
     }
     return out
-  }, [name, config, agentInfo, judgeRequired, verifierEnv.data, modelApis.data])
+  }, [name, config, agentInfo, judgeRequired, verifierEnv.data, modelApis.data, platformImage.data])
 
   return (
     <div className="space-y-4">
@@ -607,7 +613,7 @@ export default function SubmitVerify() {
                   emptyHint="请在「数据集」页上传 harbor_tasks 类型的压缩包（tasks/<task>/task.toml）。"
                 />
               )}
-              {source === 'uploaded' && selectedDataset && <PrebuildPanel dataset={selectedDataset} />}
+              {!config.use_platform_image && source === 'uploaded' && selectedDataset && <PrebuildPanel dataset={selectedDataset} />}
               {source === 'registry' && (
                 <RegistryPicker value={config.registry_dataset} onChange={(ref) => patch({ registry_dataset: ref })} />
               )}
@@ -823,10 +829,16 @@ export default function SubmitVerify() {
                   }
                 />
                 <ToggleRow
+                  label="使用平台现有 Harbor 镜像"
+                  hint={platformImage.data?.ready ? '镜像已就绪；复用公共依赖，只构建题目文件和初始化层。仅支持本地标准任务模板。' : '镜像未就绪或状态未知，请到平台管理 → Harbor 镜像检查并构建。'}
+                  checked={config.use_platform_image}
+                  onCheckedChange={(checked) => patch({ use_platform_image: checked, ...(checked ? { force_build: false, environment_type: 'docker' } : {}) })}
+                />
+                <ToggleRow
                   label="强制重建镜像"
                   hint="忽略已构建的任务镜像重新 build，较慢"
                   checked={config.force_build}
-                  onCheckedChange={(checked) => patch({ force_build: checked })}
+                  onCheckedChange={(checked) => patch({ force_build: checked, ...(checked ? { use_platform_image: false } : {}) })}
                 />
               </div>
 

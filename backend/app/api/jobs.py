@@ -54,6 +54,14 @@ def create_job(payload: JobCreate, user: CurrentUser) -> Job:
     return job_service.create_job(payload, owner=user)
 
 
+@router.post("/batch-resubmit", summary="批量按原配置重跑已结束任务")
+def batch_resubmit(
+    user: CurrentUser,
+    job_ids: list[str] = Body(..., embed=True, min_length=1, max_length=200),
+) -> dict[str, Any]:
+    return job_service.batch_resubmit_jobs(job_ids, actor=user)
+
+
 @router.get("/{job_id}", response_model=Job, summary="任务详情")
 def get_job(job_id: str, user: CurrentUser) -> Job:
     return job_service.get_job_for(job_id, user)

@@ -319,6 +319,7 @@ export const api = {
     }),
   cancelJob: (id: string, reason = '') =>
     request<Job>(`/api/jobs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  batchResubmitJobs: (jobIds: string[]) => request<{ results: { source_id: string; job_id: string; status: string; error: string }[]; succeeded: number; failed: number }>('/api/jobs/batch-resubmit', { method: 'POST', body: JSON.stringify({ job_ids: jobIds }) }),
   resubmitJob: (id: string) => request<Job>(`/api/jobs/${id}/resubmit`, { method: 'POST' }),
   verifySuggestion: (id: string) =>
     request<{
@@ -448,6 +449,9 @@ export const api = {
     ),
   dashboard: () => request<DashboardPayload>('/api/system/dashboard'),
   toolchain: () => request<ToolchainRow[]>('/api/system/toolchain'),
+  harborImage: () => request<{ image: string; ready: boolean; image_id: string; status: string; error: string; log: string }>('/api/system/harbor-image'),
+  harborImageRecipe: () => request<{ dockerfile: string }>('/api/system/harbor-image/recipe'),
+  buildHarborImage: () => request('/api/system/harbor-image/build', { method: 'POST' }),
   settings: () => request<SystemSettings>('/api/system/settings'),
   updateSettings: (payload: SystemSettings) =>
     request<SystemSettings>('/api/system/settings', { method: 'PUT', body: JSON.stringify(payload) }),

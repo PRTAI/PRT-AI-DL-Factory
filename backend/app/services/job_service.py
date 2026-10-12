@@ -221,6 +221,13 @@ def _validate_verify(payload: JobCreate) -> None:
     assert config is not None
     from ..builders.harbor import validate_secret_env
 
+    if config.use_platform_image:
+        from . import harbor_image_service
+        if config.environment_type != "docker" or config.registry_dataset or config.force_build:
+            raise HTTPException(400, "平台镜像需要本地任务集、Docker 环境，并关闭强制重建")
+        if not harbor_image_service.status()["ready"]:
+            raise HTTPException(400, "平台 Harbor 镜像尚未就绪，请管理员先构建")
+
     try:
         for env_source in (config.agent_env, config.verifier_env, payload.resources.env):
             validate_secret_env(env_source)
@@ -375,6 +382,22 @@ def resubmit_job(job_id: str, *, actor: User) -> Job:
         parent_job_id=source.id,
     )
     return create_job(payload, owner=actor)
+
+
+def batch_resubmit_jobs(job_ids: list[str], *, actor: User) -> dict[str, Any]:
+    results: list[dict[str, Any]] = []
+    for job_id in dict.fromkeys(job_ids):
+        try:
+            source = get_job(job_id)
+            _assert_can_control(source, actor)
+            if not source.status.is_terminal:
+                raise HTTPException(status.HTTP_409_CONFLICT, detail="仅支持重跑已成功、失败、终止或驳回的任务")
+            cloned = resubmit_job(job_id, actor=actor)
+            results.append({"source_id": job_id, "job_id": cloned.id, "status": cloned.status.value, "error": ""})
+        except HTTPException as exc:
+            results.append({"source_id": job_id, "job_id": "", "status": "", "error": str(exc.detail)})
+    return {"results": results, "succeeded": sum(bool(row["job_id"]) for row in results),
+            "failed": sum(bool(row["error"]) for row in results)}
 
 
 def delete_job(job_id: str, *, actor: User, purge_outputs: bool = False) -> None:

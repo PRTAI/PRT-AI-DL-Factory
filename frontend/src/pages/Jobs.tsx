@@ -122,7 +122,39 @@ export default function Jobs() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : '删除失败'),
   })
 
+  const [selected, setSelected] = React.useState<string[]>([])
+  const [batchResults, setBatchResults] = React.useState<Awaited<ReturnType<typeof api.batchResubmitJobs>> | null>(null)
+  const batch = useMutation({
+    mutationFn: (ids: string[]) => api.batchResubmitJobs(ids),
+    retry: false,
+    onSuccess: (result) => {
+      setBatchResults(result)
+      setSelected([])
+      const message = `批量重跑：已创建 ${result.succeeded} 个任务，${result.failed} 个失败`
+      if (!result.succeeded) toast.error(message)
+      else if (result.failed) toast.warning(message)
+      else toast.success(message)
+      invalidate()
+    },
+    onError: () => {
+      setSelected([])
+      toast.error('未能确认批量重跑结果，请刷新任务列表检查已创建的任务，避免重复提交')
+      invalidate()
+    },
+  })
+  React.useEffect(() => {
+    setSelected([])
+  }, [status, type, query, ownerId, effectiveProject])
+  const canResubmit = (job: Job) =>
+    (user?.role === 'admin' || job.owner_id === user?.id) && ['succeeded', 'failed', 'cancelled', 'rejected'].includes(job.status)
   const items = jobs.data?.items ?? []
+  const selectable = items.filter(canResubmit).map((job) => job.id)
+  const selectedVisible = selected.filter((id) => selectable.includes(id))
+  const allSelected = selectable.length > 0 && selectedVisible.length === selectable.length
+  const selectionRef = React.useRef<HTMLInputElement>(null)
+  React.useEffect(() => {
+    if (selectionRef.current) selectionRef.current.indeterminate = selectedVisible.length > 0 && !allSelected
+  }, [selectedVisible.length, allSelected])
   const [downloading, setDownloading] = React.useState<string[]>([])
   const downloadJob = async (id: string) => {
     setDownloading((ids) => [...ids, id])
@@ -272,11 +304,26 @@ export default function Jobs() {
           )}
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 border-b border-border p-3 text-xs text-fg-muted">
+          <span>已选 {selectedVisible.length} 项 · 可选已结束且有操作权限的任务</span>
+          <Button size="sm" variant="primary" loading={batch.isPending} disabled={!selectedVisible.length || batch.isPending} onClick={() => { setBatchResults(null); batch.mutate([...selectedVisible]) }}>批量重跑</Button>
+          <Button size="sm" variant="ghost" disabled={batch.isPending || !selectedVisible.length} onClick={() => setSelected([])}>清空选择</Button>
+          <span>按原配置创建新任务，沿用审核与排队规则；全选仅限当前列表。</span>
+        </div>
+        {batchResults && <div className="max-h-64 space-y-1 overflow-auto border-b border-border p-3 text-xs" role="status">
+          <p>已创建 {batchResults.succeeded} 个任务，失败 {batchResults.failed} 个</p>
+          {batchResults.results.map((row) => <div key={row.source_id} className="break-all">
+            <Link className="text-primary" to={`/jobs/${row.source_id}`}>{row.source_id}</Link>
+            {row.job_id ? <> → <Link className="text-primary" to={`/jobs/${row.job_id}`}>查看新任务</Link></> : <span className="text-danger">：{row.error}</span>}
+          </div>)}
+        </div>}
+
         {items.length ? (
-          <Table className="min-w-[1240px] table-fixed">
+          <Table className="min-w-[1290px] table-fixed">
             <thead>
               {/* 为操作预留宽度；窄屏在表格内横向滚动，避免按钮文字竖排。 */}
               <tr>
+                <Th className="w-[44px]"><input ref={selectionRef} type="checkbox" aria-label="全选当前列表可重跑任务" checked={allSelected} disabled={!selectable.length || batch.isPending} onChange={(event) => setSelected(event.target.checked ? selectable : [])} /></Th>
                 <Th className="w-[240px]">任务</Th>
                 {/* 每个任务都属于一个项目，所以这一列常驻 —— 哪怕已经按项目筛过，
                     看列表的人也不该靠记忆确认自己在看哪个项目 */}
@@ -296,6 +343,7 @@ export default function Jobs() {
                 const isActive = ['queued', 'preparing', 'running'].includes(job.status)
                 return (
                   <Tr key={job.id}>
+                    <Td><input type="checkbox" aria-label={`选择重跑 ${job.name}`} checked={selectedVisible.includes(job.id)} disabled={!canResubmit(job) || batch.isPending} onChange={(event) => setSelected((ids) => event.target.checked ? [...ids, job.id] : ids.filter((id) => id !== job.id))} /></Td>
                     <Td>
                       <Link to={`/jobs/${job.id}`} className="block min-w-0">
                         <div className="truncate font-medium text-fg hover:text-primary">{job.name}</div>

@@ -32,6 +32,7 @@ import {
   Tr,
 } from '@/components/ui'
 import { PageHeader } from '@/components/common'
+import { HarborImagePanel } from '@/components/HarborImagePanel'
 import { ModelApiPanel } from '@/components/ModelApiPanel'
 
 export default function Admin() {
@@ -53,9 +54,11 @@ export default function Admin() {
           <TabsTrigger value="review">待审核</TabsTrigger>
           <TabsTrigger value="models">模型 API</TabsTrigger>
           <TabsTrigger value="settings">系统设置</TabsTrigger>
+          <TabsTrigger value="harbor-image">Harbor 镜像</TabsTrigger>
           <TabsTrigger value="toolchain">工具链</TabsTrigger>
           <TabsTrigger value="audit">审计日志</TabsTrigger>
         </TabsList>
+        <TabsContent value="harbor-image" className="mt-3"><HarborImagePanel /></TabsContent>
         <TabsContent value="users" className="mt-3">
           <UsersPanel />
         </TabsContent>

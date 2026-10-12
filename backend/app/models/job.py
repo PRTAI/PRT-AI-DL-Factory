@@ -266,6 +266,7 @@ class VerifyConfig(Base):
     verifier_timeout_multiplier: float | None = None
 
     disable_verification: bool = False
+    use_platform_image: bool = False
     force_build: bool = False  # --force-build
     export_traces: bool = False
     sharegpt: bool = False  # --export-sharegpt

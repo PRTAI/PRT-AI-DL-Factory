@@ -147,6 +147,21 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if sources > 1:
         raise BuildError("同时指定了多个任务来源，请只保留一个")
     local_root = Path(dataset.root_path) if dataset is not None else Path(config.tasks_path) if config.tasks_path else None
+    if config.use_platform_image:
+        from ..services import harbor_image_service
+        if config.environment_type != "docker" or local_root is None or config.force_build:
+            raise BuildError("平台镜像需要本地任务集、Docker 环境，并关闭强制重建")
+        image = harbor_image_service.status()
+        if not image["ready"]:
+            raise BuildError("平台 Harbor 镜像尚未就绪，请管理员先构建")
+        try:
+            destination = work_dir / "platform-image-tasks"
+            pinned = harbor_image_service.pin_image(image["image_id"]) if not destination.exists() else ""
+            local_root = harbor_image_service.prepare_tasks(local_root, destination, pinned)
+        except (OSError, ValueError) as exc:
+            raise BuildError(str(exc)) from exc
+        command[command.index("--path") + 1] = str(local_root)
+        notes.append("使用平台 Harbor 镜像；只构建题目文件与初始化层，原数据集保持不变")
     if local_root is not None:
         try:
             adapted = harbor_compat.prepare_rewardkit_tasks(local_root)

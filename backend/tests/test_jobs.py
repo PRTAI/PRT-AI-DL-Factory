@@ -415,3 +415,57 @@ def test_resubmit_repairs_bad_learning_rate(client, admin_headers, member_header
     again = client.post(f"/api/jobs/{body['id']}/resubmit", headers=member_headers).json()
     assert again["name"] == "pytest-sft (重跑)"  # 不叠加
     del admin_headers
+
+
+def test_batch_resubmit_partial_success_and_deduplication(client, member_headers, dataset_id):
+    from backend.app.models import JobStatus
+    from backend.app.store import store
+    ids = []
+    for state in [JobStatus.FAILED, JobStatus.SUCCEEDED, JobStatus.RUNNING]:
+        response = client.post('/api/jobs', headers=member_headers, json=_sft_payload(dataset_id))
+        assert response.status_code == 201
+        job = store.jobs.get(response.json()['id'])
+        job.status = state
+        store.jobs.put(job)
+        ids.append(job.id)
+    try:
+        response = client.post('/api/jobs/batch-resubmit', headers=member_headers,
+                               json={'job_ids': [ids[0], ids[0], 'job_missing', ids[2], ids[1]]})
+        assert response.status_code == 200, response.text
+        result = response.json()
+        assert result['succeeded'] == 2
+        assert result['failed'] == 2
+        assert len(result['results']) == 4
+        for row in result['results']:
+            if row['job_id']:
+                clone = store.jobs.get(row['job_id'])
+                assert clone.parent_job_id == row['source_id']
+                assert clone.status == JobStatus.PENDING_REVIEW
+                assert clone.sft.dataset_ids == [dataset_id]
+                assert clone.project_id == project_id()
+        assert store.jobs.get(ids[0]).status == JobStatus.FAILED
+    finally:
+        running = store.jobs.get(ids[2])
+        running.status = JobStatus.CANCELLED
+        store.jobs.put(running)
+
+
+def test_batch_resubmit_enforces_control_permissions(client, member_headers, admin_headers, dataset_id):
+    from backend.app.models import JobStatus
+    from backend.app.store import store
+    source = client.post('/api/jobs', headers=member_headers, json=_sft_payload(dataset_id)).json()
+    job = store.jobs.get(source['id'])
+    job.status = JobStatus.REJECTED
+    job.owner_id = 'someone_else'
+    store.jobs.put(job)
+    response = client.post('/api/jobs/batch-resubmit', headers=member_headers, json={'job_ids': [job.id]})
+    assert response.json()['failed'] == 1
+    assert '无权' in response.json()['results'][0]['error']
+    response = client.post('/api/jobs/batch-resubmit', headers=admin_headers, json={'job_ids': [job.id]})
+    assert response.json()['succeeded'] == 1
+    assert client.post('/api/jobs/batch-resubmit', json={'job_ids': [job.id]}).status_code == 401
+
+
+@pytest.mark.parametrize('ids', [[], ['job_missing'] * 201])
+def test_batch_resubmit_size_limits(client, member_headers, ids):
+    assert client.post('/api/jobs/batch-resubmit', headers=member_headers, json={'job_ids': ids}).status_code == 422

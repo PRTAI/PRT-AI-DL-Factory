@@ -308,6 +308,7 @@ export interface VerifyConfig {
   agent_timeout_multiplier?: number | null
   verifier_timeout_multiplier?: number | null
   disable_verification: boolean
+  use_platform_image: boolean
   force_build: boolean
   export_traces: boolean
   sharegpt: boolean

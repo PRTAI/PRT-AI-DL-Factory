@@ -98,3 +98,21 @@ def info(_: CurrentUser) -> dict[str, Any]:
         "monitor_interval_seconds": settings.monitor_interval_seconds,
         "max_upload_mb": settings.max_upload_mb,
     }
+
+
+@router.get("/harbor-image", summary="平台 Harbor 镜像状态")
+def harbor_image_status(_: CurrentUser) -> dict[str, Any]:
+    from ..services import harbor_image_service
+    return harbor_image_service.status()
+
+
+@router.get("/harbor-image/recipe", summary="平台 Harbor 镜像构建配方")
+def harbor_image_recipe(_: AdminUser) -> dict[str, str]:
+    from ..services import harbor_image_service
+    return {"dockerfile": harbor_image_service.recipe()}
+
+
+@router.post("/harbor-image/build", summary="构建平台 Harbor 镜像")
+def build_harbor_image(_: AdminUser) -> dict[str, Any]:
+    from ..services import harbor_image_service
+    return harbor_image_service.start()
