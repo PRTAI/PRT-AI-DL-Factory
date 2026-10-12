@@ -58,8 +58,6 @@ const DEFAULT_VERIFY: VerifyConfig = {
   environment_cpus: null,
   environment_memory_mb: null,
   environment_gpus: null,
-  agent_timeout_seconds: 1800,
-  verifier_timeout_seconds: 1200,
   timeout_multiplier: 1,
   agent_timeout_multiplier: null,
   verifier_timeout_multiplier: null,
@@ -869,12 +867,6 @@ export default function SubmitVerify() {
                   </Field>
                   <Field label="容器 GPU 数">
                     <NumberInput value={config.environment_gpus} min={0} onChange={(value) => patch({ environment_gpus: value })} />
-                  </Field>
-                  <Field label="Agent 阶段上限（秒）" hint="默认 30 分钟；倍率不会突破此上限，任务较短时限仍生效">
-                    <NumberInput value={config.agent_timeout_seconds} min={30} max={86400} onChange={(value) => patch({ agent_timeout_seconds: value ?? 1800 })} />
-                  </Field>
-                  <Field label="Verifier 阶段上限（秒）" hint="默认 20 分钟；包含本题全部 Judge 调用，复杂任务可调大">
-                    <NumberInput value={config.verifier_timeout_seconds} min={30} max={86400} onChange={(value) => patch({ verifier_timeout_seconds: value ?? 1200 })} />
                   </Field>
                   <Field label="agent 超时倍数">
                     <NumberInput

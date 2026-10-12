@@ -17,12 +17,6 @@ runtime = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(runtime)
 
 
-def test_phase_caps_keep_shorter_task_limits():
-    assert runtime.capped(lambda self: 5000, 1200)(None) == 1200
-    assert runtime.capped(lambda self: 20, 1200)(None) == 20
-    assert runtime.capped(lambda self: None, 1800)(None) == 1800
-
-
 def test_command_wrapper_preserves_quotes_and_exit_code(tmp_path):
     command = "printf '%s' 'a b;$HOME'; exit 7"
     result = subprocess.run(['bash', '-c', runtime.grouped_command(command, str(tmp_path / 'exec.pid'))], capture_output=True, text=True)
@@ -41,7 +35,7 @@ def test_timeout_cleans_container_group_without_exposing_command():
             await asyncio.sleep(30)
         env = SimpleNamespace(logger=logging.getLogger('test.guard'))
         with pytest.raises(asyncio.TimeoutError):
-            await runtime.guarded_exec(original, 0.01)(env, 'sensitive-command', env={'KEEP': 'value'})
+            await runtime.guarded_exec(original)(env, 'sensitive-command', env={'KEEP': 'value'}, timeout_sec=0.01)
         assert len(calls) == 2
         assert calls[0][1]['env'] == {'KEEP': 'value', 'PYTHONUNBUFFERED': '1'}
         assert calls[1][1]['user'] == 'root'
@@ -61,7 +55,7 @@ def test_external_cancellation_runs_cleanup():
             started.set()
             await asyncio.sleep(30)
         env = SimpleNamespace(logger=logging.getLogger('test.guard'))
-        task = asyncio.create_task(runtime.guarded_exec(original, 60)(env, 'sleep 999'))
+        task = asyncio.create_task(runtime.guarded_exec(original)(env, 'sleep 999'))
         await started.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -141,7 +135,7 @@ def test_phase_events_override_file_mtime(tmp_path):
     assert 119 <= state.phase_seconds['running_agent'] <= 125
 
 
-def test_harbor_builder_installs_runtime_limits(tmp_path, monkeypatch):
+def test_harbor_builder_ignores_legacy_platform_limits(tmp_path, monkeypatch):
     from backend.app.builders import harbor
     from backend.app.models import Job, VerifyConfig
     monkeypatch.setattr(harbor, 'resolve_harbor_bin', lambda: '/fake/harbor')
@@ -151,8 +145,10 @@ def test_harbor_builder_installs_runtime_limits(tmp_path, monkeypatch):
     job = Job(name='bounded', type='verify', framework='harbor', owner_id='user', verify=VerifyConfig(tasks_path=str(task), agent='nop', agent_timeout_seconds=90, verifier_timeout_seconds=60))
     result = harbor.build(job, tmp_path / 'work', tmp_path / 'out')
     assert result.command[:3] == ['/fake/python', '-u', str(tmp_path / 'work' / 'harbor_runtime.py')]
-    assert result.env['PRT_AGENT_TIMEOUT_SECONDS'] == '90'
-    assert result.env['PRT_VERIFIER_TIMEOUT_SECONDS'] == '60'
+    assert 'PRT_AGENT_TIMEOUT_SECONDS' not in result.env
+    assert 'PRT_VERIFIER_TIMEOUT_SECONDS' not in result.env
+    assert 'agent_timeout_seconds' not in job.verify.model_dump()
+    assert 'verifier_timeout_seconds' not in job.verify.model_dump()
     assert 'install_guards' in result.files['harbor_runtime.py']
 
 
@@ -187,3 +183,58 @@ def test_tree_cleanup_includes_new_sessions_and_avoids_reused_pid(monkeypatch):
     assert (102, signal.SIGKILL) in signals
     assert (101, signal.SIGKILL) not in signals
     assert not any(pid == 999 for pid, _ in signals)
+
+
+def test_runtime_preserves_native_phase_timeouts(monkeypatch):
+    class Trial:
+        def _compute_agent_timeout_sec(self):
+            return None
+        def _compute_verifier_timeout_sec(self):
+            return 10800
+        def _step_agent_timeout_sec(self, step):
+            return 7200
+        def _step_verifier_timeout_sec(self, step):
+            return 9600
+    class DockerEnvironment:
+        async def exec(self, command, **kwargs):
+            return SimpleNamespace(return_code=0)
+    names = ('_compute_agent_timeout_sec', '_compute_verifier_timeout_sec',
+             '_step_agent_timeout_sec', '_step_verifier_timeout_sec')
+    originals = {name: getattr(Trial, name) for name in names}
+    monkeypatch.setitem(sys.modules, 'harbor.trial.trial', SimpleNamespace(Trial=Trial))
+    monkeypatch.setitem(sys.modules, 'harbor.environments.docker.docker', SimpleNamespace(DockerEnvironment=DockerEnvironment))
+    runtime.install_guards()
+    assert all(getattr(Trial, name) is method for name, method in originals.items())
+    assert Trial()._compute_agent_timeout_sec() is None
+    assert Trial()._compute_verifier_timeout_sec() == 10800
+    assert Trial()._step_agent_timeout_sec(None) == 7200
+    assert Trial()._step_verifier_timeout_sec(None) == 9600
+
+
+@pytest.mark.parametrize('timeout', [None, 96000])
+def test_long_commands_have_only_harbor_timeout(monkeypatch, timeout):
+    async def scenario():
+        clock = [0.0]
+        started, release = asyncio.Event(), asyncio.Event()
+        waits = []
+        native_wait = asyncio.wait
+        expected = SimpleNamespace(return_code=0)
+        async def original(self, command, **kwargs):
+            assert not command.startswith('if [ -f'), 'unexpected cleanup of a running command'
+            started.set()
+            await release.wait()
+            return expected
+        async def wait(tasks, *, timeout):
+            waits.append(timeout)
+            if len(waits) == 1:
+                await started.wait()
+                clock[0] = 90000  # simulate 25 hours without waiting in real time
+                return set(), tasks
+            release.set()
+            return await native_wait(tasks, timeout=timeout)
+        monkeypatch.setattr(runtime, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+        monkeypatch.setattr(runtime.asyncio, 'wait', wait)
+        env = SimpleNamespace(logger=logging.getLogger('test.no-platform-cap'))
+        assert await runtime.guarded_exec(original)(env, 'long evaluation', timeout_sec=timeout) is expected
+        assert waits == [60, 60]
+    asyncio.run(scenario())

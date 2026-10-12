@@ -304,8 +304,6 @@ export interface VerifyConfig {
   environment_cpus?: number | null
   environment_memory_mb?: number | null
   environment_gpus?: number | null
-  agent_timeout_seconds: number
-  verifier_timeout_seconds: number
   timeout_multiplier: number
   agent_timeout_multiplier?: number | null
   verifier_timeout_multiplier?: number | null

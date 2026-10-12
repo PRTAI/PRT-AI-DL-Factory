@@ -263,8 +263,6 @@ class VerifyConfig(Base):
     environment_memory_mb: int | None = None
     environment_gpus: int | None = None
 
-    agent_timeout_seconds: int = Field(default=1800, ge=30, le=86400)
-    verifier_timeout_seconds: int = Field(default=1200, ge=30, le=86400)
     timeout_multiplier: float = Field(default=1.0, gt=0)
     agent_timeout_multiplier: float | None = Field(default=None, gt=0)
     verifier_timeout_multiplier: float | None = Field(default=None, gt=0)

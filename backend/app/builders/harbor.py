@@ -353,11 +353,9 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     secrets = [value for key, value in secrets_map.items() if value and _looks_secret(key)]
     secrets += [value for value in injected_secrets if value not in secrets]
 
-    env["PRT_AGENT_TIMEOUT_SECONDS"] = str(config.agent_timeout_seconds)
-    env["PRT_VERIFIER_TIMEOUT_SECONDS"] = str(config.verifier_timeout_seconds)
     runtime_file = "harbor_runtime.py"
     command = [resolve_harbor_python(binary), "-u", str(work_dir / runtime_file), *command[1:]]
-    notes.append(f"阶段硬上限：Agent {config.agent_timeout_seconds}s，Verifier {config.verifier_timeout_seconds}s；任务更短的时限仍生效")
+    notes.append("平台不设评测时限；Agent / Verifier 超时由 task.toml、Harbor 默认值及倍率配置决定")
     return BuildResult(
         command=command,
         cwd=str(work_dir),

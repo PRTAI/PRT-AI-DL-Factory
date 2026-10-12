@@ -5,18 +5,9 @@ import asyncio
 import functools
 import json
 from pathlib import Path
-import os
 import shlex
 import time
 import uuid
-
-
-def capped(original, limit):
-    @functools.wraps(original)
-    def compute(self, *args, **kwargs):
-        value = original(self, *args, **kwargs)
-        return min(value, limit) if value is not None else limit
-    return compute
 
 
 def grouped_command(command: str, pidfile: str) -> str:
@@ -106,24 +97,24 @@ async def bounded_cleanup(original, environment, pidfile):
         environment.logger.warning("PRT: 容器进程组清理超时，请检查 Docker 状态")
 
 
-def guarded_exec(original, command_limit: float):
+def guarded_exec(original):
     @functools.wraps(original)
     async def execute(self, command, cwd=None, env=None, timeout_sec=None, user=None):
         if getattr(self, '_is_windows_container', False):
             return await original(self, command, cwd=cwd, env=env, timeout_sec=timeout_sec, user=user)
         pidfile = f"/tmp/prt-exec-{uuid.uuid4().hex}.pid"
         started = time.monotonic()
-        limit = min(timeout_sec, command_limit) if timeout_sec and timeout_sec > 0 else command_limit
+        limit = timeout_sec if timeout_sec is not None and timeout_sec > 0 else None
         task = asyncio.create_task(original(
             self, grouped_command(command, pidfile), cwd=cwd,
             env={**(env or {}), "PYTHONUNBUFFERED": "1"}, timeout_sec=None, user=user,
         ))
         try:
             while True:
-                remaining = limit - (time.monotonic() - started)
-                if remaining <= 0:
+                remaining = limit - (time.monotonic() - started) if limit is not None else None
+                if remaining is not None and remaining <= 0:
                     raise asyncio.TimeoutError("PRT: Docker command exceeded execution limit")
-                done, _ = await asyncio.wait({task}, timeout=min(60, remaining))
+                done, _ = await asyncio.wait({task}, timeout=min(60, remaining) if remaining is not None else 60)
                 if task in done:
                     return task.result()
                 self.logger.info("PRT: 容器命令仍在执行，已等待 %.0f 秒；可能正在等待模型，详见 agent/verifier 日志", time.monotonic() - started)
@@ -175,42 +166,21 @@ def record_phase(original):
     return emit
 
 
-def install_guards(agent_limit: float, verifier_limit: float) -> None:
+def install_guards() -> None:
     from harbor.trial.trial import Trial
     from harbor.environments.docker.docker import DockerEnvironment
     if hasattr(Trial, "_emit"):
         Trial._emit = record_phase(Trial._emit)
-    for name, limit in (
-        ("_compute_agent_timeout_sec", agent_limit),
-        ("_compute_verifier_timeout_sec", verifier_limit),
-        ("_step_agent_timeout_sec", agent_limit),
-        ("_step_verifier_timeout_sec", verifier_limit),
-    ):
-        original = getattr(Trial, name, None)
-        if original is None:
-            if name.startswith('_compute_'):
-                raise RuntimeError(f"当前 Harbor 缺少 {name}，请更新 Harbor 后使用平台超时保护")
-            continue
-        setattr(Trial, name, capped(original, limit))
-    try:
-        from harbor.trial.multi_step import MultiStepTrial
-    except ImportError:
-        pass  # Older Harbor releases only have single-step trials.
-    else:
-        if "_step_agent_timeout_sec" in MultiStepTrial.__dict__:
-            MultiStepTrial._step_agent_timeout_sec = capped(MultiStepTrial._step_agent_timeout_sec, agent_limit)
     for name in ("_collect_buffered_output", "_collect_streamed_output"):
         original = getattr(DockerEnvironment, name, None)
         if original is not None:
             setattr(DockerEnvironment, name, staticmethod(reap_on_cancel(original)))
-    DockerEnvironment.exec = guarded_exec(DockerEnvironment.exec, max(agent_limit, verifier_limit) + 60)
+    DockerEnvironment.exec = guarded_exec(DockerEnvironment.exec)
 
 
 def main() -> None:
-    agent_limit = float(os.environ["PRT_AGENT_TIMEOUT_SECONDS"])
-    verifier_limit = float(os.environ["PRT_VERIFIER_TIMEOUT_SECONDS"])
-    install_guards(agent_limit, verifier_limit)
-    print(f"PRT: Agent 阶段上限 {agent_limit:g}s；Verifier 阶段上限 {verifier_limit:g}s；Docker 取消时清理容器内进程组", flush=True)
+    install_guards()
+    print("PRT: 平台不设评测时限；按 Harbor 任务配置执行；超时或取消时清理容器内进程组", flush=True)
     from harbor.cli.main import app
     app()
 

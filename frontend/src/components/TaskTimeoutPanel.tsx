@@ -18,12 +18,11 @@ export function TaskTimeoutPanel({ data, loading, error, registry, config, onRef
     const unknown = value.source === 'invalid' || value.source === 'unavailable' || (value.source === 'harbor_default' && !defaults?.available)
     const seconds = value.source === 'harbor_default' ? defaults?.[phase] : value.seconds
     const multiplier = (phase === 'agent' ? config.agent_timeout_multiplier : config.verifier_timeout_multiplier) ?? config.timeout_multiplier
-    const cap = phase === 'agent' ? config.agent_timeout_seconds : config.verifier_timeout_seconds
-    const effective = unknown || seconds === undefined ? null : seconds === null ? cap : Math.min(seconds * multiplier, cap)
+    const effective = unknown || seconds === undefined ? undefined : seconds === null ? null : seconds * multiplier
     return <div className="space-y-1">
       <div>{unknown ? '无法确定' : seconds == null ? '未设时限' : secondsText(seconds)}</div>
       <div className="text-[11px] text-fg-subtle">{sources[value.source]} · 倍率 ×{multiplier}</div>
-      <div className="text-primary">{phase === 'verifier' && config.disable_verification ? '已跳过判分' : `生效：${effective == null ? '待确认' : secondsText(effective)}`}</div>
+      <div className="text-primary">{phase === 'verifier' && config.disable_verification ? '已跳过判分' : `生效：${effective === undefined ? '待确认' : effective === null ? '未设时限' : secondsText(effective)}`}</div>
     </div>
   }
   return <div className="min-w-0 space-y-2 rounded-lg border border-border p-3 text-xs">
@@ -31,9 +30,9 @@ export function TaskTimeoutPanel({ data, loading, error, registry, config, onRef
       <span className="font-medium">任务超时（自动读取 task.toml）</span>
       <Button size="sm" variant="ghost" disabled={!canDetect || loading} onClick={onRefresh}>重新检测</Button>
     </div>
-    <p className="text-fg-muted">读取 [agent].timeout_sec 和 [verifier].timeout_sec（秒）。生效时限为任务时限 × 阶段倍率与平台上限中的较小值；阶段倍率未填时使用全局倍率。Verifier 时限包含本题全部判分调用。</p>
+    <p className="text-fg-muted">读取 [agent].timeout_sec 和 [verifier].timeout_sec（秒）。平台不设额外上限，生效时限为任务时限 × 阶段倍率；阶段倍率未填时使用全局倍率。Verifier 时限包含本题全部判分调用。</p>
     {Object.keys(config.extra_args).some((key) => /timeout|config/.test(key)) && <p className="text-warning">额外 CLI 参数可能覆盖超时设置；以下按表单配置计算，最终以 Harbor 执行配置为准。</p>}
-    {data?.timeout_defaults?.version && <p className="text-fg-subtle">服务器 Harbor {data.timeout_defaults.version} · 平台上限：Agent {config.agent_timeout_seconds} 秒 / Verifier {config.verifier_timeout_seconds} 秒</p>}
+    {data?.timeout_defaults?.version && <p className="text-fg-subtle">服务器 Harbor {data.timeout_defaults.version} · 平台不设额外时限</p>}
     {loading && <p>正在读取任务配置…</p>}
     {error && <p className="text-danger">{error}</p>}
     {!canDetect && <p className="text-fg-subtle">{registry ? '注册表任务下载前无法读取超时配置；可导入本地任务集后检测。' : '选择任务集或填写服务器任务目录后自动检测。'}</p>}
