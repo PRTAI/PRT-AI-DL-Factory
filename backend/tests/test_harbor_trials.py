@@ -216,3 +216,71 @@ def test_registry_url_matches_harbor_constant():
     text = Path(hits[0]).read_text(encoding="utf-8")
     assert harbor_registry_service.REGISTRY_URL in text.replace("\n", "").replace(" ", "").replace('""', "") or \
         harbor_registry_service.REGISTRY_URL.split("//")[1] in text
+
+
+@pytest.mark.parametrize('terminal', [False, True])
+@pytest.mark.parametrize('config_readable', [False, True])
+def test_local_names_and_package_result_names_do_not_duplicate_trials(tmp_path, terminal, config_readable):
+    planned = []
+    for index, reward in enumerate((.83, .66, .82), 1):
+        name = f'MED-T2-{index:03d}'
+        planned.append({'task': {'name': name}, 'agent': {'name': 'codex', 'model_name': 'm'}})
+        trial = _trial(tmp_path, f'{name}__abc{index}', name)
+        if not config_readable:
+            (trial / 'config.json').write_text('{broken')
+        result = _result(trial.name, reward)
+        result['task_name'] = f'prt/{name.lower()}'
+        result['agent_info'] = {'name': 'codex', 'model_info': {'name': 'm'}}
+        (trial / 'result.json').write_text(json.dumps(result))
+    (tmp_path / 'lock.json').write_text(json.dumps({'trials': planned}))
+    page = harbor_trials.page(tmp_path, job_status='succeeded' if terminal else 'running')
+    assert page['total'] == page['counts']['success'] == page['counts']['scored'] == 3
+    assert page['counts']['failed'] == page['counts']['pending'] == 0
+    assert {row['reward'] for row in page['items']} == {.83, .66, .82}
+    from backend.app.services import metrics_parser
+    parsed = metrics_parser.parse_harbor(tmp_path.parent, tmp_path.name,
+                                        job_status='succeeded' if terminal else 'running')
+    assert parsed.progress.total_trials == parsed.progress.completed_trials == 3
+    assert parsed.summary.n_errors == 0
+
+
+def test_matching_consumes_each_attempt_once_and_keeps_unstarted_attempt(tmp_path):
+    name = 'MED-T2-001'
+    (tmp_path / 'lock.json').write_text(json.dumps({'trials': [
+        {'task': {'name': name}} for _ in range(3)
+    ]}))
+    for attempt in ('first', 'second'):
+        trial = _trial(tmp_path, f'{name}__{attempt}', name)
+        result = _result(trial.name, .8)
+        result['task_name'] = 'prt/med-t2-001'
+        (trial / 'result.json').write_text(json.dumps(result))
+    states = harbor_trials.scan(tmp_path, job_status='failed')
+    assert len(states) == 3
+    assert sum(state.exception_type == 'TrialNotStarted' for state in states) == 1
+    assert sum(state.reward == .8 for state in states) == 2
+
+
+def test_matching_does_not_consume_different_model_or_namespace(tmp_path):
+    (tmp_path / 'lock.json').write_text(json.dumps({'trials': [
+        {'task': {'name': 'other/task'}, 'agent': {'name': 'codex', 'model_name': 'm'}},
+        {'task': {'name': 'prt/task'}, 'agent': {'name': 'codex', 'model_name': 'not-m'}},
+        {'task': {'name': 'prt/task'}, 'agent': {'name': 'codex', 'model_name': 'm'}},
+    ]}))
+    trial = _trial(tmp_path, 'task__real', 'prt/task')
+    (trial / 'agent' / 'codex.txt').write_text('running')
+    states = harbor_trials.scan(tmp_path)
+    assert len(states) == 3
+    pending = [state for state in states if state.phase == 'pending']
+    assert len(pending) == 2
+    assert {state.model for state in pending} == {'m', 'not-m'}
+
+
+def test_trial_lock_name_recognizes_task_despite_directory_truncation(tmp_path):
+    name = 'MED-' + 'long-task-name-' * 5
+    (tmp_path / 'lock.json').write_text(json.dumps({'trials': [{'task': {'name': name}}]}))
+    trial = _trial(tmp_path, name[:32] + '__abc', 'prt/renamed-package')
+    (trial / 'lock.json').write_text(json.dumps({'task': {'name': name}}))
+    result = _result(trial.name, 1)
+    result['task_name'] = 'prt/renamed-package'
+    (trial / 'result.json').write_text(json.dumps(result))
+    assert len(harbor_trials.scan(tmp_path, job_status='succeeded')) == 1

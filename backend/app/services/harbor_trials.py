@@ -325,10 +325,72 @@ def _planned_trials(job_dir: Path) -> list[dict[str, Any]]:
     lock = _read_json(job_dir / "lock.json") or {}
     rows: list[dict[str, Any]] = []
     for entry in lock.get("trials") or []:
-        task = (entry or {}).get("task") or {}
-        rows.append({"task_name": task.get("name") or "", "agent": ((entry or {}).get("agent") or {}).get("name", ""),
-                     "model": ((entry or {}).get("agent") or {}).get("model_name") or ""})
+        if not isinstance(entry, dict):
+            continue
+        task, agent = entry.get("task") or {}, entry.get("agent") or {}
+        if not isinstance(task, dict) or not isinstance(agent, dict):
+            continue
+        name = task.get("name")
+        if not isinstance(name, str) or not name:
+            continue
+        rows.append({"task_name": name, "agent": agent.get("name") or "",
+                     "model": agent.get("model_name") or ""})
     return rows
+
+
+def _unstarted_trials(planned: list[dict[str, Any]], states: list[TrialState]) -> list[dict[str, Any]]:
+    """Match planned attempts to physical trials, using source names as well as display names."""
+    if not planned:
+        return []
+    observed: list[dict[str, Any]] = []
+    exact: dict[str, set[int]] = {}
+    basenames: dict[str, set[int]] = {}
+    for index, state in enumerate(states):
+        trial_dir = Path(state.path)
+        names = {state.task_name, state.trial_name.rsplit("__", 1)[0]}
+        agent, model = state.agent, state.model
+        # task_name in results is the package metadata name, while the job lock
+        # may use a case-sensitive local directory name. Trial config/lock retain
+        # that source identity even when the generated directory name is truncated.
+        for filename in ("config.json", "lock.json"):
+            config = _read_json(trial_dir / filename) or {}
+            task = config.get("task") or {}
+            if isinstance(task, dict):
+                if isinstance(task.get("name"), str):
+                    names.add(task["name"])
+                if isinstance(task.get("path"), str) and task["path"]:
+                    names.add(Path(task["path"]).name)
+            agent_config = config.get("agent") or {}
+            if isinstance(agent_config, dict):
+                agent = agent_config.get("name") or agent
+                model = agent_config.get("model_name") or model
+        names = {name for name in names if name and "[REDACTED]" not in name}
+        observed.append({"names": names, "agent": agent, "model": model})
+        for name in names:
+            exact.setdefault(name, set()).add(index)
+            basenames.setdefault(name.rsplit("/", 1)[-1], set()).add(index)
+
+    used: set[int] = set()
+    matched: set[int] = set()
+    # Resolve exact identities across the entire plan before using prefix fallback.
+    # Each real trial consumes only one planned attempt, irrespective of alias count.
+    for fallback, lookup in ((False, exact), (True, basenames)):
+        for index, row in enumerate(planned):
+            if index in matched:
+                continue
+            name = row["task_name"]
+            key = name.rsplit("/", 1)[-1] if fallback else name
+            for candidate in sorted(lookup.get(key, set()) - used):
+                actual = observed[candidate]
+                if any(row[field] and actual[field] and row[field] != actual[field] for field in ("agent", "model")):
+                    continue
+                if fallback and "/" in name and any("/" in alias for alias in actual["names"]):
+                    # Qualified names from different registries are different tasks.
+                    continue
+                used.add(candidate)
+                matched.add(index)
+                break
+    return [row for index, row in enumerate(planned) if index not in matched]
 
 
 def scan(job_dir: Path, *, job_status: str = "", finished_at: str | None = None) -> list[TrialState]:
@@ -351,25 +413,13 @@ def scan(job_dir: Path, *, job_status: str = "", finished_at: str | None = None)
                                      detail="结果解析失败" if context.terminal else "解析中",
                                      finished_at=context.finished_at, path=str(trial_dir)))
 
-    # 还没落盘的：按任务名把清单里多出来的次数补成 pending。
-    # result.json 里的 task_name 可能带数据集前缀（pc-fullstack/xxx），lock 里是裸名，
-    # 按最后一段比。
-    planned = _planned_trials(job_dir)
-    if planned:
-        seen: dict[str, int] = {}
-        for state in states:
-            key = state.task_name.rsplit("/", 1)[-1]
-            seen[key] = seen.get(key, 0) + 1
-        for row in planned:
-            name = row["task_name"].rsplit("/", 1)[-1]
-            if seen.get(name, 0) > 0:
-                seen[name] -= 1
-                continue
-            states.append(TrialState(trial_name=f"{name} (待开始)", task_name=name,
-                                     phase="failed" if context.terminal else "pending",
-                                     detail="任务已结束，trial 未执行" if context.terminal else "排队中",
-                                     exception_type="TrialNotStarted" if context.terminal else None,
-                                     finished_at=context.finished_at, agent=row["agent"], model=row["model"]))
+    for row in _unstarted_trials(_planned_trials(job_dir), states):
+        name = row["task_name"]
+        states.append(TrialState(trial_name=f"{name} (待开始)", task_name=name,
+                                 phase="failed" if context.terminal else "pending",
+                                 detail="任务已结束，trial 未执行" if context.terminal else "排队中",
+                                 exception_type="TrialNotStarted" if context.terminal else None,
+                                 finished_at=context.finished_at, agent=row["agent"], model=row["model"]))
     return states
 
 
