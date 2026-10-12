@@ -117,6 +117,7 @@ export function ProjectSwitcher() {
                         setProject(project.id)
                         setOpen(false)
                         setKeyword('')
+                        navigate(`/jobs?project=${encodeURIComponent(project.id)}`)
                         toast.success(`已进入项目「${project.name}」`)
                       }}
                     >
