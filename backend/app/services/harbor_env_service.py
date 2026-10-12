@@ -1,9 +1,13 @@
-"""Inspect task-defined verifier variables without exposing embedded credentials."""
+"""Inspect task timeouts and verifier variables without exposing credentials."""
 
 from __future__ import annotations
 
+import json
+import math
 import re
+import subprocess
 import tomllib
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -23,21 +27,91 @@ def inspect_source(*, dataset_id: str = "", tasks_path: str = "") -> dict[str, A
     if dataset_id:
         dataset = dataset_service.get_dataset(dataset_id)
         if dataset.kind != DatasetKind.HARBOR_TASKS:
-            raise HTTPException(400, "只能检测 Harbor 任务集的 verifier 环境变量")
+            raise HTTPException(400, "只能检测 Harbor 任务集的环境变量与超时配置")
         root = Path(dataset.root_path)
     else:
         root = Path(tasks_path).expanduser()
     if not root.is_dir():
         raise HTTPException(400, "任务目录不存在")
-    return inspect_root(root)
+    defaults = timeout_defaults()
+    result = inspect_root(root, defaults=defaults)
+    result["timeout_defaults"] = defaults
+    return result
 
 
-def inspect_root(root: Path) -> dict[str, Any]:
+def timeout_defaults() -> dict[str, Any]:
+    from ..builders.harbor import resolve_harbor_bin, resolve_harbor_python
+    try:
+        python = resolve_harbor_python(resolve_harbor_bin())
+    except ValueError:
+        return {"available": False}
+    return _timeout_defaults(python)
+
+
+@lru_cache(maxsize=4)
+def _timeout_defaults(python: str) -> dict[str, Any]:
+    code = (
+        "import json; from importlib.metadata import version; "
+        "import harbor.models.task.config as config; c=config.TaskConfig(); "
+        "s=config.StepConfig(name='timeout-probe') if hasattr(config,'StepConfig') else None; "
+        "print(json.dumps(dict(available=True,version=version('harbor'),"
+        "agent=c.agent.timeout_sec,verifier=c.verifier.timeout_sec,"
+        "steps=dict(agent=s.agent.timeout_sec,verifier=s.verifier.timeout_sec) if s else None)))"
+    )
+    try:
+        result = subprocess.run([python, "-c", code], capture_output=True, text=True, timeout=10, check=True)
+        value = json.loads(result.stdout)
+        if not isinstance(value, dict) or not all(key in value for key in ("agent", "verifier", "version")):
+            raise ValueError("invalid defaults")
+        return value
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {"available": False}
+
+
+def _task_timeouts(
+    data: dict[str, Any], task: str, warnings: list[str], defaults: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    def phase_value(phase: str, step: dict[str, Any] | None) -> dict[str, Any]:
+        section = data.get(phase, {})
+        step_section = (step or {}).get(phase, {})
+        if not isinstance(section, dict) or not isinstance(step_section, dict):
+            warnings.append(f"{task}: [{phase}] 超时配置格式错误")
+            return {"seconds": None, "source": "invalid"}
+        if "timeout_sec" in step_section:
+            value, source = step_section["timeout_sec"], "step"
+        else:
+            if step is not None:
+                step_defaults = (defaults or {}).get("steps")
+                if not isinstance(step_defaults, dict) or phase not in step_defaults:
+                    return {"seconds": None, "source": "unavailable"}
+                # Harbor falls back to the task only when the step's model value is None.
+                if step_defaults[phase] is not None:
+                    return {"seconds": step_defaults[phase], "source": "step_default"}
+            if "timeout_sec" in section:
+                value, source = section["timeout_sec"], "task"
+            else:
+                return {"seconds": None, "source": "harbor_default"}
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            warnings.append(f"{task}: {phase}.timeout_sec 必须为正数")
+            return {"seconds": None, "source": "invalid"}
+        return {"seconds": value, "source": source}
+
+    steps = data.get("steps") or [None]
+    if not isinstance(steps, list) or any(step is not None and not isinstance(step, dict) for step in steps):
+        warnings.append(f"{task}: steps 格式错误")
+        steps = [None]
+    return [{"task": task, "step": str(step.get("name", index + 1)) if step else "",
+             "agent": phase_value("agent", step), "verifier": phase_value("verifier", step)}
+            for index, step in enumerate(steps)]
+
+
+def inspect_root(root: Path, *, defaults: dict[str, Any] | None = None) -> dict[str, Any]:
     fields: dict[str, dict[str, Any]] = {}
-    defaults: dict[str, set[str | None]] = {}
+    env_defaults: dict[str, set[str | None]] = {}
     references: dict[str, set[str | None]] = {}
     warnings: list[str] = []
     n_tasks = 0
+    task_timeouts: list[dict[str, Any]] = []
     for path in sorted(root.rglob("task.toml")):
         if path.is_symlink() or not archive.is_within(root, path):
             continue
@@ -53,6 +127,7 @@ def inspect_root(root: Path) -> dict[str, Any]:
             warnings.append(f"{task}/task.toml 无法解析，请检查配置文件")
             continue
         n_tasks += 1
+        task_timeouts.extend(_task_timeouts(data, task, warnings, defaults))
         for key, value in env.items():
             if not _KEY.fullmatch(key) or not isinstance(value, str):
                 warnings.append(f"{task}/task.toml 含不支持的环境变量声明")
@@ -71,14 +146,14 @@ def inspect_root(root: Path) -> dict[str, Any]:
             field["secret"] |= secret
             field["has_task_value"] |= bool(default)
             field["tasks"].append(task)
-            defaults.setdefault(key, set()).add(default)
+            env_defaults.setdefault(key, set()).add(default)
             references.setdefault(key, set()).add(reference)
     for key, field in fields.items():
-        choices = defaults[key]
+        choices = env_defaults[key]
         default = next(iter(choices)) if len(choices) == 1 else None
         # 返回空默认值，但绝不把 task.toml 中的真实密钥或密钥默认值送到浏览器。
         field["default"] = None if field["secret"] and default else default
         field["conflicting_defaults"] = len(choices) > 1
         field["source_variable"] = next(iter(references[key])) if len(references[key]) == 1 else None
         field["source_variables"] = sorted(reference for reference in references[key] if reference)
-    return {"variables": [fields[key] for key in sorted(fields)], "n_tasks": n_tasks, "warnings": warnings}
+    return {"variables": [fields[key] for key in sorted(fields)], "n_tasks": n_tasks, "warnings": warnings, "task_timeouts": task_timeouts}

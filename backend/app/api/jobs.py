@@ -11,6 +11,7 @@ from starlette.background import BackgroundTask
 from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
 from ..services import job_download_service, job_service
+from ..models.job import JobPublic
 from ..services.scheduler import gpu_snapshot
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -39,7 +40,7 @@ def list_jobs(
         limit=limit,
         offset=offset,
     )
-    return {"items": items, "total": total, "offset": offset, "limit": limit}
+    return {"items": [JobPublic.model_validate(item.model_dump()) for item in items], "total": total, "offset": offset, "limit": limit}
 
 
 @router.get("/overview", summary="任务统计")
@@ -49,7 +50,7 @@ def overview(user: CurrentUser, project_id: str = Query(default="")) -> dict[str
     return payload
 
 
-@router.post("", response_model=Job, status_code=201, summary="提交任务")
+@router.post("", response_model=JobPublic, status_code=201, summary="提交任务")
 def create_job(payload: JobCreate, user: CurrentUser) -> Job:
     return job_service.create_job(payload, owner=user)
 
@@ -62,7 +63,7 @@ def batch_resubmit(
     return job_service.batch_resubmit_jobs(job_ids, actor=user)
 
 
-@router.get("/{job_id}", response_model=Job, summary="任务详情")
+@router.get("/{job_id}", response_model=JobPublic, summary="任务详情")
 def get_job(job_id: str, user: CurrentUser) -> Job:
     return job_service.get_job_for(job_id, user)
 
@@ -124,19 +125,19 @@ def get_command(job_id: str, user: CurrentUser) -> dict[str, Any]:
     return job_service.preview_command(job_id, actor=user)
 
 
-@router.post("/{job_id}/review", response_model=Job, summary="审核任务（管理员）")
+@router.post("/{job_id}/review", response_model=JobPublic, summary="审核任务（管理员）")
 def review(job_id: str, payload: JobReviewRequest, admin: AdminUser) -> Job:
     return job_service.review_job(
         job_id, approve=payload.approve, comment=payload.comment, reviewer=admin
     )
 
 
-@router.post("/{job_id}/cancel", response_model=Job, summary="终止任务")
+@router.post("/{job_id}/cancel", response_model=JobPublic, summary="终止任务")
 def cancel(job_id: str, user: CurrentUser, reason: str = Body(default="", embed=True)) -> Job:
     return job_service.cancel_job(job_id, actor=user, reason=reason)
 
 
-@router.post("/{job_id}/resubmit", response_model=Job, status_code=201, summary="按相同配置重跑")
+@router.post("/{job_id}/resubmit", response_model=JobPublic, status_code=201, summary="按相同配置重跑")
 def resubmit(job_id: str, user: CurrentUser) -> Job:
     return job_service.resubmit_job(job_id, actor=user)
 

@@ -10,7 +10,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, model_serializer, model_validator
+
+from ..redaction import public_payload
 
 from .common import (
     Base,
@@ -261,9 +263,11 @@ class VerifyConfig(Base):
     environment_memory_mb: int | None = None
     environment_gpus: int | None = None
 
-    timeout_multiplier: float = 1.0
-    agent_timeout_multiplier: float | None = None
-    verifier_timeout_multiplier: float | None = None
+    agent_timeout_seconds: int = Field(default=1800, ge=30, le=86400)
+    verifier_timeout_seconds: int = Field(default=1200, ge=30, le=86400)
+    timeout_multiplier: float = Field(default=1.0, gt=0)
+    agent_timeout_multiplier: float | None = Field(default=None, gt=0)
+    verifier_timeout_multiplier: float | None = Field(default=None, gt=0)
 
     disable_verification: bool = False
     use_platform_image: bool = False
@@ -396,6 +400,14 @@ class Job(Base):
     @property
     def config_block(self) -> SFTConfig | RLConfig | VerifyConfig:
         return self.sft or self.rl or self.verify  # type: ignore[return-value]
+
+
+class JobPublic(Job):
+    """Response-only schema; stored jobs retain credentials for execution/retry."""
+
+    @model_serializer(mode="wrap")
+    def serialize_public(self, handler) -> dict[str, Any]:
+        return public_payload(handler(self))
 
 
 class JobCreate(Base):

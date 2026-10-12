@@ -12,38 +12,13 @@ from typing import Any, BinaryIO
 
 from ..config import settings
 from ..models import Job, User, utcnow
+from ..redaction import SECRET_KEY as _SECRET_KEY, secret_values as _secret_values, mask_values as _mask
 from ..store import store
 from . import audit_service, job_service, runner
 
-_SECRET_KEY = re.compile(r"api[-_]?key|password|passwd|secret|credential|(?:^|[-_])(?:access|auth|bearer|refresh)?[-_]?token$", re.I)
 _BINARY_SUFFIXES = {".bin", ".pt", ".pth", ".ckpt", ".safetensors", ".zip", ".gz", ".png", ".jpg", ".jpeg", ".pdf", ".docx", ".xlsx", ".parquet", ".npy", ".npz"}
 _PRIVATE_NAMES = {"secrets.json", "credentials.json", "auth.json"}
 _CHUNK = 1024 * 1024
-
-
-def _secret_values(value: Any) -> set[str]:
-    secrets: set[str] = set()
-    if isinstance(value, dict):
-        for key, child in value.items():
-            if _SECRET_KEY.search(key) and isinstance(child, str) and child:
-                secrets.add(child)
-            else:
-                secrets.update(_secret_values(child))
-    elif isinstance(value, list):
-        for child in value:
-            secrets.update(_secret_values(child))
-    return secrets
-
-
-def _mask(value: Any, secrets: list[str]) -> Any:
-    if isinstance(value, dict):
-        return {key: _mask(child, secrets) for key, child in value.items()}
-    if isinstance(value, list):
-        return [_mask(child, secrets) for child in value]
-    if isinstance(value, str):
-        for secret in secrets:
-            value = value.replace(secret, "***")
-    return value
 
 
 def _secrets_for(job: Job, payload: dict[str, Any], work: Path) -> list[str]:

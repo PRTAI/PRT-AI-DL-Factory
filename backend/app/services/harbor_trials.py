@@ -116,7 +116,10 @@ def _from_result(trial_dir: Path, payload: dict[str, Any]) -> TrialState:
     agent_info = payload.get("agent_info") or {}
     agent_result = payload.get("agent_result") or {}
     started, finished = payload.get("started_at"), payload.get("finished_at")
-    phase = "failed" if exception else "success"
+    verifier_error = bool(rewards.get("verifier_error"))
+    phase = "failed" if exception or verifier_error else "success"
+    if verifier_error and not exception:
+        exception = {"exception_type": "VerifierError", "exception_message": "判分流程失败，reward 是失败兜底值，并非有效评分"}
     tokens = {
         key: int(agent_result[src])
         for key, src in (("input", "n_input_tokens"), ("output", "n_output_tokens"), ("cache", "n_cache_tokens"))
@@ -183,6 +186,9 @@ def _from_live_dir(trial_dir: Path, *, finished_at: str | None = None) -> TrialS
 
     if verifier_files:
         phase, detail = "running_verifier", "运行测试"
+        exit_message = _read_json(verifier_dir / "reward_exit_message.json") or {}
+        if "placeholder" in str(exit_message.get("exit_reason", "")).lower():
+            detail = "判分执行中（已有失败占位文件，等待最终结果）"
     elif agent_files:
         phase, detail = "running_agent", "agent 执行中"
     elif setup_dir.exists():
@@ -201,6 +207,16 @@ def _from_live_dir(trial_dir: Path, *, finished_at: str | None = None) -> TrialS
             phase_seconds["running_agent"] = max(0.0, (verifier_start or now) - agent_start)
         if verifier_start is not None:
             phase_seconds["running_verifier"] = max(0.0, now - verifier_start)
+
+    observation = _read_json(trial_dir / "prt-phase.json") or {}
+    observed_phase, observed_start = observation.get("phase"), observation.get("started_at")
+    if observed_phase in _RUNNING and isinstance(observed_start, (int, float)) and 0 < observed_start <= now:
+        phase = observed_phase
+        if phase == "running_agent":
+            detail = "agent 执行中"
+        elif phase == "running_verifier" and "占位" not in detail:
+            detail = "运行测试"
+        phase_seconds[phase] = max(0.0, now - observed_start)
 
     task_name = task_cfg.get("name") or trial_dir.name.split("__", 1)[0]
     return TrialState(
@@ -431,10 +447,38 @@ def _tail(path: Path, limit: int = _TAIL_BYTES) -> str:
         with path.open("rb") as handle:
             if size > limit:
                 handle.seek(size - limit)
-                handle.readline()
-            return handle.read().decode("utf-8", errors="replace")
+            return handle.read(limit).decode("utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _nested_logs(root: Path) -> list[dict[str, str]]:
+    """Bound both traversal and output; never follow directory symlinks."""
+    import os
+    if root.is_symlink():
+        return []
+    candidates: list[Path] = []
+    visited = 0
+    for current, directories, filenames in os.walk(root, followlinks=False):
+        visited += 1
+        if visited >= 1000:
+            break
+        directories[:] = sorted(d for d in directories if not (Path(current) / d).is_symlink())[:50]
+        if len(Path(current).relative_to(root).parts) >= 6:
+            directories[:] = []
+        for name in sorted(filenames):
+            visited += 1
+            path = Path(current) / name
+            if not path.is_symlink() and (path.suffix in {".txt", ".log", ".jsonl"} or name in {"reward.json", "reward_exit_message.json", "trajectory.json"}):
+                candidates.append(path)
+            if visited >= 1000:
+                break
+        if visited >= 1000:
+            break
+    # Show lifecycle/score files as well as the most recently updated nested sessions.
+    primary = [p for p in candidates if p.parent == root and p.name in {"test-stdout.txt", "test-stderr.txt", "reward.json", "reward.txt", "reward_exit_message.json"}]
+    recent = sorted((p for p in candidates if p not in primary), key=lambda p: _mtime(p) or 0, reverse=True)
+    return [{"name": str(p.relative_to(root)), "content": _tail(p, 24000)} for p in (primary + recent)[:12]]
 
 
 def detail(job_dir: Path, trial_name: str, *, job_status: str = "", finished_at: str | None = None) -> dict[str, Any] | None:
@@ -454,24 +498,8 @@ def detail(job_dir: Path, trial_name: str, *, job_status: str = "", finished_at:
         return None
     state = _state_for(trial_dir, _job_context(job_dir, job_status, finished_at))
 
-    agent_dir = trial_dir / "agent"
-    agent_logs: list[dict[str, str]] = []
-    try:
-        candidates = sorted(
-            (p for p in agent_dir.iterdir() if p.is_file() and p.suffix in {".txt", ".log"}),
-            key=lambda p: _mtime(p) or 0,
-        )
-    except OSError:
-        candidates = []
-    for path in candidates[-3:]:
-        agent_logs.append({"name": path.name, "content": _tail(path)})
-
-    verifier_dir = trial_dir / "verifier"
-    verifier_logs: list[dict[str, str]] = []
-    for name in ("test-stdout.txt", "test-stderr.txt", "reward.txt", "reward.json"):
-        path = verifier_dir / name
-        if path.is_file():
-            verifier_logs.append({"name": name, "content": _tail(path, 32_000)})
+    agent_logs = _nested_logs(trial_dir / "agent")
+    verifier_logs = _nested_logs(trial_dir / "verifier")
 
     files: list[dict[str, Any]] = []
     try:

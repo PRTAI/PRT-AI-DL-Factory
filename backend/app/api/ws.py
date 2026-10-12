@@ -6,12 +6,12 @@ import asyncio
 import contextlib
 from pathlib import Path
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, status
 
 from ..config import settings
 from ..deps import get_ws_user
 from ..services import monitor
-from ..services.job_service import get_job
+from ..services.job_service import get_job_for
 from ..services.scheduler import gpu_snapshot, refresh_metrics
 from ..store import store
 
@@ -47,8 +47,9 @@ async def job_log_stream(websocket: WebSocket, job_id: str) -> None:
     if user is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
-    job = store.jobs.get(job_id)
-    if job is None or not (user.is_admin or job.owner_id == user.id):
+    try:
+        job = await asyncio.to_thread(get_job_for, job_id, user)
+    except HTTPException:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
@@ -108,4 +109,4 @@ async def job_log_stream(websocket: WebSocket, job_id: str) -> None:
             await websocket.close()
 
 
-__all__ = ["router", "get_job"]
+__all__ = ["router"]

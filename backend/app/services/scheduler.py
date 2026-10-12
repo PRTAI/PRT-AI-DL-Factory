@@ -22,6 +22,7 @@ from ..config import settings
 from ..models import Job, JobStatus, utcnow
 from ..store import store
 from . import audit_service, metrics_parser, runner
+from .resource_lock import RESOURCE_LOCK
 
 logger = logging.getLogger("prt.scheduler")
 
@@ -125,26 +126,32 @@ class Scheduler:
 
     def dispatch(self) -> None:
         with _DISPATCH_LOCK:
-            system = store.system_settings()
-            max_concurrent = system.max_concurrent_jobs or settings.max_concurrent_jobs
-            queued = store.jobs.find(lambda j: j.status == JobStatus.QUEUED)
-            if not queued:
-                return
-            queued.sort(key=lambda j: (-j.resources.priority, j.queued_at or j.created_at))
-
-            for job in queued:
-                if self.running_count() >= max_concurrent:
+            launches: list[Job] = []
+            with RESOURCE_LOCK:
+                system = store.system_settings()
+                max_concurrent = system.max_concurrent_jobs or settings.max_concurrent_jobs
+                queued = store.jobs.find(lambda j: j.status == JobStatus.QUEUED)
+                if not queued:
                     return
-                if not self._user_slot_available(job, system.max_concurrent_jobs):
-                    continue
-                free = self.free_gpu_ids()
-                needed = job.resources.n_gpus
-                if needed > self.total_gpus and self.total_gpus > 0:
-                    self._fail(job, f"申请 {needed} 张 GPU，但本机只有 {self.total_gpus} 张")
-                    continue
-                if needed > len(free):
-                    continue  # wait for a GPU to free up
-                self._start(job, free[:needed])
+                queued.sort(key=lambda j: (-j.resources.priority, j.queued_at or j.created_at))
+
+                for job in queued:
+                    if self.running_count() >= max_concurrent:
+                        break
+                    if not self._user_slot_available(job, system.max_concurrent_jobs):
+                        continue
+                    free = self.free_gpu_ids()
+                    needed = job.resources.n_gpus
+                    if needed > self.total_gpus and self.total_gpus > 0:
+                        self._fail(job, f"申请 {needed} 张 GPU，但本机只有 {self.total_gpus} 张")
+                        continue
+                    if needed > len(free):
+                        continue  # wait for a GPU to free up
+                    claimed = self._claim(job, free[:needed])
+                    if claimed is not None:
+                        launches.append(claimed)
+            for claimed in launches:
+                self._launch(claimed)
 
     def _user_slot_available(self, job: Job, default_limit: int) -> bool:
         owner = store.users.get(job.owner_id)
@@ -157,27 +164,35 @@ class Scheduler:
         del default_limit
         return running < limit
 
-    def _start(self, job: Job, gpu_ids: list[int]) -> None:
-        def claim(item: Job) -> None:
-            item.status = JobStatus.PREPARING
-            item.resources.gpu_ids = gpu_ids
-            item.progress.message = "准备运行环境…"
-            item.updated_at = utcnow()
+    def _claim(self, job: Job, gpu_ids: list[int]) -> Job | None:
+        # Called while RESOURCE_LOCK is held, before any slow preparation.
+        with runner.LIFECYCLE_LOCK:
+            current = store.jobs.get(job.id)
+            if current is None or current.status != JobStatus.QUEUED or current.runtime.cancel_requested:
+                return None
 
-        claimed = store.jobs.update(job.id, claim)
-        if claimed is None:
-            return
+            def claim(item: Job) -> None:
+                item.status = JobStatus.PREPARING
+                item.resources.gpu_ids = gpu_ids
+                item.progress.message = "准备运行环境…"
+                item.updated_at = utcnow()
+
+            return store.jobs.update(job.id, claim)
+
+    def _launch(self, claimed: Job) -> None:
         try:
             runner.launch(claimed)
-            logger.info("job %s launched on GPU %s", job.id, gpu_ids or "cpu")
+            logger.info("job %s launch handled", claimed.id)
         except BuildError as exc:
             self._fail(claimed, str(exc))
         except Exception as exc:  # pragma: no cover
-            logger.exception("job %s failed to launch", job.id)
+            logger.exception("job %s failed to launch", claimed.id)
             self._fail(claimed, f"{type(exc).__name__}: {exc}")
 
     def _fail(self, job: Job, message: str) -> None:
         def mutate(item: Job) -> None:
+            if item.runtime.cancel_requested or item.status.is_terminal:
+                return
             item.status = JobStatus.FAILED
             item.runtime.error = message
             item.runtime.finished_at = utcnow()
@@ -186,7 +201,7 @@ class Scheduler:
             item.updated_at = utcnow()
 
         updated = store.jobs.update(job.id, mutate)
-        if updated:
+        if updated and updated.status == JobStatus.FAILED:
             audit_service.notify(
                 updated.owner_id,
                 f"任务 {updated.name} 启动失败",

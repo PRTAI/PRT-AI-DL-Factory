@@ -310,7 +310,7 @@ function TrialDetailDialog({
             <span className="ml-auto text-[11px] text-fg-subtle">目录 {d.files.length} 个文件</span>
           </div>
           <pre className="num max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg-elevated p-3 text-[11px] leading-relaxed text-fg-muted">
-            {current?.content || '（暂无内容）'}
+            {current?.content || (live ? '该日志暂未产生内容。部分 Agent 在结束时才写入会话日志；可查看 trial.log 中的执行心跳及其他日志标签。' : '该文件未产生内容，请查看其他日志标签或异常信息。')}
           </pre>
           <p className="text-[11px] text-fg-subtle">
             <Mono>{d.trial.path}</Mono>

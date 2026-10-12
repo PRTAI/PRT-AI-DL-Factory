@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 
 from ..builders import BuildError, build_job
 from ..config import settings
+from ..redaction import has_secret_placeholders, restore_secret_placeholders
 from ..models import (
     DatasetKind,
     Framework,
@@ -49,6 +50,18 @@ _ALLOWED_DATASETS: dict[TrainStage, set[DatasetKind]] = {
 # Creation
 # --------------------------------------------------------------------------- #
 def create_job(payload: JobCreate, *, owner: User) -> Job:
+    # Editing a rerun receives masked API values. Resolve them server-side only
+    # for the source owner/admin; never run a literal mask as an API credential.
+    data = payload.model_dump()
+    if has_secret_placeholders(data):
+        if not payload.parent_job_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请填写真实密钥，不能提交脱敏占位值")
+        source = get_job(payload.parent_job_id)
+        _assert_can_control(source, owner)
+        try:
+            payload = JobCreate.model_validate(restore_secret_placeholders(data, source.model_dump()))
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="原任务中没有对应密钥，请重新填写") from exc
     framework = _framework_for(payload)
     project = project_service.assert_usable(payload.project_id)
     _validate_resources(payload, owner)
@@ -313,21 +326,23 @@ def review_job(job_id: str, *, approve: bool, comment: str, reviewer: User) -> J
 
 
 def cancel_job(job_id: str, *, actor: User, reason: str = "") -> Job:
-    job = get_job(job_id)
-    _assert_can_control(job, actor)
-    if job.status.is_terminal:
-        raise HTTPException(status.HTTP_409_CONFLICT, detail="任务已结束，无法终止")
+    with runner.LIFECYCLE_LOCK:
+        job = get_job(job_id)
+        _assert_can_control(job, actor)
+        if job.status.is_terminal:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="任务已结束，无法终止")
 
-    def mutate(item: Job) -> None:
-        item.runtime.cancel_requested = True
-        item.updated_at = utcnow()
-        if item.status in {JobStatus.QUEUED, JobStatus.PENDING_REVIEW}:
-            item.status = JobStatus.CANCELLED
-            item.runtime.finished_at = utcnow()
-            item.progress.message = "已取消"
+        def mutate(item: Job) -> None:
+            item.runtime.cancel_requested = True
+            item.updated_at = utcnow()
+            if item.status in {JobStatus.QUEUED, JobStatus.PENDING_REVIEW, JobStatus.PREPARING}:
+                item.resources.gpu_ids = []
+                item.status = JobStatus.CANCELLED
+                item.runtime.finished_at = utcnow()
+                item.progress.message = "已取消"
 
-    updated = store.jobs.update(job_id, mutate)
-    assert updated is not None
+        updated = store.jobs.update(job_id, mutate)
+        assert updated is not None
     if updated.status == JobStatus.RUNNING or updated.status == JobStatus.PREPARING:
         runner.terminate(updated)
     audit_service.record(
@@ -351,7 +366,7 @@ def cancel_job(job_id: str, *, actor: User, reason: str = "") -> Job:
 def resubmit_job(job_id: str, *, actor: User) -> Job:
     """Clone a finished/rejected job back into the review queue."""
     source = get_job(job_id)
-    _assert_can_view(source, actor)
+    _assert_can_control(source, actor)
     sft, rl, note = source.sft, source.rl, source.note
     # 旧任务可能带着后来才被禁止的坏值（真机上 GRPO 的学习率被数字框改成了 1.000001）。
     # 重跑时替用户改回该算法的默认值并写进备注，而不是把人堵在「重跑」按钮上。

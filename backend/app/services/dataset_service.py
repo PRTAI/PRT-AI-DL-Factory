@@ -9,6 +9,8 @@ column mappings.
 from __future__ import annotations
 
 import json
+from collections import Counter
+from urllib.parse import quote
 import shutil
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -94,6 +96,7 @@ def _validate_json_dataset(root: Path, kind: DatasetKind) -> tuple[DatasetStats,
     if not files:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="压缩包内没有找到 .json / .jsonl 数据文件")
 
+    name_counts = Counter(_entry_name(path.relative_to(root).as_posix()) for path in files)
     stats = DatasetStats()
     infos: list[DatasetFileInfo] = []
     lf_entries: dict[str, Any] = {}
@@ -130,7 +133,13 @@ def _validate_json_dataset(root: Path, kind: DatasetKind) -> tuple[DatasetStats,
         if not stats.sample:
             stats.sample = [_truncate(r) for r in records[:MAX_SAMPLE_ROWS]]
 
-        lf_entries[_entry_name(rel)] = _lf_entry(str(path.resolve()), kind, keys)
+        name = _entry_name(rel)
+        if name_counts[name] > 1:
+            # Slash/extension/percent remain distinguishable; no flattening collisions.
+            name = "path:" + quote(rel, safe="")
+        if name in lf_entries:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"训练索引名称冲突：{rel}")
+        lf_entries[name] = _lf_entry(str(path.resolve()), kind, keys)
 
     stats.n_files = len(infos)
     stats.columns = sorted(columns)

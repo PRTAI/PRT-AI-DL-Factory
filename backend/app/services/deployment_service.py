@@ -35,6 +35,7 @@ from ..models import (
 )
 from ..store import store
 from . import audit_service, model_service, proc_env
+from .resource_lock import RESOURCE_LOCK
 
 _PROCESSES: dict[str, subprocess.Popen] = {}
 _LOCK = threading.RLock()
@@ -157,37 +158,38 @@ def deployment_log(deployment_id: str, *, tail_bytes: int | None = None, offset:
 # --------------------------------------------------------------------------- #
 def create_deployment(payload: DeploymentCreate, *, owner: User) -> Deployment:
     model_path = _resolve_source(payload)
-    port = payload.port or _pick_port()
-    _assert_port_free(port)
-    gpu_ids = _allocate_gpus(payload.n_gpus)
+    with RESOURCE_LOCK:
+        port = payload.port or _pick_port()
+        _assert_port_free(port)
+        gpu_ids = _allocate_gpus(payload.n_gpus)
 
-    served = payload.served_model_name.strip() or Path(model_path).name
-    deployment = Deployment(
-        name=payload.name.strip(),
-        note=payload.note,
-        source=payload.source,
-        model_id=payload.model_id,
-        job_id=payload.job_id,
-        model_path=model_path,
-        served_model_name=served,
-        port=port,
-        config=payload.config,
-        owner_id=owner.id,
-        owner_email=owner.email,
-        project_id=payload.project_id,
-        gpu_ids=gpu_ids,
-    )
-    if payload.config.tensor_parallel_size * payload.config.pipeline_parallel_size > max(len(gpu_ids), 1):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"tensor_parallel_size × pipeline_parallel_size = "
-                f"{payload.config.tensor_parallel_size * payload.config.pipeline_parallel_size}，"
-                f"但只申请了 {len(gpu_ids)} 张 GPU"
-            ),
+        served = payload.served_model_name.strip() or Path(model_path).name
+        deployment = Deployment(
+            name=payload.name.strip(),
+            note=payload.note,
+            source=payload.source,
+            model_id=payload.model_id,
+            job_id=payload.job_id,
+            model_path=model_path,
+            served_model_name=served,
+            port=port,
+            config=payload.config,
+            owner_id=owner.id,
+            owner_email=owner.email,
+            project_id=payload.project_id,
+            gpu_ids=gpu_ids,
         )
+        if payload.config.tensor_parallel_size * payload.config.pipeline_parallel_size > max(len(gpu_ids), 1):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"tensor_parallel_size × pipeline_parallel_size = "
+                    f"{payload.config.tensor_parallel_size * payload.config.pipeline_parallel_size}，"
+                    f"但只申请了 {len(gpu_ids)} 张 GPU"
+                ),
+            )
 
-    store.deployments.put(deployment)
+        store.deployments.put(deployment)
     try:
         deployment = _launch(deployment)
     except Exception as exc:  # 启动失败也要留下记录，方便看日志排查

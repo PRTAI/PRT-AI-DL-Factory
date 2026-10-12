@@ -106,8 +106,7 @@ def test_job_log_stream(client, member_headers, running_job):
     assert saw_status
 
 
-def test_job_log_stream_rejects_other_users(client, admin_headers, running_job):
-    from starlette.websockets import WebSocketDisconnect
+def test_job_log_stream_allows_shared_job_viewers(client, admin_headers, running_job):
 
     created = client.post(
         "/api/users",
@@ -121,6 +120,12 @@ def test_job_log_stream_rejects_other_users(client, admin_headers, running_job):
     )
     assert created.status_code in (201, 409)
     token = _token(client, "wsoutsider@prt.local", "outsider-pass-9")
-    with pytest.raises(WebSocketDisconnect):
-        with client.websocket_connect(f"/ws/jobs/{running_job['id']}/log?token={token}") as ws:
-            ws.receive_json()
+    with client.websocket_connect(f"/ws/jobs/{running_job['id']}/log?token={token}") as ws:
+        messages = []
+        for _ in range(12):
+            message = ws.receive_json()
+            messages.append(message)
+            if message['type'] == 'end':
+                break
+    assert any(message['type'] == 'status' for message in messages)
+    assert 'WS-MARKER-LINE' in ''.join(message.get('content', '') for message in messages)

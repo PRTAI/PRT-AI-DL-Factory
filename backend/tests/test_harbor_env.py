@@ -1,6 +1,9 @@
 """Task verifier variable discovery, defaults and credential redaction."""
 
 import json
+import subprocess
+
+import pytest
 
 from backend.app.services import harbor_env_service
 
@@ -67,8 +70,61 @@ def test_verifier_environment_catalog_api(client, member_headers, make_zip):
     response = client.get(endpoint, headers=member_headers, params=query)
     assert response.status_code == 200, response.text
     assert response.json()["n_tasks"] == 2
+    assert len(response.json()["task_timeouts"]) == 2
+    assert "available" in response.json()["timeout_defaults"]
     assert [field["key"] for field in response.json()["variables"]] == ["CUSTOM_API_KEY", "EVAL_API_KEY"]
     path_response = client.get(endpoint, headers=member_headers, params={"tasks_path": uploaded.json()["root_path"]})
     assert path_response.json() == response.json()
     assert client.get(endpoint, headers=member_headers, params={**query, "tasks_path": "/tmp"}).status_code == 400
     assert client.get(endpoint, headers=member_headers, params={"dataset_id": "missing"}).status_code == 404
+
+
+def test_task_timeouts_preserve_per_task_values_and_missing_fields(tmp_path):
+    for name, text in {
+        "医疗001": "[agent]\ntimeout_sec=7200\n[verifier]\ntimeout_sec=1800.5\n",
+        "医疗002": "[agent]\ntimeout_sec=120\n",
+    }.items():
+        task = tmp_path / name
+        task.mkdir()
+        (task / "task.toml").write_text(text)
+    detected = harbor_env_service.inspect_root(tmp_path)
+    first, second = detected["task_timeouts"]
+    assert first["agent"] == {"seconds": 7200, "source": "task"}
+    assert first["verifier"] == {"seconds": 1800.5, "source": "task"}
+    assert second["agent"] == {"seconds": 120, "source": "task"}
+    assert second["verifier"] == {"seconds": None, "source": "harbor_default"}
+    assert detected["warnings"] == []
+
+
+def test_step_timeouts_match_harbor_default_and_inheritance(tmp_path):
+    (tmp_path / "task.toml").write_text(
+        '[agent]\ntimeout_sec=7200\n[verifier]\ntimeout_sec=3600\n'
+        '[[steps]]\nname="first"\n[steps.agent]\ntimeout_sec=900\n'
+        '[steps.verifier]\ntimeout_sec=240\n[[steps]]\nname="second"\n'
+    )
+    defaults = {"available": True, "steps": {"agent": None, "verifier": 600}}
+    rows = harbor_env_service.inspect_root(tmp_path, defaults=defaults)["task_timeouts"]
+    assert rows[0]["agent"] == {"seconds": 900, "source": "step"}
+    assert rows[0]["verifier"] == {"seconds": 240, "source": "step"}
+    assert rows[1]["agent"] == {"seconds": 7200, "source": "task"}
+    assert rows[1]["verifier"] == {"seconds": 600, "source": "step_default"}
+    unknown = harbor_env_service.inspect_root(tmp_path)["task_timeouts"][1]
+    assert unknown["agent"]["source"] == "unavailable"
+    assert unknown["verifier"]["source"] == "unavailable"
+
+
+@pytest.mark.parametrize("value", ["-1", "0", "true", '"3600"', "nan", "inf"])
+def test_invalid_timeout_is_reported_without_inventing_effective_value(tmp_path, value):
+    (tmp_path / "task.toml").write_text(f"[agent]\ntimeout_sec={value}\n")
+    detected = harbor_env_service.inspect_root(tmp_path)
+    assert detected["task_timeouts"][0]["agent"] == {"seconds": None, "source": "invalid"}
+    assert "agent.timeout_sec" in detected["warnings"][0]
+
+
+def test_installed_timeout_defaults_probe_is_bounded_and_fails_closed(monkeypatch):
+    def run(argv, **kwargs):
+        assert argv[:2] == ["/test/harbor/python", "-c"]
+        assert kwargs["timeout"] == 10
+        raise subprocess.TimeoutExpired(argv, 10)
+    monkeypatch.setattr(harbor_env_service.subprocess, "run", run)
+    assert harbor_env_service._timeout_defaults.__wrapped__("/test/harbor/python") == {"available": False}

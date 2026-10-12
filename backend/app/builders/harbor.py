@@ -109,6 +109,24 @@ def _sibling_of_harbor_python(name: str) -> str | None:
     return None
 
 
+def resolve_harbor_python(binary: str) -> str:
+    if settings.harbor_python:
+        return settings.harbor_python
+    try:
+        first_line = Path(binary).read_text(encoding="utf-8").splitlines()[0]
+        if first_line.startswith("#!") and "python" in first_line:
+            import shlex
+            parts = shlex.split(first_line[2:])
+            if len(parts) == 1 and Path(parts[0]).is_file():
+                return parts[0]
+    except (OSError, UnicodeError, IndexError):
+        pass
+    candidate = Path(binary).parent / "python"
+    if candidate.is_file():
+        return str(candidate)
+    raise BuildError("请配置 PRT_HARBOR_PYTHON 指向 Harbor 的 Python 解释器，以启用阶段超时和容器进程回收")
+
+
 def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     config: VerifyConfig = job.verify  # type: ignore[assignment]
     if config is None:
@@ -335,11 +353,16 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     secrets = [value for key, value in secrets_map.items() if value and _looks_secret(key)]
     secrets += [value for value in injected_secrets if value not in secrets]
 
+    env["PRT_AGENT_TIMEOUT_SECONDS"] = str(config.agent_timeout_seconds)
+    env["PRT_VERIFIER_TIMEOUT_SECONDS"] = str(config.verifier_timeout_seconds)
+    runtime_file = "harbor_runtime.py"
+    command = [resolve_harbor_python(binary), "-u", str(work_dir / runtime_file), *command[1:]]
+    notes.append(f"阶段硬上限：Agent {config.agent_timeout_seconds}s，Verifier {config.verifier_timeout_seconds}s；任务更短的时限仍生效")
     return BuildResult(
         command=command,
         cwd=str(work_dir),
         env=env,
-        files={},
+        files={runtime_file: (settings.resources_dir / runtime_file).read_text(encoding="utf-8")},
         output_dir=str(output_dir),
         notes=notes,
         secrets=secrets,

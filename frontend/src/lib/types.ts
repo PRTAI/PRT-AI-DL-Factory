@@ -304,6 +304,8 @@ export interface VerifyConfig {
   environment_cpus?: number | null
   environment_memory_mb?: number | null
   environment_gpus?: number | null
+  agent_timeout_seconds: number
+  verifier_timeout_seconds: number
   timeout_multiplier: number
   agent_timeout_multiplier?: number | null
   verifier_timeout_multiplier?: number | null
@@ -839,7 +841,21 @@ export interface VerifierEnvVariable {
   source_variable: string | null
 }
 
+export interface TaskTimeoutValue {
+  seconds: number | null
+  source: 'task' | 'step' | 'harbor_default' | 'step_default' | 'unavailable' | 'invalid'
+}
+
+export interface TaskTimeout {
+  task: string
+  step: string
+  agent: TaskTimeoutValue
+  verifier: TaskTimeoutValue
+}
+
 export interface VerifierEnvInfo {
+  task_timeouts?: TaskTimeout[]
+  timeout_defaults?: { available: boolean; version?: string; agent?: number | null; verifier?: number | null }
   variables: VerifierEnvVariable[]
   n_tasks: number
   warnings: string[]

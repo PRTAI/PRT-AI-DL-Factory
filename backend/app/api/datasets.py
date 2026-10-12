@@ -29,7 +29,7 @@ def list_datasets(
 
 
 @router.post("", response_model=Dataset, status_code=201, summary="上传数据集压缩包")
-async def upload_dataset(
+def upload_dataset(
     user: CurrentUser,
     file: UploadFile = File(..., description="zip / tar.gz 压缩包"),
     name: str = Form(...),
@@ -71,7 +71,7 @@ def update_dataset(dataset_id: str, payload: DatasetUpdate, user: CurrentUser) -
 
 
 @router.put("/{dataset_id}/file", response_model=Dataset, summary="重新上传文件替换数据集内容")
-async def replace_dataset_file(
+def replace_dataset_file(
     dataset_id: str,
     user: CurrentUser,
     file: UploadFile = File(..., description="zip / tar.gz 压缩包"),
