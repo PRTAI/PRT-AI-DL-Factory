@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import os
 from pathlib import Path
 import shlex
 import time
@@ -97,6 +98,87 @@ async def bounded_cleanup(original, environment, pidfile):
         environment.logger.warning("PRT: 容器进程组清理超时，请检查 Docker 状态")
 
 
+# Run as root inside the container, only on verified writable log bind mounts.
+# Keep the creating UID (the agent may resume) and grant the host process's group
+# access. Never follow links into task inputs, the workspace, or other mounts.
+LOG_PERMISSIONS = r"""
+import os, stat, sys
+gid = int(sys.argv[1])
+def repair(fd, device):
+    info = os.fstat(fd)
+    if info.st_dev != device:
+        return
+    directory = stat.S_ISDIR(info.st_mode)
+    if not directory and (not stat.S_ISREG(info.st_mode) or info.st_nlink > 1):
+        return
+    mode = stat.S_IMODE(info.st_mode) | (0o770 if directory else 0o660)
+    if info.st_gid != gid:
+        os.fchown(fd, -1, gid)
+    os.fchmod(fd, mode & ~(stat.S_ISUID | stat.S_ISGID))
+    if directory:
+        for name in os.listdir(fd):
+            child = None
+            try:
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+                    continue
+                child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                repair(child, device)
+            except FileNotFoundError:
+                pass
+            finally:
+                if child is not None:
+                    os.close(child)
+for path in sys.argv[2:]:
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.strip('/').split('/'):
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        repair(fd, os.fstat(fd).st_dev)
+    except FileNotFoundError:
+        pass
+    finally:
+        os.close(fd)
+"""
+
+
+def log_mount_targets(environment):
+    paths = getattr(environment, 'trial_paths', None)
+    if paths is None:
+        return []
+    allowed = {str(Path(value).resolve()) for name in ('agent_dir', 'verifier_dir')
+               if (value := getattr(paths, name, None)) is not None}
+    targets = []
+    for mount in getattr(environment, '_mounts', []):
+        source, target = mount.get('source'), mount.get('target')
+        if (mount.get('type') == 'bind' and not mount.get('read_only') and source and target
+                and str(Path(source).resolve()) in allowed
+                and target in ('/logs/agent', '/logs/verifier')):
+            targets.append(target)
+    return sorted(set(targets))
+
+
+async def repair_log_permissions(original, environment):
+    targets = log_mount_targets(environment)
+    if not targets or not hasattr(os, 'getgid'):
+        return
+    command = shlex.join(['python3', '-c', LOG_PERMISSIONS, str(os.getgid()), *targets])
+    task = asyncio.create_task(original(environment, command=command, user='root', timeout_sec=8))
+    done, _ = await asyncio.wait({task}, timeout=10)
+    if task in done:
+        try:
+            if task.result().return_code == 0:
+                return
+        except Exception:
+            pass
+    else:
+        task.cancel()
+        task.add_done_callback(consume)
+    environment.logger.warning('PRT: 日志目录权限修复失败，宿主机可能无法读取或归档日志；请检查容器权限')
+
+
 def guarded_exec(original):
     @functools.wraps(original)
     async def execute(self, command, cwd=None, env=None, timeout_sec=None, user=None):
@@ -124,6 +206,13 @@ def guarded_exec(original):
             await bounded_cleanup(original, self, pidfile)
             task.add_done_callback(consume)
             raise
+        finally:
+            # Must run before Harbor reads rewards or archives a completed step,
+            # including when wait_for cancelled the verifier after its timeout.
+            try:
+                await repair_log_permissions(original, self)
+            except Exception:
+                self.logger.warning('PRT: 无法修复日志目录权限，请检查 Docker 状态')
     return execute
 
 

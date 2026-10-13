@@ -238,3 +238,104 @@ def test_long_commands_have_only_harbor_timeout(monkeypatch, timeout):
         assert await runtime.guarded_exec(original)(env, 'long evaluation', timeout_sec=timeout) is expected
         assert waits == [60, 60]
     asyncio.run(scenario())
+
+
+def _mounted_log_environment(tmp_path):
+    return SimpleNamespace(
+        logger=logging.getLogger('test.log-permissions'),
+        trial_paths=SimpleNamespace(agent_dir=tmp_path / 'agent', verifier_dir=tmp_path / 'verifier'),
+        _mounts=[{'type': 'bind', 'source': str(tmp_path / name), 'target': f'/logs/{name}'}
+                 for name in ('agent', 'verifier')],
+    )
+
+
+def test_log_permission_script_preserves_owner_and_ignores_links(tmp_path):
+    import stat
+    root = tmp_path / 'verifier'
+    graded = root / 'graded'
+    graded.mkdir(parents=True)
+    reward = graded / 'reward.json'
+    reward.write_text('{"reward":0.5}')
+    graded.chmod(0o700)
+    reward.chmod(0o600)
+    owner = reward.stat().st_uid
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    private = outside / 'private.txt'
+    private.write_text('private')
+    private.chmod(0o600)
+    (root / 'link').symlink_to(outside, target_is_directory=True)
+    (root / 'linked-file').symlink_to(private)
+    os.link(private, root / 'hardlink')
+    result = subprocess.run([sys.executable, '-c', runtime.LOG_PERMISSIONS, str(os.getgid()), str(root.resolve())], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert stat.S_IMODE(graded.stat().st_mode) == 0o770
+    assert stat.S_IMODE(reward.stat().st_mode) == 0o660
+    assert reward.stat().st_uid == owner
+    assert reward.read_text() == '{"reward":0.5}'
+    assert stat.S_IMODE(private.stat().st_mode) == 0o600
+
+
+def test_permission_repair_only_targets_writable_trial_log_mounts(tmp_path):
+    env = _mounted_log_environment(tmp_path)
+    env._mounts += [
+        {'type': 'bind', 'source': str(tmp_path / 'inputs'), 'target': '/app'},
+        {'type': 'bind', 'source': str(tmp_path / 'agent'), 'target': '/app/input_files'},
+        {'type': 'bind', 'source': str(tmp_path / 'other-job'), 'target': '/logs/verifier'},
+    ]
+    assert runtime.log_mount_targets(env) == ['/logs/agent', '/logs/verifier']
+    env._mounts[0]['read_only'] = True
+    assert runtime.log_mount_targets(env) == ['/logs/verifier']
+
+
+@pytest.mark.parametrize('outcome', ['success', 'failure', 'timeout', 'cancel'])
+def test_permission_repair_runs_before_return_or_propagating_failure(tmp_path, outcome):
+    async def scenario():
+        calls = []
+        env = _mounted_log_environment(tmp_path)
+        ready = asyncio.Event()
+        expected = SimpleNamespace(return_code=17)
+        async def original(self, command, **kwargs):
+            if command.startswith('python3 '):
+                calls.append('permissions')
+                assert kwargs['user'] == 'root'
+                assert kwargs['timeout_sec'] == 8
+                return SimpleNamespace(return_code=0)
+            if command.startswith('if [ -f'):
+                calls.append('kill')
+                return SimpleNamespace(return_code=0)
+            ready.set()
+            if outcome == 'success':
+                return expected
+            if outcome == 'failure':
+                raise RuntimeError('original error')
+            await asyncio.sleep(30)
+        wrapped = runtime.guarded_exec(original)
+        if outcome == 'cancel':
+            task = asyncio.create_task(wrapped(env, 'verify'))
+            await ready.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        elif outcome == 'timeout':
+            with pytest.raises(asyncio.TimeoutError):
+                await wrapped(env, 'verify', timeout_sec=0.01)
+        elif outcome == 'failure':
+            with pytest.raises(RuntimeError, match='original error'):
+                await wrapped(env, 'verify')
+        else:
+            assert await wrapped(env, 'verify') is expected
+        assert calls == (['kill', 'permissions'] if outcome in ('timeout', 'cancel') else ['permissions'])
+    asyncio.run(scenario())
+
+
+def test_permission_repair_failure_does_not_mask_verifier_error(tmp_path, caplog):
+    async def scenario():
+        async def original(self, command, **kwargs):
+            if command.startswith('python3 '):
+                return SimpleNamespace(return_code=1)
+            raise RuntimeError('verifier error')
+        with pytest.raises(RuntimeError, match='verifier error'):
+            await runtime.guarded_exec(original)(_mounted_log_environment(tmp_path), 'verify')
+    asyncio.run(scenario())
+    assert '日志目录权限修复失败' in caplog.text
