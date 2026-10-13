@@ -26,6 +26,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
+from ..models.job import HarborAction
 from . import audit_service, metrics_parser, model_service, project_service, runner
 from .scheduler import refresh_metrics, scheduler
 
@@ -49,7 +50,7 @@ _ALLOWED_DATASETS: dict[TrainStage, set[DatasetKind]] = {
 # --------------------------------------------------------------------------- #
 # Creation
 # --------------------------------------------------------------------------- #
-def create_job(payload: JobCreate, *, owner: User) -> Job:
+def create_job(payload: JobCreate, *, owner: User, harbor_action: HarborAction | None = None) -> Job:
     # Editing a rerun receives masked API values. Resolve them server-side only
     # for the source owner/admin; never run a literal mask as an API credential.
     data = payload.model_dump()
@@ -71,7 +72,7 @@ def create_job(payload: JobCreate, *, owner: User) -> Job:
     elif payload.type == JobType.RL:
         _validate_rl(payload)
     else:
-        _validate_verify(payload)
+        _validate_verify(payload, harbor_action=harbor_action)
 
     system = store.system_settings()
     require_approval = system.require_approval if system.updated_by else settings.require_approval
@@ -92,6 +93,7 @@ def create_job(payload: JobCreate, *, owner: User) -> Job:
         rl=payload.rl,
         verify=payload.verify,
         parent_job_id=payload.parent_job_id,
+        harbor_action=harbor_action,
     )
     job.review.required = require_approval
     if initial_status == JobStatus.QUEUED:
@@ -229,12 +231,12 @@ def _validate_rl(payload: JobCreate) -> None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="组相对算法的 rollout 组大小至少为 2")
 
 
-def _validate_verify(payload: JobCreate) -> None:
+def _validate_verify(payload: JobCreate, *, harbor_action: HarborAction | None = None) -> None:
     config = payload.verify
     assert config is not None
     from ..builders.harbor import validate_secret_env
 
-    if config.use_platform_image:
+    if config.use_platform_image and harbor_action is None:
         from . import harbor_image_service
         if config.environment_type != "docker" or config.registry_dataset or config.force_build:
             raise HTTPException(400, "平台镜像需要本地任务集、Docker 环境，并关闭强制重建")
@@ -265,6 +267,9 @@ def _validate_verify(payload: JobCreate) -> None:
     model_api_service.agent_protocol(config.agent, config.agent_api_protocol)
     if config.judge_model_api_id and not config.disable_verification:
         model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol)
+    if harbor_action is not None:
+        # Recorded configuration supplies the agent for resume; regrade never runs it.
+        return
     if config.model_api_id:
         # 提交时就把「没填密钥 / 已停用」挡下来，别等排队到了才失败
         from . import resources_service
@@ -396,7 +401,9 @@ def resubmit_job(job_id: str, *, actor: User) -> Job:
         verify=source.verify,
         parent_job_id=source.id,
     )
-    return create_job(payload, owner=actor)
+    # Repeating a recovery/regrade must retain its operation. Dropping this
+    # would silently run the agent again when the user asked only to re-score.
+    return create_job(payload, owner=actor, harbor_action=source.harbor_action)
 
 
 def batch_resubmit_jobs(job_ids: list[str], *, actor: User) -> dict[str, Any]:
@@ -416,10 +423,19 @@ def batch_resubmit_jobs(job_ids: list[str], *, actor: User) -> dict[str, Any]:
 
 
 def delete_job(job_id: str, *, actor: User, purge_outputs: bool = False) -> None:
+    from .harbor_action_service import SOURCE_LOCK
+    with SOURCE_LOCK:
+        _delete_job(job_id, actor=actor, purge_outputs=purge_outputs)
+
+
+def _delete_job(job_id: str, *, actor: User, purge_outputs: bool = False) -> None:
     job = get_job(job_id)
     _assert_can_control(job, actor)
     if job.status.is_active:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="请先终止任务再删除")
+    dependents = store.jobs.find(lambda item: item.harbor_action is not None and item.harbor_action.source_job_id == job_id)
+    if dependents:
+        raise HTTPException(409, "该任务仍被恢复或重新判分任务引用，请先删除这些派生任务")
     work_dir = Path(job.runtime.work_dir or runner.work_dir_for(job))
     if work_dir.is_dir():
         shutil.rmtree(work_dir, ignore_errors=True)

@@ -69,13 +69,6 @@ class Scheduler:
 
     def _reconcile(self) -> None:
         for job in store.jobs.find(lambda j: j.status == JobStatus.RUNNING):
-            if runner.is_running(job):
-                continue
-            # Give the supervisor thread a moment to record the exit itself.
-            current = store.jobs.get(job.id)
-            if current is None or current.status != JobStatus.RUNNING:
-                continue
-
             def mutate(item: Job) -> None:
                 item.status = JobStatus.CANCELLED if item.runtime.cancel_requested else JobStatus.FAILED
                 item.runtime.finished_at = utcnow()
@@ -87,7 +80,13 @@ class Scheduler:
                     item.progress.message = "进程丢失"
                 item.updated_at = utcnow()
 
-            updated = store.jobs.update(job.id, mutate)
+            with runner.LIFECYCLE_LOCK:
+                current = store.jobs.get(job.id)
+                if current is None or current.status != JobStatus.RUNNING:
+                    continue
+                if runner.has_supervisor(job.id) or runner.is_running(current):
+                    continue
+                updated = store.jobs.update(job.id, mutate)
             if updated:
                 logger.warning("job %s marked %s after process disappeared", job.id, updated.status.value)
                 audit_service.notify(

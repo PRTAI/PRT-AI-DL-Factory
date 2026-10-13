@@ -12,6 +12,8 @@ from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
 from ..services import job_download_service, job_service
 from ..models.job import JobPublic
+from ..models.job import HarborActionRequest
+from ..services import harbor_action_service
 from ..services.scheduler import gpu_snapshot
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -152,6 +154,16 @@ def cancel(job_id: str, user: CurrentUser, reason: str = Body(default="", embed=
 @router.post("/{job_id}/resubmit", response_model=JobPublic, status_code=201, summary="按相同配置重跑")
 def resubmit(job_id: str, user: CurrentUser) -> Job:
     return job_service.resubmit_job(job_id, actor=user)
+
+
+@router.get("/{job_id}/harbor-actions", summary="检查 Harbor 恢复和重新判分所需的记录")
+def harbor_actions(job_id: str, user: CurrentUser) -> dict[str, Any]:
+    return harbor_action_service.inspect_job(job_id, actor=user)
+
+
+@router.post("/{job_id}/harbor-actions", response_model=JobPublic, status_code=201, summary="恢复评测或重新判分")
+def create_harbor_action(job_id: str, payload: HarborActionRequest, user: CurrentUser) -> Job:
+    return harbor_action_service.create_action(job_id, payload, actor=user)
 
 
 @router.get("/{job_id}/verify-suggestion", summary="从训练产物发起评测的建议")

@@ -373,6 +373,7 @@ export interface JobReview {
 }
 
 export interface Job {
+  harbor_action?: { mode: 'resume' | 'regrade'; source_job_id: string; filter_error_types: string[] } | null
   id: string
   name: string
   note: string

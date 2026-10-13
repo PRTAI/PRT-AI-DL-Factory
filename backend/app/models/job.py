@@ -355,6 +355,20 @@ class JobMetricsSummary(Base):
 # --------------------------------------------------------------------------- #
 
 
+class HarborAction(Base):
+    mode: Literal["resume", "regrade"]
+    source_job_id: str
+    filter_error_types: list[str] = Field(default_factory=lambda: ["CancelledError"], max_length=50)
+
+
+class HarborActionRequest(Base):
+    mode: Literal["resume", "regrade"]
+    filter_error_types: list[str] = Field(default_factory=lambda: ["CancelledError"], max_length=50)
+    judge_model_api_id: str | None = None
+    judge_api_protocol: Literal["anthropic", "openai"] | None = None
+    dataset_id: str | None = None
+
+
 class Job(Base):
     id: str = Field(default_factory=lambda: new_id("job"))
     name: str
@@ -383,6 +397,8 @@ class Job(Base):
 
     # Chained lineage: a verify job spawned from a finished training run.
     parent_job_id: str | None = None
+    # Server-created only; generic job submission cannot supply recovery paths.
+    harbor_action: HarborAction | None = None
 
     @model_validator(mode="after")
     def _check_config_present(self) -> "Job":

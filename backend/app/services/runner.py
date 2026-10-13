@@ -65,6 +65,10 @@ def prepare(job: Job):
 
     result = build_job(job, work_dir, output_dir)
 
+    if job.harbor_action is not None:
+        from . import harbor_action_service
+        harbor_action_service.prepare_snapshot(job, work_dir, output_dir)
+
     for rel_path, content in result.files.items():
         target = work_dir / rel_path
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -200,11 +204,10 @@ def _supervise(job_id: str, process: subprocess.Popen, log_handle) -> None:
         log_handle.close()
     except (OSError, ValueError):
         pass
-    with LIFECYCLE_LOCK:
-        _PROCESSES.pop(job_id, None)
-
     job = store.jobs.get(job_id)
     if job is None:
+        with LIFECYCLE_LOCK:
+            _PROCESSES.pop(job_id, None)
         return
 
     def mutate(item: Job) -> None:
@@ -223,7 +226,11 @@ def _supervise(job_id: str, process: subprocess.Popen, log_handle) -> None:
             item.runtime.error = _tail_error(Path(item.runtime.log_file))
         item.updated_at = utcnow()
 
-    updated = store.jobs.update(job_id, mutate)
+    # Keep ownership until the terminal status is persisted; reconciliation
+    # must not mistake a just-exited child for a process lost on restart.
+    with LIFECYCLE_LOCK:
+        updated = store.jobs.update(job_id, mutate)
+        _PROCESSES.pop(job_id, None)
     if updated is None:
         return
 
@@ -268,6 +275,11 @@ def _tail_error(log_path: Path, lines: int = 40) -> str:
         text = handle.read().decode("utf-8", errors="replace")
     tail = [line for line in text.splitlines() if line.strip()][-lines:]
     return "\n".join(tail)
+
+
+def has_supervisor(job_id: str) -> bool:
+    with LIFECYCLE_LOCK:
+        return job_id in _PROCESSES
 
 
 def is_running(job: Job) -> bool:

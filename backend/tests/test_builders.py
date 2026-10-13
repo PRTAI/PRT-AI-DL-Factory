@@ -34,6 +34,35 @@ from backend.app.store import store
 from .conftest import FAKE_MODEL_ID, MODELS_ROOT
 
 
+@pytest.mark.parametrize("mode", ["resume", "regrade"])
+def test_harbor_recovery_commands_and_secrets(tmp_path, monkeypatch, mode):
+    from backend.app.models.job import HarborAction
+    monkeypatch.setattr(harbor_builder, "resolve_harbor_bin", lambda: "/usr/bin/harbor")
+    from backend.app.builders import harbor_actions
+    monkeypatch.setattr(harbor_actions, "resolve_harbor_bin", lambda: "/usr/bin/harbor")
+    monkeypatch.setattr(harbor_actions, "resolve_harbor_python", lambda _: "/usr/bin/python")
+    task = tmp_path / "tasks"
+    task.mkdir()
+    job = Job(name="action", type=JobType.VERIFY, framework=Framework.HARBOR, owner_id="test",
+              verify=VerifyConfig(tasks_path=str(task), agent="claude-code", model="old-model",
+                                  verifier_env={"JUDGE_API_KEY": "sensitive-test-key"}),
+              harbor_action=HarborAction(mode=mode, source_job_id="source",
+                                        filter_error_types=["CancelledError", "AgentTimeoutError"]))
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    assert result.command[3:5] == ["job", mode]
+    assert result.env["JUDGE_API_KEY"] == "sensitive-test-key"
+    assert "sensitive-test-key" not in result.masked_command_line()
+    assert result.masked_env()["JUDGE_API_KEY"] == "***"
+    assert "--agent" not in result.command
+    if mode == "resume":
+        assert result.command.count("--filter-error-type") == 2
+        assert "--jobs-dir" not in result.command
+    else:
+        assert "--task-path" in result.command
+        assert "--jobs-dir" in result.command
+        assert "--verifier-env" in result.command
+
+
 @pytest.fixture
 def sft_dataset(tmp_path) -> Dataset:
     root = tmp_path / "sft-ds"

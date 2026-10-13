@@ -327,6 +327,13 @@ export const api = {
     request<Job>(`/api/jobs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
   batchResubmitJobs: (jobIds: string[]) => request<{ results: { source_id: string; job_id: string; status: string; error: string }[]; succeeded: number; failed: number }>('/api/jobs/batch-resubmit', { method: 'POST', body: JSON.stringify({ job_ids: jobIds }) }),
   resubmitJob: (id: string) => request<Job>(`/api/jobs/${id}/resubmit`, { method: 'POST' }),
+  harborActions: (id: string) => request<{
+    recorded_trials: number; unfinished_trials: number; error_types: Record<string, number>; regrade_error: string
+  }>(`/api/jobs/${id}/harbor-actions`),
+  createHarborAction: (id: string, payload: {
+    mode: 'resume' | 'regrade'; filter_error_types?: string[]; dataset_id?: string
+    judge_model_api_id?: string; judge_api_protocol?: 'anthropic' | 'openai'
+  }) => request<Job>(`/api/jobs/${id}/harbor-actions`, { method: 'POST', body: JSON.stringify(payload) }),
   verifySuggestion: (id: string) =>
     request<{
       parent_job_id: string

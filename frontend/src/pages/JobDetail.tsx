@@ -56,6 +56,7 @@ import {
 import { CopyButton, FRAMEWORK_LABEL, JobTypeBadge, Mono, PageHeader, StatusBadge } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
 import { TrialBoard } from '@/components/TrialBoard'
+import { HarborActions } from '@/components/HarborActions'
 import { VerifyOverview } from '@/components/VerifyOverview'
 import { LineSeriesChart } from '@/components/charts'
 
@@ -261,16 +262,17 @@ export default function JobDetail() {
             )}
             {canControl && ['succeeded', 'failed', 'cancelled', 'rejected'].includes(data.status) && (
               <>
+                {data.type === 'verify' && data.status !== 'rejected' && <HarborActions key={data.id} job={data} />}
                 <Button
                   variant="secondary"
                   size="sm"
-                  title="载入这次的配置到提交页，修改后再提交"
+                  title={data.harbor_action ? '载入完整评测提交页，将重新执行 Agent' : '载入这次的配置到提交页，修改后再提交'}
                   onClick={() =>
                     navigate(`${data.type === 'verify' ? '/submit/verify' : '/submit/train'}?rerun=${data.id}`)
                   }
                 >
                   <Repeat className="h-3.5 w-3.5" aria-hidden />
-                  编辑后重跑
+                  {data.harbor_action ? '编辑为完整评测' : '编辑后重跑'}
                 </Button>
                 <Button variant="ghost" size="sm" loading={resubmit.isPending} onClick={() => resubmit.mutate()}>
                   原样重跑
@@ -303,6 +305,7 @@ export default function JobDetail() {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <StatusBadge status={liveStatus} />
           <JobTypeBadge type={data.type} framework={data.framework} />
+          {data.harbor_action && <Badge tone="info">{data.harbor_action.mode === 'resume' ? '中断恢复' : '重新判分'}</Badge>}
           {data.tags.map((tag) => (
             <Badge key={tag}>{tag}</Badge>
           ))}

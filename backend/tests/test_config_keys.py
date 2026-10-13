@@ -405,7 +405,7 @@ def _known_override(key: str, known: set[str], free_form: set[str]) -> bool:
     return key in known
 
 
-def _harbor_run_flags() -> set[str]:
+def _harbor_run_flags(command: str = "start") -> set[str]:
     """Every option `harbor jobs start` accepts, read straight from its signature.
 
     Typer derives a flag from the parameter name when no explicit string is
@@ -413,11 +413,15 @@ def _harbor_run_flags() -> set[str]:
     """
     jobs_cli = settings.harbor_root / "src" / "harbor" / "cli" / "jobs.py"
     if not jobs_cli.is_file():
-        pytest.skip("Harbor 源码不可用")
+        import importlib.util
+        spec = importlib.util.find_spec("harbor")
+        if spec is None or not spec.origin:
+            pytest.skip("Harbor 源码不可用")
+        jobs_cli = Path(spec.origin).parent / "cli" / "jobs.py"
     tree = ast.parse(jobs_cli.read_text(encoding="utf-8"))
     flags: set[str] = set()
     for node in tree.body:
-        if not (isinstance(node, ast.FunctionDef) and node.name == "start"):
+        if not (isinstance(node, ast.FunctionDef) and node.name == command):
             continue
         for arg in [*node.args.args, *node.args.kwonlyargs]:
             explicit: list[str] = []
@@ -433,6 +437,21 @@ def _harbor_run_flags() -> set[str]:
     if not flags:
         pytest.skip("无法从 Harbor CLI 中解析出参数")
     return flags
+
+
+@pytest.mark.parametrize("mode", ["resume", "regrade"])
+def test_harbor_recovery_flags_match_installed_cli(tmp_path, monkeypatch, mode):
+    from backend.app.builders import harbor_actions
+    from backend.app.models import VerifyConfig
+    from backend.app.models.job import HarborAction
+    known = _harbor_run_flags(mode)
+    monkeypatch.setattr(harbor_actions, "resolve_harbor_bin", lambda: "harbor")
+    monkeypatch.setattr(harbor_actions, "resolve_harbor_python", lambda _: "python")
+    job = Job(name="flags", owner_id="test", type=JobType.VERIFY, framework=Framework.HARBOR,
+              verify=VerifyConfig(tasks_path=str(tmp_path), verifier_env={"JUDGE_MODEL": "demo"}),
+              harbor_action=HarborAction(mode=mode, source_job_id="source"))
+    result = harbor_actions.build_action(job, tmp_path / "w", tmp_path / "o")
+    assert {part for part in result.command if part.startswith("--")} <= known
 
 
 def test_harbor_flags_match_cli(tmp_path):
