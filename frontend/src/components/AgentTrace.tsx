@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { parseAgentTrace } from '@/lib/agentTrace'
+import { formatAgentTraceTime, parseAgentTrace } from '@/lib/agentTrace'
 import type { AgentTraceEntry, AgentTraceKind } from '@/lib/agentTrace'
 import { cn } from '@/lib/utils'
 import { Dialog } from './ui'
@@ -35,8 +35,9 @@ export function AgentTrace({ logs, live }: { logs: { name: string; content: stri
               <span className="num shrink-0 text-fg-subtle">{index + 1}</span>
               <span className="shrink-0 font-semibold text-fg">{KINDS[entry.kind].label}</span>
               <span className="min-w-0 flex-1 truncate text-fg-muted">{entry.title !== KINDS[entry.kind].label ? entry.title : ''}</span>
-              <span className="hidden max-w-[25%] truncate text-fg-subtle sm:block" title={entry.source}>{entry.source.split('/').pop()}</span>
-              {entry.timestamp && <time className="num shrink-0 text-fg-subtle" dateTime={entry.timestamp}>{Number.isFinite(Date.parse(entry.timestamp)) ? new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : ''}</time>}
+              <time className="num max-w-[50%] shrink-0 truncate text-fg-subtle" dateTime={entry.timestamp || undefined} title={`记录时间（北京时间）：${formatAgentTraceTime(entry.timestamp)}`}>
+                {formatAgentTraceTime(entry.timestamp)}
+              </time>
             </div>
             <div className="num line-clamp-2 w-full min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-fg-muted [overflow-wrap:anywhere]">{entry.content}</div>
           </button>
@@ -44,6 +45,7 @@ export function AgentTrace({ logs, live }: { logs: { name: string; content: stri
         {!entries.length && <p className="p-3 text-xs text-fg-muted">{live ? '暂未产生 Agent 输出，等待下一次刷新。' : '没有可显示的 Agent 输出。'}</p>}
       </div>
       <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && setSelected(null)} title={selected ? selected.title === KINDS[selected.kind].label ? selected.title : `${KINDS[selected.kind].label} · ${selected.title}` : '轨迹详情'} width="max-w-4xl">
+        <p className="mb-2 text-[11px] text-fg-subtle">记录时间（北京时间）：{formatAgentTraceTime(selected?.timestamp ?? '')}</p>
         <p className="mb-2 break-all text-[11px] text-fg-subtle">{selected?.source}</p>
         <pre className="num max-h-[55vh] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted p-3 text-xs text-fg-muted [overflow-wrap:anywhere]">{selected?.content}</pre>
       </Dialog>

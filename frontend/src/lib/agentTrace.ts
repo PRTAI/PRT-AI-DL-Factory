@@ -12,6 +12,17 @@ export interface AgentTraceEntry {
 type RecordValue = Record<string, unknown>
 const record = (value: unknown): RecordValue => value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
 const text = (value: unknown): string => typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value, null, 2)
+const timestampText = (value: unknown): string => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : ''
+const timeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+})
+
+export function formatAgentTraceTime(timestamp: string): string {
+  if (!timestampText(timestamp)) return '时间未知'
+  const parts = Object.fromEntries(timeFormatter.formatToParts(new Date(timestamp)).map(part => [part.type, part.value]))
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`
+}
 
 /** Normalize bounded log tails; tolerate partial JSON records from running agents. */
 export function parseAgentTrace(logs: { name: string; content: string }[]): AgentTraceEntry[] {
@@ -41,6 +52,8 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
     for (const item of value) {
       if (typeof item === 'string') { add(kind, title, item); continue }
       const block = record(item)
+      const parentTimestamp = timestamp
+      timestamp = timestampText(block.timestamp) || parentTimestamp
       const type = String(block.type ?? '')
       if (type === 'tool_use' || type === 'function_call') {
         add('tool', String(block.name ?? '工具调用'), block.input ?? block.arguments)
@@ -53,26 +66,32 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
       } else {
         add('other', String(block.type ?? '日志'), block)
       }
+      timestamp = parentTimestamp
     }
   }
   const parse = (value: unknown) => {
     const event = record(value)
     if (!Object.keys(event).length) { add('other', '日志', value); return }
+    const message = record(event.message)
+    timestamp = timestampText(event.timestamp) || timestampText(message.timestamp) || timestamp
     if (Array.isArray(event.steps)) {
       for (const item of event.steps) {
         const step = record(item)
         eventId = `${source}:step:${step.step_id ?? entries.length}`
-        timestamp = String(step.timestamp ?? '')
+        const stepTimestamp = timestampText(step.timestamp)
+        timestamp = stepTimestamp
         blockIndex = 0
         blocks(step.message, String(step.source ?? 'other'))
         for (const item of Array.isArray(step.tool_calls) ? step.tool_calls : []) {
           const call = record(item)
           const fn = record(call.function)
+          timestamp = timestampText(call.timestamp) || stepTimestamp
           add('tool', String(call.function_name ?? fn.name ?? '工具调用'), call.arguments ?? fn.arguments)
         }
         const observation = record(step.observation)
         for (const item of Array.isArray(observation.results) ? observation.results : []) {
           const result = record(item)
+          timestamp = timestampText(result.timestamp) || timestampText(observation.timestamp) || stepTimestamp
           add('tool', '工具返回', result.content ?? result)
         }
       }
@@ -83,7 +102,6 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
       parse(event.payload)
       return
     }
-    const message = record(event.message)
     if (message.role || event.role || ['user', 'assistant'].includes(type)) {
       blocks(message.content ?? event.content ?? event.message, String(message.role ?? event.role ?? type))
     } else if (type === 'user_message' || type === 'agent_message') {
@@ -92,6 +110,7 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
       blocks([event], 'tool')
     } else if (type.startsWith('item.')) {
       const item = record(event.item)
+      timestamp = timestampText(item.timestamp) || timestamp
       if (item.type === 'agent_message' || item.type === 'reasoning') {
         add('assistant', item.type === 'reasoning' ? '模型思考' : '模型回复', item.text)
       } else if (['command_execution', 'mcp_tool_call', 'file_change', 'web_search'].includes(String(item.type))) {
@@ -124,7 +143,7 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
         }
       }
       const object = record(event)
-      timestamp = String(object.timestamp ?? '')
+      timestamp = timestampText(object.timestamp)
       eventId = typeof object.uuid === 'string' ? object.uuid : ''
       parse(event)
     }

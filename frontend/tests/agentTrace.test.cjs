@@ -12,7 +12,7 @@ function load(relative, modules = {}) {
   vm.runInNewContext(compiled, context)
   return context.exports
 }
-const { parseAgentTrace } = load('lib/agentTrace.ts')
+const { parseAgentTrace, formatAgentTraceTime } = load('lib/agentTrace.ts')
 const log = (events, name = 'claude-code.txt') => ({ name, content: events.map(event => JSON.stringify(event)).join('\n') })
 const json = value => JSON.parse(JSON.stringify(value))
 
@@ -81,7 +81,7 @@ test('cards use identical fixed dimensions, role colors and clipped previews', (
   const { renderToStaticMarkup } = require('react-dom/server')
   const { AgentTrace } = load('components/AgentTrace.tsx', {
     react: React,
-    '@/lib/agentTrace': { parseAgentTrace },
+    '@/lib/agentTrace': { parseAgentTrace, formatAgentTraceTime },
     '@/lib/utils': { cn: (...values) => values.filter(Boolean).join(' ') },
     './ui': { Dialog: () => null },
   })
@@ -93,4 +93,49 @@ test('cards use identical fixed dimensions, role colors and clipped previews', (
   assert.equal((html.match(/h-28 w-full min-w-0/g) || []).length, 4)
   assert.equal((html.match(/line-clamp-2/g) || []).length, 4)
   for (const color of ['border-danger/50', 'border-yellow-500/50', 'border-primary/50', 'border-border-strong']) assert.ok(html.includes(color))
+})
+
+test('record times use Beijing dates and do not invent missing or invalid times', () => {
+  assert.equal(formatAgentTraceTime('2026-10-13T02:03:04Z'), '2026-10-13 10:03:04')
+  assert.equal(formatAgentTraceTime('2026-10-13T16:00:00Z'), '2026-10-14 00:00:00')
+  assert.equal(formatAgentTraceTime(''), '时间未知')
+  assert.equal(formatAgentTraceTime('not-a-time'), '时间未知')
+})
+
+test('nested model records and tool results retain their individual timestamps', () => {
+  const entries = parseAgentTrace([log([
+    { type: 'assistant', message: { timestamp: '2026-10-13T02:00:00Z', content: [{ type: 'text', text: '回复' }, { type: 'tool_use', name: 'Bash', input: {}, timestamp: '2026-10-13T02:00:05Z' }] } },
+    { type: 'response_item', payload: { timestamp: '2026-10-13T02:00:10Z', type: 'function_call_output', output: '工具返回' } },
+    { type: 'item.completed', item: { timestamp: '2026-10-13T02:00:15Z', type: 'agent_message', text: '完成' } },
+  ])])
+  assert.deepEqual(json(entries.map(entry => entry.timestamp)), ['2026-10-13T02:00:00Z', '2026-10-13T02:00:05Z', '2026-10-13T02:00:10Z', '2026-10-13T02:00:15Z'])
+})
+
+test('trajectory observations use the return timestamp instead of the tool call timestamp', () => {
+  const entries = parseAgentTrace([{ name: 'trajectory.json', content: JSON.stringify({ steps: [{
+    step_id: 1, source: 'agent', timestamp: '2026-10-13T02:00:00Z', message: '开始执行',
+    tool_calls: [{ function_name: 'Bash', arguments: {}, timestamp: '2026-10-13T02:00:05Z' }],
+    observation: { results: [{ content: '执行完成', timestamp: '2026-10-13T02:00:30Z' }] },
+  }] }) }])
+  assert.equal(entries[1].timestamp, '2026-10-13T02:00:05Z')
+  assert.equal(entries[2].timestamp, '2026-10-13T02:00:30Z')
+})
+
+test('card headers display times in the former filename position', () => {
+  const React = require('react')
+  const { renderToStaticMarkup } = require('react-dom/server')
+  const { AgentTrace } = load('components/AgentTrace.tsx', {
+    react: React,
+    '@/lib/agentTrace': { parseAgentTrace, formatAgentTraceTime },
+    '@/lib/utils': { cn: (...values) => values.filter(Boolean).join(' ') },
+    './ui': { Dialog: () => null },
+  })
+  const html = renderToStaticMarkup(React.createElement(AgentTrace, { live: true, logs: [log([
+    { type: 'assistant', timestamp: '2026-10-13T02:03:04Z', message: { content: [{ type: 'text', text: '模型回复' }] } },
+    { type: 'system', status: 'compacting' },
+  ])] }))
+  assert.ok(html.includes('2026-10-13 10:03:04'))
+  assert.ok(html.includes('时间未知'))
+  assert.ok(!html.includes('claude-code.txt'))
+  assert.equal((html.match(/<time /g) || []).length, 2)
 })
