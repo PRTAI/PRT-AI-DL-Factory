@@ -502,7 +502,62 @@ def _tail(path: Path, limit: int = _TAIL_BYTES) -> str:
         return ""
 
 
-def _nested_logs(root: Path) -> list[dict[str, str]]:
+def _agent_log_content(path: Path) -> str:
+    """Keep JSON envelopes (especially timestamps) while bounding bodies and IO."""
+    limit = 2_000_000
+    try:
+        if path.is_symlink():
+            return ""
+        with path.open("rb") as handle:
+            size = handle.seek(0, 2)
+            start = max(0, size - limit)
+            handle.seek(max(0, start - 1))
+            if start and handle.read(1) != b"\n":
+                # The first record is incomplete; never render it as a JSON event.
+                handle.readline(limit)
+            raw = handle.read(limit).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+    def clip(value: Any, depth: int = 0) -> Any:
+        if isinstance(value, str):
+            return value if len(value) <= 2000 else value[:2000] + "\n…（内容已截断）"
+        if depth >= 12:
+            return "…（内容已截断）"
+        if isinstance(value, dict):
+            return {key: clip(item, depth + 1) for key, item in value.items()}
+        if isinstance(value, list):
+            return [clip(item, depth + 1) for item in value[-100:]]
+        return value
+
+    records: list[Any] = []
+    try:
+        document = json.loads(raw)
+        if isinstance(document, dict) and isinstance(document.get("steps"), list):
+            records = [{"steps": [step]} for step in document["steps"][-100:]]
+        elif isinstance(document, dict):
+            records = [document]
+    except (ValueError, RecursionError):
+        for line in raw.splitlines()[-300:]:
+            try:
+                event = json.loads(line)
+                if isinstance(event, dict):
+                    records.append(event)
+            except (ValueError, RecursionError):
+                continue
+    output: list[str] = []
+    remaining = 48_000
+    for event in reversed(records):
+        serialized = json.dumps(clip(event), ensure_ascii=False)
+        length = len(serialized.encode("utf-8")) + 1
+        if length > remaining:
+            continue
+        output.append(serialized)
+        remaining -= length
+    return "\n".join(reversed(output)) if output else _tail(path, 24000)
+
+
+def _nested_logs(root: Path, *, agent: bool = False, file_limit: int = 12) -> list[dict[str, str]]:
     """Bound both traversal and output; never follow directory symlinks."""
     import os
     if root.is_symlink():
@@ -527,8 +582,11 @@ def _nested_logs(root: Path) -> list[dict[str, str]]:
             break
     # Show lifecycle/score files as well as the most recently updated nested sessions.
     primary = [p for p in candidates if p.parent == root and p.name in {"test-stdout.txt", "test-stderr.txt", "reward.json", "reward.txt", "reward_exit_message.json"}]
-    recent = sorted((p for p in candidates if p not in primary), key=lambda p: _mtime(p) or 0, reverse=True)
-    return [{"name": str(p.relative_to(root)), "content": _tail(p, 24000)} for p in (primary + recent)[:12]]
+    recent = sorted((p for p in candidates if p not in primary), key=lambda p: (
+        agent and (p.suffix == ".jsonl" or p.name == "trajectory.json"), _mtime(p) or 0,
+    ), reverse=True)
+    return [{"name": str(p.relative_to(root)), "content": _agent_log_content(p) if agent else _tail(p, 24000)}
+            for p in (primary + recent)[:file_limit]]
 
 
 def detail(job_dir: Path, trial_name: str, *, job_status: str = "", finished_at: str | None = None) -> dict[str, Any] | None:
@@ -548,8 +606,19 @@ def detail(job_dir: Path, trial_name: str, *, job_status: str = "", finished_at:
         return None
     state = _state_for(trial_dir, _job_context(job_dir, job_status, finished_at))
 
-    agent_logs = _nested_logs(trial_dir / "agent")
+    agent_logs = _nested_logs(trial_dir / "agent", agent=True)
     verifier_logs = _nested_logs(trial_dir / "verifier")
+    # Harbor archives completed phases under steps/<name>/{agent,verifier}/.
+    steps_dir = trial_dir / "steps"
+    if steps_dir.is_dir() and not steps_dir.is_symlink():
+        for step in sorted(steps_dir.iterdir(), key=lambda path: _mtime(path) or 0, reverse=True)[:100]:
+            if not step.is_dir() or step.is_symlink():
+                continue
+            for phase, logs in (("agent", agent_logs), ("verifier", verifier_logs)):
+                if len(logs) >= 24:
+                    continue
+                for log in _nested_logs(step / phase, agent=phase == "agent", file_limit=min(12, 24 - len(logs))):
+                    logs.append({**log, "name": f"steps/{step.name}/{phase}/{log['name']}"})
 
     files: list[dict[str, Any]] = []
     try:

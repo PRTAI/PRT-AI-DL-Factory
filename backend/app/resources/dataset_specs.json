@@ -195,7 +195,7 @@
         "└── tasks/                     # 也可以直接把任务目录放在压缩包根部",
         "    └── my-task-001/",
         "        ├── task.toml          # 必需：难度、超时、资源、verifier 配置",
-        "        ├── instruction.md     # 必需：给 agent 的任务描述",
+        "        ├── instruction.md     # 单步必需；多步放在 steps/<name>/ 下",
         "        ├── environment/",
         "        │   └── Dockerfile     # 必需：沙箱环境",
         "        ├── tests/",
@@ -206,7 +206,7 @@
       ],
       "required_fields": [
         "task.toml",
-        "instruction.md"
+        "instruction.md 或 steps/<name>/instruction.md"
       ],
       "optional_fields": [
         "environment/Dockerfile",
@@ -218,6 +218,7 @@
         "task.toml": "version = \"1.0\"\n\n[metadata]\ndifficulty = \"easy\"\ncategory = \"programming\"\ntags = [\"bash\"]\n\n[agent]\ntimeout_sec = 300.0\n\n[verifier]\ntimeout_sec = 120.0\n\n[environment]\nbuild_timeout_sec = 600.0\ncpus = 1\nmemory = \"2G\"\nstorage = \"10G\"\n"
       },
       "notes": [
+        "多步骤任务在 task.toml 使用 [[steps]] 声明执行顺序，每步包含 instruction.md、tests/test.sh 和可选 solution/solve.sh；根 tests/ 可提供共享工具或评分入口，workdir/ 原样保留。multi_step_reward_strategy 由 Harbor 汇总评分。",
         "oracle agent 会执行 solution/solve.sh，用于验证任务本身是否自洽；没有 solution 时请改用 nop 或真实 agent。",
         "每个任务必须有 environment/ 目录（Harbor 会跳过没有环境定义的任务），平台在上传时就会拦下来。",
         "reward-kit judge 是在**任务容器内**运行的：tests/ 下放 reward.toml（或 rubrics.toml）+ criteria.py，test.sh 里执行 `uvx --from harbor-rewardkit rewardkit /tests`，因此任务的 Dockerfile 需要自带 uv/uvx（`COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/`）。",

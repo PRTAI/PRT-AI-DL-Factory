@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from ..config import settings
+from .harbor_task_layout import task_units
 
 RUNNER_NAME = "_prt_rewardkit_runner.py"
 _COMMAND = re.compile(r"\b(python(?:3(?:\.\d+)?)?)\s+-m\s+rewardkit\b")
@@ -14,8 +15,11 @@ _COMMAND = re.compile(r"\b(python(?:3(?:\.\d+)?)?)\s+-m\s+rewardkit\b")
 def prepare_rewardkit_tasks(root: Path) -> int:
     runner = (settings.resources_dir / "rewardkit_runner.py").read_text(encoding="utf-8")
     changed = 0
+    scripts = []
     for task in sorted(root.rglob("task.toml")):
-        script = task.parent / "tests" / "test.sh"
+        units = task_units(task)
+        scripts.extend(unit / "tests" / "test.sh" for unit in dict.fromkeys([task.parent, *units]))
+    for script in scripts:
         if not script.is_file() or script.is_symlink():
             continue
         content = script.read_text(encoding="utf-8")

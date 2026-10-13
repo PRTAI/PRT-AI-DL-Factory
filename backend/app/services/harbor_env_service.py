@@ -128,26 +128,41 @@ def inspect_root(root: Path, *, defaults: dict[str, Any] | None = None) -> dict[
             continue
         n_tasks += 1
         task_timeouts.extend(_task_timeouts(data, task, warnings, defaults))
-        for key, value in env.items():
-            if not _KEY.fullmatch(key) or not isinstance(value, str):
-                warnings.append(f"{task}/task.toml 含不支持的环境变量声明")
-                continue
-            template = _TEMPLATE.fullmatch(value)
-            reference = template[1] if template else None
-            if reference and not _KEY.fullmatch(reference):
-                warnings.append(f"{task}/task.toml 含不支持的环境变量引用")
-                continue
-            default = template[2] if template else value
-            secret = bool(_SECRET.search(key) or (reference and _SECRET.search(reference)))
-            field = fields.setdefault(key, {
-                "key": key, "required": False, "secret": False, "tasks": [], "has_task_value": False,
-            })
-            field["required"] |= template is not None and default is None
-            field["secret"] |= secret
-            field["has_task_value"] |= bool(default)
-            field["tasks"].append(task)
-            env_defaults.setdefault(key, set()).add(default)
-            references.setdefault(key, set()).add(reference)
+        scopes = []
+        steps = data.get("steps")
+        if isinstance(steps, list) and steps:
+            for step in steps:
+                if not isinstance(step, dict):
+                    continue
+                verifier = step.get("verifier") or {}
+                step_env = verifier.get("env", {}) if isinstance(verifier, dict) else None
+                if not isinstance(step_env, dict):
+                    warnings.append(f"{task}: 步骤 verifier.env 必须是键值表")
+                    continue
+                scopes.append((f"{task}/steps/{step.get('name', '?')}", {**env, **step_env}))
+        else:
+            scopes.append((task, env))
+        for scope, scoped_env in scopes:
+            for key, value in scoped_env.items():
+                if not _KEY.fullmatch(key) or not isinstance(value, str):
+                    warnings.append(f"{task}/task.toml 含不支持的环境变量声明")
+                    continue
+                template = _TEMPLATE.fullmatch(value)
+                reference = template[1] if template else None
+                if reference and not _KEY.fullmatch(reference):
+                    warnings.append(f"{task}/task.toml 含不支持的环境变量引用")
+                    continue
+                default = template[2] if template else value
+                secret = bool(_SECRET.search(key) or (reference and _SECRET.search(reference)))
+                field = fields.setdefault(key, {
+                    "key": key, "required": False, "secret": False, "tasks": [], "has_task_value": False,
+                })
+                field["required"] |= template is not None and default is None
+                field["secret"] |= secret
+                field["has_task_value"] |= bool(default)
+                field["tasks"].append(scope)
+                env_defaults.setdefault(key, set()).add(default)
+                references.setdefault(key, set()).add(reference)
     for key, field in fields.items():
         choices = env_defaults[key]
         default = next(iter(choices)) if len(choices) == 1 else None

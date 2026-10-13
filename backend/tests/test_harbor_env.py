@@ -128,3 +128,30 @@ def test_installed_timeout_defaults_probe_is_bounded_and_fails_closed(monkeypatc
         raise subprocess.TimeoutExpired(argv, 10)
     monkeypatch.setattr(harbor_env_service.subprocess, "run", run)
     assert harbor_env_service._timeout_defaults.__wrapped__("/test/harbor/python") == {"available": False}
+
+
+def test_step_verifier_env_merges_inheritance_and_redacts_secrets(tmp_path):
+    (tmp_path / "task.toml").write_text('''
+[verifier.env]
+SHARED = "root"
+OVERRIDE = "${OLD_REQUIRED}"
+[[steps]]
+name = "prepare"
+[steps.verifier.env]
+OVERRIDE = "local"
+EVAL_API_KEY = "secret-never-return"
+[[steps]]
+name = "analyze"
+[steps.verifier.env]
+OVERRIDE = "local"
+EVAL_API_KEY = "${EVAL_API_KEY}"
+''')
+    from backend.app.services.harbor_env_service import inspect_root
+    result = inspect_root(tmp_path)
+    fields = {field["key"]: field for field in result["variables"]}
+    assert fields["SHARED"]["default"] == "root"
+    assert not fields["OVERRIDE"]["required"]
+    assert fields["EVAL_API_KEY"]["required"]
+    assert fields["EVAL_API_KEY"]["default"] is None
+    assert len(fields["EVAL_API_KEY"]["tasks"]) == 2
+    assert "secret-never-return" not in str(result)

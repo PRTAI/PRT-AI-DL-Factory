@@ -183,10 +183,10 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if local_root is not None:
         try:
             adapted = harbor_compat.prepare_rewardkit_tasks(local_root)
-        except OSError as exc:
-            raise BuildError("无法更新 reward-kit 兼容入口，请检查任务目录写权限或重新上传数据集") from exc
+        except (OSError, ValueError) as exc:
+            raise BuildError(f"无法更新 reward-kit 兼容入口: {exc}") from exc
         if adapted:
-            notes.append(f"已适配 {adapted} 个 reward-kit 任务：无挂载权限时保留独立副本隔离")
+            notes.append(f"已适配 {adapted} 个 reward-kit 评分入口：无挂载权限时保留独立副本隔离")
 
     # ---- agent / model ---------------------------------------------------
     command += ["--agent", config.agent]

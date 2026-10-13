@@ -32,6 +32,7 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
   let timestamp = ''
   let eventId = ''
   let blockIndex = 0
+  let hasStructuredEvents = false
   const add = (kind: AgentTraceKind, title: string, content: unknown) => {
     const body = text(content).trim()
     if (!body) return
@@ -128,6 +129,12 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
     source = log.name
     const content = log.content.trim()
     if (!content) continue
+    if (log.name.includes('tool-results/')) {
+      timestamp = ''
+      eventId = ''
+      add('tool', '日志片段', content)
+      continue
+    }
     const lines = content.split('\n')
     let values: unknown[]
     try { values = [JSON.parse(content)] } catch { values = lines }
@@ -143,6 +150,7 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
         }
       }
       const object = record(event)
+      if (object.type || object.role || object.steps || object.message) hasStructuredEvents = true
       timestamp = timestampText(object.timestamp)
       eventId = typeof object.uuid === 'string' ? object.uuid : ''
       parse(event)
@@ -152,5 +160,6 @@ export function parseAgentTrace(logs: { name: string; content: string }[]): Agen
   if (entries.every((entry) => entry.timestamp && Number.isFinite(Date.parse(entry.timestamp)))) {
     entries.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
   }
-  return entries.slice(-300)
+  // Raw tool-result files have no per-event time; their session records carry it.
+  return entries.filter(entry => !hasStructuredEvents || !entry.source.includes('tool-results/')).slice(-300)
 }

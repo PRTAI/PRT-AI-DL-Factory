@@ -31,6 +31,7 @@ from ..models import (
 )
 from ..store import store
 from . import archive, audit_service, harbor_compat, project_service
+from .harbor_task_layout import task_units
 
 CHUNK = 4 * 1024 * 1024
 DATA_SUFFIXES = (".json", ".jsonl")
@@ -207,9 +208,6 @@ def _validate_harbor_tasks(root: Path) -> tuple[DatasetStats, list[DatasetFileIn
             detail="未找到任何 task.toml，请确认是 Harbor 任务树（tasks/<task>/task.toml）",
         )
     stats = DatasetStats(n_tasks=len(task_files))
-    adapted = harbor_compat.prepare_rewardkit_tasks(root)
-    if adapted:
-        stats.warnings.append(f"已为 {adapted} 个 reward-kit 任务启用无挂载权限时的独立工作区副本隔离")
     infos: list[DatasetFileInfo] = []
     missing_instruction: list[str] = []
     missing_tests: list[str] = []
@@ -219,14 +217,20 @@ def _validate_harbor_tasks(root: Path) -> tuple[DatasetStats, list[DatasetFileIn
     for task_file in task_files:
         task_dir = task_file.parent
         rel = task_dir.relative_to(root).as_posix()
-        if not (task_dir / "instruction.md").is_file():
-            missing_instruction.append(rel)
+        try:
+            units = task_units(task_file)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        for unit in units:
+            unit_rel = unit.relative_to(root).as_posix()
+            if not (unit / "instruction.md").is_file():
+                missing_instruction.append(unit_rel)
+            if not any((unit / "tests").glob("test.*")) and not any((task_dir / "tests").glob("test.*")):
+                missing_tests.append(unit_rel)
+            if not any((unit / "solution").glob("solve.*")):
+                missing_solution.append(unit_rel)
         if not (task_dir / "environment").is_dir():
             missing_environment.append(rel)
-        if not any((task_dir / "tests").glob("test.*")):
-            missing_tests.append(rel)
-        if not any((task_dir / "solution").glob("solve.*")):
-            missing_solution.append(rel)
         size = sum(p.stat().st_size for p in task_dir.rglob("*") if p.is_file())
         stats.total_bytes += size
         if len(infos) < 500:  # keep the record list bounded for huge suites
@@ -245,6 +249,9 @@ def _validate_harbor_tasks(root: Path) -> tuple[DatasetStats, list[DatasetFileIn
                 f"例如: {missing_environment[:3]}"
             ),
         )
+    adapted = harbor_compat.prepare_rewardkit_tasks(root)
+    if adapted:
+        stats.warnings.append(f"已为 {adapted} 个 reward-kit 评分入口启用无挂载权限时的独立工作区副本隔离")
     if missing_tests:
         stats.warnings.append(
             f"{len(missing_tests)} 个任务没有 tests/test.*，评测时必须使用 --disable-verification 或补齐测试"
@@ -666,14 +673,17 @@ def preview(dataset_id: str, limit: int = 5) -> dict[str, Any]:
         tasks = sorted(root.rglob("task.toml"))[:limit]
         items = []
         for task in tasks:
-            instruction = task.parent / "instruction.md"
+            units = task_units(task)
+            instructions = []
+            for unit in units:
+                path = unit / "instruction.md"
+                body = path.read_text(encoding="utf-8", errors="replace")[:2000] if path.is_file() else ""
+                instructions.append((f"步骤：{unit.name}\n" if unit != task.parent else "") + body)
             items.append(
                 {
                     "task": task.parent.name,
                     "task_toml": task.read_text(encoding="utf-8", errors="replace")[:2000],
-                    "instruction": instruction.read_text(encoding="utf-8", errors="replace")[:2000]
-                    if instruction.is_file()
-                    else "",
+                    "instruction": "\n\n".join(instructions),
                 }
             )
         return {"kind": dataset.kind.value, "tasks": items}

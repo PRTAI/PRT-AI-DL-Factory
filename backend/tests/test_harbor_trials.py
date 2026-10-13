@@ -284,3 +284,60 @@ def test_trial_lock_name_recognizes_task_despite_directory_truncation(tmp_path):
     result['task_name'] = 'prt/renamed-package'
     (trial / 'result.json').write_text(json.dumps(result))
     assert len(harbor_trials.scan(tmp_path, job_status='succeeded')) == 1
+
+
+def test_agent_logs_preserve_large_record_timestamp_and_skip_partial_write(tmp_path):
+    trial = _trial(tmp_path, "sample__x", "sample")
+    session = trial / "agent" / "sessions" / "main.jsonl"
+    session.parent.mkdir()
+    event = {"type": "user", "uuid": "return-1", "timestamp": "2026-10-13T02:03:04Z",
+             "message": {"role": "user", "content": [{"type": "tool_result", "content": "长输出" * 30000}]}}
+    session.write_text(json.dumps(event, ensure_ascii=False) + '\n{"type":"assistant",', encoding="utf-8")
+    detail = harbor_trials.detail(tmp_path, trial.name)
+    returned = json.loads(detail["agent_logs"][0]["content"])
+    assert returned["timestamp"] == event["timestamp"]
+    assert returned["uuid"] == event["uuid"]
+    assert "内容已截断" in returned["message"]["content"][0]["content"]
+    assert session.read_text(encoding="utf-8").endswith('{"type":"assistant",')
+
+
+def test_agent_sessions_not_displaced_by_tool_output_files(tmp_path):
+    root = tmp_path / "agent"
+    root.mkdir()
+    (root / "main.jsonl").write_text('{"type":"assistant","timestamp":"2026-10-13T02:03:04Z"}')
+    outputs = root / "tool-results"
+    outputs.mkdir()
+    for i in range(20):
+        (outputs / f"{i}.txt").write_text("output")
+    assert harbor_trials._nested_logs(root, agent=True)[0]["name"] == "main.jsonl"
+
+
+def test_agent_record_tail_bounds_and_symlinks(tmp_path):
+    path = tmp_path / "main.jsonl"
+    event = {"type": "assistant", "timestamp": "2026-10-13T02:03:04Z", "message": {"content": "done"}}
+    path.write_text('x' * 2_100_000 + '\n' + json.dumps(event) + '\n')
+    assert json.loads(harbor_trials._agent_log_content(path)) == event
+    link = tmp_path / "link.jsonl"
+    link.symlink_to(path)
+    assert harbor_trials._agent_log_content(link) == ""
+
+
+def test_agent_trajectory_remains_parseable_after_clipping(tmp_path):
+    path = tmp_path / "trajectory.json"
+    path.write_text(json.dumps({"steps": [{"step_id": 1, "source": "agent", "timestamp": "2026-10-13T02:03:04Z", "message": "a" * 50000}]}))
+    step = json.loads(harbor_trials._agent_log_content(path))["steps"][0]
+    assert step["timestamp"] == "2026-10-13T02:03:04Z"
+    assert len(step["message"]) < 2100
+
+
+def test_multistep_detail_reads_archived_agent_and_verifier_logs(tmp_path):
+    trial = _trial(tmp_path, "multi__x", "multi")
+    for name in ("prepare", "analyze"):
+        step = trial / "steps" / name
+        (step / "agent").mkdir(parents=True)
+        (step / "verifier").mkdir()
+        (step / "agent/main.jsonl").write_text(json.dumps({"type": "assistant", "timestamp": "2026-10-13T02:03:04Z", "message": {"content": name}}))
+        (step / "verifier/reward.json").write_text('{"reward":1.0}')
+    detail = harbor_trials.detail(tmp_path, trial.name)
+    assert {log["name"] for log in detail["agent_logs"]} == {f"steps/{name}/agent/main.jsonl" for name in ("prepare", "analyze")}
+    assert len(detail["verifier_logs"]) == 2

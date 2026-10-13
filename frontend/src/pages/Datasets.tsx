@@ -119,7 +119,7 @@ export default function Datasets() {
           description={
             datasets.data
               ? `共 ${visible.length} 个 · 解压后统一存放在 data/datasets/<dataset_id>/${
-                  category === 'verify' ? ' · Harbor 任务树（task.toml / instruction.md / environment / tests）' : ''
+                  category === 'verify' ? ' · Harbor 任务树（单步或 steps/ 多步骤，支持 RewardKit）' : ''
                 }`
               : undefined
           }
@@ -418,7 +418,7 @@ function UploadDialog({
         {kind === 'harbor_tasks' && (
           <ToggleRow
             label="是否为 reward-kit 格式"
-            hint="任务的 tests/test.sh 通过 reward-kit 调 LLM judge 打分；启用后提交评测时必须选择一个 judge 模型，平台会注入 JUDGE_* 环境变量"
+            hint="支持根目录或 steps/<步骤>/tests 中的 RewardKit 评分；启用后评测需选择 judge 模型，平台注入 JUDGE_* 环境变量"
             checked={rewardkit}
             onCheckedChange={setRewardkit}
           />

@@ -618,3 +618,20 @@ def test_relative_data_root_is_resolved_absolute():
     assert settings.data_root == REPO_ROOT / "data"
     assert settings.jobs_dir.is_absolute()
     assert settings.outputs_dir.is_absolute()
+
+
+def test_harbor_multistep_builder_adapts_each_verifier_without_rewriting_config(tmp_path, harbor_dataset, monkeypatch):
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    task = Path(harbor_dataset.root_path) / "demo"
+    config = 'multi_step_reward_strategy = "final"\n[[steps]]\nname = "prepare"\n[[steps]]\nname = "analyze"\n'
+    (task / "task.toml").write_text(config)
+    for name in ("prepare", "analyze"):
+        tests = task / "steps" / name / "tests"
+        tests.mkdir(parents=True)
+        (tests / "test.sh").write_text('python3 -m rewardkit /tests --workspace /app\n')
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(dataset_id=harbor_dataset.id, agent="oracle"))
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    assert result.command[result.command.index("--path") + 1] == harbor_dataset.root_path
+    assert (task / "task.toml").read_text() == config
+    for name in ("prepare", "analyze"):
+        assert (task / "steps" / name / "tests/_prt_rewardkit_runner.py").is_file()

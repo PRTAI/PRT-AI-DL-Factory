@@ -64,8 +64,8 @@ test('partial JSON, plain text and empty files do not break parsing', () => {
     { name: 'claude-code.txt', content: 'fragment of truncated record\n{"type":"system","status":"compacting"}\n{"type":"assistant",' },
     { name: 'tool-results/output.txt', content: '工具输出' },
   ])
-  assert.equal(entries.length, 4)
-  assert.deepEqual(json(entries.map(entry => entry.kind)), ['other', 'other', 'other', 'tool'])
+  assert.equal(entries.length, 3)
+  assert.deepEqual(json(entries.map(entry => entry.kind)), ['other', 'other', 'other'])
 })
 
 test('long content survives for details but titles and displayed history are bounded', () => {
@@ -138,4 +138,12 @@ test('card headers display times in the former filename position', () => {
   assert.ok(html.includes('时间未知'))
   assert.ok(!html.includes('claude-code.txt'))
   assert.equal((html.match(/<time /g) || []).length, 2)
+})
+
+test('raw tool output cannot crowd timestamped session records out of the last 300 cards', () => {
+  const raw = { name: 'sessions/tool-results/output.txt', content: Array.from({ length: 400 }, (_, i) => `line ${i}`).join('\n') }
+  assert.equal(parseAgentTrace([raw]).length, 1)
+  const entries = parseAgentTrace([log([{ type: 'user', timestamp: '2026-10-13T02:03:04Z', message: { role: 'user', content: [{ type: 'tool_result', content: 'output' }] } }], 'sessions/main.jsonl'), raw])
+  assert.equal(entries.length, 1)
+  assert.equal(entries[0].timestamp, '2026-10-13T02:03:04Z')
 })

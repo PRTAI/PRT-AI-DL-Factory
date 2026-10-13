@@ -116,3 +116,56 @@ def test_harbor_upload_adapts_rewardkit_entrypoint(client, member_headers, make_
     root = Path(response.json()["root_path"])
     assert (root / "tests" / harbor_compat.RUNNER_NAME).is_file()
     assert "独立工作区副本" in response.json()["stats"]["warnings"][0]
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_multistep_rewardkit_upload_and_preview(client, member_headers, make_zip, shared):
+    config = 'multi_step_reward_strategy = "final"\n[[steps]]\nname = "prepare"\n[[steps]]\nname = "analyze"\n'
+    files = {"task/task.toml": config, "task/environment/Dockerfile": "FROM python:3.12-slim\n"}
+    script = "#!/bin/bash\npython3 -m rewardkit /tests --workspace /app\n"
+    rubric = '[judge]\nisolated = true\n[[criterion]]\ndescription = "检查结果"\n'
+    if shared:
+        files["task/tests/test.sh"] = script
+    for name in ("prepare", "analyze"):
+        files[f"task/steps/{name}/instruction.md"] = f"{name} instruction"
+        files[f"task/steps/{name}/tests/rubrics.toml"] = rubric
+        files[f"task/steps/{name}/solution/solve.sh"] = "#!/bin/bash\ntrue\n"
+        if not shared:
+            files[f"task/steps/{name}/tests/test.sh"] = script
+    files["task/steps/analyze/workdir/setup.sh"] = "#!/bin/bash\ntrue\n"
+    path = make_zip(files)
+    with path.open("rb") as handle:
+        response = client.post("/api/datasets", headers=member_headers,
+            files={"file": (path.name, handle, "application/zip")},
+            data={"name": "multi-rewardkit", "kind": "harbor_tasks", "rewardkit": "true"})
+    assert response.status_code == 201, response.text
+    body = response.json()
+    root = Path(body["root_path"])
+    assert body["rewardkit"] and body["stats"]["n_tasks"] == 1
+    assert not any("没有" in warning for warning in body["stats"]["warnings"])
+    assert (root / "task.toml").read_text() == config
+    for name in ("prepare", "analyze"):
+        assert (root / f"steps/{name}/tests/rubrics.toml").read_text() == rubric
+        tests = root / "tests" if shared else root / f"steps/{name}/tests"
+        assert (tests / harbor_compat.RUNNER_NAME).is_file()
+    assert harbor_compat.prepare_rewardkit_tasks(root) == 0
+    preview = client.get(f"/api/datasets/{body['id']}/preview", headers=member_headers).json()
+    instruction = preview["tasks"][0]["instruction"]
+    assert instruction.index("prepare instruction") < instruction.index("analyze instruction")
+
+
+@pytest.mark.parametrize("config, expected", [
+    ('[[steps]]\nname = "../escape"', "非法步骤"),
+    ('[[steps]]\nname = "prepare"\n[[steps]]\nname = "PREPARE"', "重复步骤"),
+    ('[[steps]]\nname = "missing"', "缺少 instruction"),
+    ('', "声明执行顺序"),
+])
+def test_multistep_upload_rejects_invalid_structure(client, member_headers, make_zip, config, expected):
+    path = make_zip({"task/task.toml": config, "task/environment/Dockerfile": "FROM python:3.12-slim",
+                     "task/steps/prepare/instruction.md": "prepare"})
+    with path.open("rb") as handle:
+        response = client.post("/api/datasets", headers=member_headers,
+            files={"file": (path.name, handle, "application/zip")},
+            data={"name": "bad-steps", "kind": "harbor_tasks"})
+    assert response.status_code == 400, response.text
+    assert expected in response.json()["detail"]
