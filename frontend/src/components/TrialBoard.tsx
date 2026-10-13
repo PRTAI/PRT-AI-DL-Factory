@@ -23,6 +23,7 @@ import type { TrialPhase, TrialState } from '@/lib/types'
 import { cn, formatDuration, formatNumber } from '@/lib/utils'
 import { Badge, Button, Card, CardBody, CardHeader, Dialog, EmptyState, Input, Skeleton, StatusDot, Table, Td, Th, Tr } from './ui'
 import { CopyButton, Mono } from './common'
+import { AgentTrace } from './AgentTrace'
 
 export const PHASE_META: Record<
   TrialPhase,
@@ -241,8 +242,8 @@ function TrialDetailDialog({
         { key: 'trial', label: 'trial.log', content: d.trial_log, available: Boolean(d.trial_log) },
         {
           key: 'agent',
-          label: `agent 输出${d.agent_logs.length ? ` (${d.agent_logs.map((l) => l.name).join(', ')})` : ''}`,
-          content: d.agent_logs.map((l) => `===== ${l.name} =====\n${l.content}`).join('\n\n'),
+          label: 'agent 输出',
+          content: '',
           available: d.agent_logs.length > 0,
         },
         {
@@ -309,9 +310,9 @@ function TrialDetailDialog({
             ))}
             <span className="ml-auto text-[11px] text-fg-subtle">目录 {d.files.length} 个文件</span>
           </div>
-          <pre className="num max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg-elevated p-3 text-[11px] leading-relaxed text-fg-muted">
+          {tab === 'agent' ? <AgentTrace key={trialName} logs={d.agent_logs} live={live} /> : <pre className="num max-h-[50vh] overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg-elevated p-3 text-[11px] leading-relaxed text-fg-muted">
             {current?.content || (live ? '该日志暂未产生内容。部分 Agent 在结束时才写入会话日志；可查看 trial.log 中的执行心跳及其他日志标签。' : '该文件未产生内容，请查看其他日志标签或异常信息。')}
-          </pre>
+          </pre>}
           <p className="text-[11px] text-fg-subtle">
             <Mono>{d.trial.path}</Mono>
           </p>
