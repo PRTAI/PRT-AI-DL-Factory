@@ -10,7 +10,7 @@ from urllib.parse import unquote
 import pytest
 
 from backend.app.config import settings
-from backend.app.models import ModelApiConfig
+from backend.app.models import JobStatus, ModelApiConfig
 from backend.app.services import job_download_service, runner
 from backend.app.store import store
 
@@ -161,4 +161,82 @@ def test_export_packaging_failure_removes_temporary_file(client, member_headers,
     monkeypatch.setattr(zipfile.ZipFile, "writestr", fail)
     with pytest.raises(OSError, match="模拟打包失败"):
         job_download_service.prepare_download(export_job.id, actor=actor)
+    assert set(settings.downloads_dir.glob("prt-job-export-*.zip")) == before
+
+
+def test_batch_export_separates_same_named_jobs_and_deduplicates_ids(client, member_headers, export_job):
+    other = export_job.model_copy(deep=True)
+    other.id = f"{export_job.id}_other"
+    other.owner_id = "another-member"
+    other.status = JobStatus.RUNNING
+    store.jobs.put(other)
+    work = runner.work_dir_for(other)
+    work.mkdir(parents=True)
+    (work / "stdout.log").write_text("仍在运行", encoding="utf-8")
+    before = set(settings.downloads_dir.glob("prt-job-export-*.zip"))
+    response = client.post("/api/jobs/batch-export", headers=member_headers, json={
+        "job_ids": [export_job.id, other.id, export_job.id],
+    })
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"] == "application/zip"
+    assert "jobs_2.zip" in response.headers["content-disposition"]
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        names = archive.namelist()
+        assert len(names) == len(set(names))
+        assert {name.split("/")[0] for name in names} == {export_job.id, other.id}
+        assert archive.read(f"{export_job.id}/work/stdout.log").decode() == "任务完成\n"
+        assert archive.read(f"{other.id}/work/stdout.log").decode() == "仍在运行"
+        assert json.loads(archive.read(f"{other.id}/job.json"))["status"] == "running"
+        assert json.loads(archive.read(f"{export_job.id}/outputs/trial-1/result.json"))["reward"] == 1.0
+    assert set(settings.downloads_dir.glob("prt-job-export-*.zip")) == before
+
+
+@pytest.mark.parametrize("ids", [[], ["job_missing"], ["job_missing"] * 201])
+def test_batch_export_validates_selection(client, member_headers, ids):
+    before = set(settings.downloads_dir.glob("prt-job-export-*.zip"))
+    response = client.post("/api/jobs/batch-export", headers=member_headers, json={"job_ids": ids})
+    assert response.status_code == (404 if len(ids) == 1 else 422)
+    assert set(settings.downloads_dir.glob("prt-job-export-*.zip")) == before
+
+
+def test_batch_export_requires_login_and_validates_every_job_before_packaging(client, member_headers, export_job, monkeypatch):
+    assert client.post("/api/jobs/batch-export", json={"job_ids": [export_job.id]}).status_code == 401
+    calls = []
+    monkeypatch.setattr(job_download_service, "_write_job", lambda *args, **kwargs: calls.append(args))
+    response = client.post("/api/jobs/batch-export", headers=member_headers, json={
+        "job_ids": [export_job.id, "job_missing"],
+    })
+    assert response.status_code == 404
+    assert calls == []
+
+
+def test_batch_export_uses_redaction_and_preserves_binary_files(client, member_headers, export_job):
+    secret = "sk-batch-export-secret"
+    export_job.resources.env["API_KEY"] = secret
+    store.jobs.put(export_job)
+    work = runner.work_dir_for(export_job)
+    (work / ".env").write_text(f"API_KEY={secret}")
+    (work / "stdout.log").write_text(f"key={secret}")
+    binary = bytes(range(256))
+    (runner.output_dir_for(export_job) / "adapter.safetensors").write_bytes(binary)
+    response = client.post("/api/jobs/batch-export", headers=member_headers, json={"job_ids": [export_job.id]})
+    assert response.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
+        assert f"{export_job.id}/work/.env" not in archive.namelist()
+        assert archive.read(f"{export_job.id}/work/stdout.log") == b"key=***"
+        assert json.loads(archive.read(f"{export_job.id}/job.json"))["resources"]["env"]["API_KEY"] == "***"
+        assert archive.read(f"{export_job.id}/outputs/adapter.safetensors") == binary
+    assert (work / "stdout.log").read_text() == f"key={secret}"
+
+
+def test_batch_export_failure_cleans_partial_archive(export_job, monkeypatch):
+    actor = store.users.get(export_job.owner_id)
+    before = set(settings.downloads_dir.glob("prt-job-export-*.zip"))
+    original = job_download_service._write_job
+    def fail_after_writing(*args, **kwargs):
+        original(*args, **kwargs)
+        raise OSError("模拟批量打包失败")
+    monkeypatch.setattr(job_download_service, "_write_job", fail_after_writing)
+    with pytest.raises(OSError, match="模拟批量打包失败"):
+        job_download_service.prepare_batch_download([export_job.id], actor=actor)
     assert set(settings.downloads_dir.glob("prt-job-export-*.zip")) == before

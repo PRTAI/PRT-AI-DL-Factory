@@ -63,6 +63,18 @@ def batch_resubmit(
     return job_service.batch_resubmit_jobs(job_ids, actor=user)
 
 
+@router.post("/batch-export", summary="批量导出下载任务 ZIP")
+def batch_export(
+    user: CurrentUser,
+    job_ids: list[str] = Body(..., embed=True, min_length=1, max_length=200),
+) -> FileResponse:
+    target, filename = job_download_service.prepare_batch_download(job_ids, actor=user)
+    return FileResponse(
+        target, filename=filename, media_type="application/zip",
+        background=BackgroundTask(target.unlink, missing_ok=True),
+    )
+
+
 @router.get("/{job_id}", response_model=JobPublic, summary="任务详情")
 def get_job(job_id: str, user: CurrentUser) -> Job:
     return job_service.get_job_for(job_id, user)

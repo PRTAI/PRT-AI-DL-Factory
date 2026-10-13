@@ -131,8 +131,11 @@ const qs = (params: Record<string, unknown>) => {
  * 带 token 的附件下载。文件名优先用后端 `Content-Disposition` 里的
  * `filename*=UTF-8''…`（返修报告的名字是中文，走 `filename=` 会乱码）。
  */
-async function downloadAttachment(path: string, fallback: string) {
-  const response = await fetch(path, { headers: { Authorization: `Bearer ${getToken() ?? ''}` } })
+async function downloadAttachment(path: string, fallback: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers)
+  headers.set('Authorization', `Bearer ${getToken() ?? ''}`)
+  if (init.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json')
+  const response = await fetch(path, { ...init, headers })
   if (!response.ok) {
     throw new ApiError(response.status, extractDetail(safeParse(await response.text())) ?? '下载失败')
   }
@@ -312,6 +315,9 @@ export const api = {
     URL.revokeObjectURL(url)
   },
   downloadJob: (id: string) => downloadAttachment(`/api/jobs/${id}/export`, `${id}.zip`),
+  batchDownloadJobs: (jobIds: string[]) => downloadAttachment('/api/jobs/batch-export', 'jobs.zip', {
+    method: 'POST', body: JSON.stringify({ job_ids: jobIds }),
+  }),
   reviewJob: (id: string, approve: boolean, comment = '') =>
     request<Job>(`/api/jobs/${id}/review`, {
       method: 'POST',

@@ -69,8 +69,7 @@ def _copy_masked(source: BinaryIO, target: BinaryIO, secrets: list[str]) -> None
     target.write(matcher.sub(b"***", pending))
 
 
-def prepare_download(job_id: str, *, actor: User) -> tuple[Path, str]:
-    job = job_service.get_job_for(job_id, actor)
+def _write_job(archive: zipfile.ZipFile, job: Job, *, prefix: str = "") -> str:
     work = runner.work_dir_for(job)
     output = runner.output_dir_for(job)
     payload = job.model_dump(mode="json")
@@ -78,35 +77,42 @@ def prepare_download(job_id: str, *, actor: User) -> tuple[Path, str]:
     project = store.projects.get(job.project_id)
     payload["project_name"] = project.name if project else ""
     payload["exported_at"] = utcnow().isoformat()
+    archive.writestr(f"{prefix}job.json", json.dumps(_mask(payload, secrets), ensure_ascii=False, indent=2))
+    for directory, root in (("work", work), ("outputs", output)):
+        if root.is_symlink() or not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*")):
+            relative = path.relative_to(root)
+            if (
+                path.is_symlink()
+                or any(part.startswith(".") for part in relative.parts)
+                or path.name.lower() in _PRIVATE_NAMES
+                or path.suffix.lower() in {".env", ".pem", ".key"}
+                or not path.is_file()
+            ):
+                continue
+            destination = f"{prefix}{directory}/{relative.as_posix()}"
+            try:
+                if path.suffix.lower() in _BINARY_SUFFIXES:
+                    archive.write(path, destination, compress_type=zipfile.ZIP_STORED)
+                else:
+                    with path.open("rb") as source, archive.open(destination, "w", force_zip64=True) as entry:
+                        _copy_masked(source, entry, secrets)
+            except FileNotFoundError:
+                # 运行中的任务可能清理旧 checkpoint，导出当前仍存在的内容。
+                continue
+    label = _mask(f"{project.name + '_' if project else ''}{job.name}", secrets)
+    return re.sub(r"[^\w .-]", "_", label)[:100].strip(" .")
+
+
+def prepare_download(job_id: str, *, actor: User) -> tuple[Path, str]:
+    job = job_service.get_job_for(job_id, actor)
     fd, name = tempfile.mkstemp(prefix="prt-job-export-", suffix=".zip", dir=settings.downloads_dir)
     os.close(fd)
     target = Path(name)
     try:
         with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
-            archive.writestr("job.json", json.dumps(_mask(payload, secrets), ensure_ascii=False, indent=2))
-            for prefix, root in (("work", work), ("outputs", output)):
-                if root.is_symlink() or not root.is_dir():
-                    continue
-                for path in sorted(root.rglob("*")):
-                    relative = path.relative_to(root)
-                    if (
-                        path.is_symlink()
-                        or any(part.startswith(".") for part in relative.parts)
-                        or path.name.lower() in _PRIVATE_NAMES
-                        or path.suffix.lower() in {".env", ".pem", ".key"}
-                        or not path.is_file()
-                    ):
-                        continue
-                    destination = f"{prefix}/{relative.as_posix()}"
-                    try:
-                        if path.suffix.lower() in _BINARY_SUFFIXES:
-                            archive.write(path, destination, compress_type=zipfile.ZIP_STORED)
-                        else:
-                            with path.open("rb") as source, archive.open(destination, "w", force_zip64=True) as entry:
-                                _copy_masked(source, entry, secrets)
-                    except FileNotFoundError:
-                        # 运行中的任务可能清理旧 checkpoint，导出当前仍存在的内容。
-                        continue
+            label = _write_job(archive, job)
         audit_service.record(
             "job.download", actor=actor, target_type="job", target_id=job.id,
             summary=f"导出下载任务「{job.name}」",
@@ -114,6 +120,25 @@ def prepare_download(job_id: str, *, actor: User) -> tuple[Path, str]:
     except BaseException:
         target.unlink(missing_ok=True)
         raise
-    label = _mask(f"{project.name + '_' if project else ''}{job.name}", secrets)
-    label = re.sub(r"[^\w .-]", "_", label)[:100].strip(" .")
     return target, f"{label or 'job'}_{job.id}.zip"
+
+
+def prepare_batch_download(job_ids: list[str], *, actor: User) -> tuple[Path, str]:
+    # Validate every selection before allocating or writing the archive.
+    jobs = [job_service.get_job_for(job_id, actor) for job_id in dict.fromkeys(job_ids)]
+    fd, name = tempfile.mkstemp(prefix="prt-job-export-", suffix=".zip", dir=settings.downloads_dir)
+    os.close(fd)
+    target = Path(name)
+    try:
+        with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as archive:
+            for job in jobs:
+                _write_job(archive, job, prefix=f"{job.id}/")
+        audit_service.record(
+            "job.batch_download", actor=actor, target_type="job",
+            summary=f"批量导出下载 {len(jobs)} 个任务",
+            detail={"job_ids": [job.id for job in jobs]},
+        )
+    except BaseException:
+        target.unlink(missing_ok=True)
+        raise
+    return target, f"jobs_{len(jobs)}.zip"
