@@ -301,6 +301,7 @@ export interface VerifyConfig {
   /** reward-kit 套件的 LLM judge：平台注入 JUDGE_API_KEY/BASE_URL/MODEL/PROVIDER/API_PROTOCOL */
   judge_model_api_id: string
   judge_api_protocol: 'anthropic' | 'openai'
+  batch_judge: boolean
   environment_cpus?: number | null
   environment_memory_mb?: number | null
   environment_gpus?: number | null
@@ -950,3 +951,7 @@ export interface ReviewTask {
   error: string
   usage: Record<string, number>
 }
+
+export type VerifyAgentConfig = Pick<VerifyConfig,
+  'agent' | 'model_api_id' | 'agent_api_protocol' | 'model' | 'reasoning_effort' |
+  'agent_import_path' | 'agent_env' | 'agent_kwargs'>

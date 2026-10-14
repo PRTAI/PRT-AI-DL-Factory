@@ -257,6 +257,7 @@ class VerifyConfig(Base):
     # JUDGE_API_PROTOCOL 到 verifier 容器（tests/test.sh 自行读取）。
     judge_model_api_id: str = ""
     judge_api_protocol: Literal["anthropic", "openai"] = "anthropic"
+    batch_judge: bool = False
 
     # Emitted as --override-cpus / --override-memory-mb / --override-gpus
     environment_cpus: int | None = None
@@ -367,6 +368,7 @@ class HarborActionRequest(Base):
     judge_model_api_id: str | None = None
     judge_api_protocol: Literal["anthropic", "openai"] | None = None
     dataset_id: str | None = None
+    batch_judge: bool | None = None
 
 
 class Job(Base):
@@ -435,6 +437,36 @@ class JobCreate(Base):
     rl: RLConfig | None = None
     verify: VerifyConfig | None = None
     parent_job_id: str | None = None
+
+
+class VerifyAgentConfig(Base):
+    """Per-agent overrides; dataset, Judge and resources belong to the shared job."""
+
+    model_config = {"extra": "forbid"}
+
+    agent: str = Field(default="oracle", min_length=1)
+    model_api_id: str = ""
+    agent_api_protocol: Literal["", "openai", "anthropic"] = ""
+    model: str = ""
+    reasoning_effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
+    agent_import_path: str = ""
+    agent_env: dict[str, str] = Field(default_factory=dict)
+    agent_kwargs: dict[str, str] = Field(default_factory=dict)
+
+
+class VerifyBatchCreate(Base):
+    model_config = {"extra": "forbid"}
+
+    common: JobCreate
+    agents: list[VerifyAgentConfig] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def verify_only(self) -> "VerifyBatchCreate":
+        if self.common.type != JobType.VERIFY or self.common.verify is None:
+            raise ValueError("批量启动仅支持 Harbor 评测任务")
+        if not self.common.name.strip():
+            raise ValueError("请填写任务名称")
+        return self
 
 
 class JobRenameRequest(Base):

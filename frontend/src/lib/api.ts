@@ -287,6 +287,8 @@ export const api = {
     request<Job>(`/api/jobs/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   createJob: (payload: unknown) =>
     request<Job>('/api/jobs', { method: 'POST', body: JSON.stringify(payload) }),
+  createVerifyBatch: (payload: unknown) =>
+    request<Job[]>('/api/jobs/verify-batch', { method: 'POST', body: JSON.stringify(payload) }),
   jobLog: (id: string, offset = 0) =>
     request<{ content: string; size: number; offset: number; eof: boolean }>(
       `/api/jobs/${id}/log${qs({ offset })}`,
@@ -335,6 +337,7 @@ export const api = {
   createHarborAction: (id: string, payload: {
     mode: 'resume' | 'regrade'; filter_error_types?: string[]; dataset_id?: string
     judge_model_api_id?: string; judge_api_protocol?: 'anthropic' | 'openai'
+    batch_judge?: boolean
   }) => request<Job>(`/api/jobs/${id}/harbor-actions`, { method: 'POST', body: JSON.stringify(payload) }),
   verifySuggestion: (id: string) =>
     request<{

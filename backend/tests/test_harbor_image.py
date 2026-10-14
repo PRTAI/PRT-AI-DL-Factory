@@ -87,18 +87,25 @@ def test_image_status_and_admin_only_build(client, admin_headers, member_headers
     assert client.post('/api/system/harbor-image/build', headers=admin_headers).json()['status'] == 'running'
 
 
-def test_builder_uses_snapshot(tmp_path, monkeypatch):
+@pytest.mark.parametrize('batch', [False, True])
+def test_builder_uses_snapshot(tmp_path, monkeypatch, batch):
     from backend.app.builders import harbor
     from backend.app.models import Job, JobType, VerifyConfig
     root = task_root(tmp_path)
+    tests = root / '题目一/tests'
+    tests.mkdir()
+    (tests / 'judge.toml').write_text('[judge]\nmode="individual"\n')
     monkeypatch.setattr(harbor, 'resolve_harbor_bin', lambda: '/usr/bin/harbor')
     monkeypatch.setattr(images, 'status', lambda: {'ready': True, 'image_id': 'sha256:123'})
     monkeypatch.setattr(images, 'pin_image', lambda image_id: 'prt-ai-factory-harbor-eval-base-image:sha-test')
-    job = Job(name='image-test', type=JobType.VERIFY, framework='harbor', owner_id='test', verify=VerifyConfig(tasks_path=str(root), agent='nop', use_platform_image=True))
+    job = Job(name='image-test', type=JobType.VERIFY, framework='harbor', owner_id='test', verify=VerifyConfig(tasks_path=str(root), agent='nop', use_platform_image=True, batch_judge=batch))
     result = harbor.build(job, tmp_path / 'work', tmp_path / 'outputs')
     assert result.command[result.command.index('--path') + 1] == str(tmp_path / 'work' / 'platform-image-tasks')
     assert '--force-build' not in result.command
     assert any('平台 Harbor 镜像' in note for note in result.notes)
+    copied = tmp_path / 'work/platform-image-tasks/题目一/tests/judge.toml'
+    assert tomllib.loads(copied.read_text())['judge']['mode'] == ('batched' if batch else 'individual')
+    assert tomllib.loads((tests / 'judge.toml').read_text())['judge']['mode'] == 'individual'
     job.verify.force_build = True
     with pytest.raises(harbor.BuildError, match='关闭强制重建'):
         harbor.build(job, tmp_path / 'work', tmp_path / 'outputs')

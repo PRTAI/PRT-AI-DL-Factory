@@ -713,6 +713,7 @@ function ConfigSummary({ job }: { job: Job }) {
       <>
         <KeyValue label="数据集"><VerifyDataset config={config} /></KeyValue>
         <KeyValue label="Agent">{config.agent}</KeyValue>
+        <KeyValue label="Batch Judge">{config.batch_judge ? '启用（batched）' : '沿用题包设置'}</KeyValue>
         <KeyValue label="模型">{config.model || '（无需模型）'}</KeyValue>
         <KeyValue label="pass@k">{config.n_attempts}</KeyValue>
         <KeyValue label="并发">{config.n_concurrent}</KeyValue>

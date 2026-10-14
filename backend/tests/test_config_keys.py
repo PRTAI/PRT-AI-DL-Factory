@@ -65,6 +65,21 @@ _TRANSFORMERS_KEYS = {
 }
 
 
+def test_rewardkit_accepts_generated_batch_judge_mode(tmp_path, monkeypatch):
+    import tomllib
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    models = pytest.importorskip("rewardkit.models", reason="需要 RewardKit 原生配置模型")
+    from backend.app.services.harbor_judge_service import prepare_batched_tasks
+    root = tmp_path / "task"
+    (root / "tests").mkdir(parents=True)
+    (root / "task.toml").touch()
+    (root / "tests/judge.toml").write_text('[judge]\nmode="individual"\n')
+    copied, _ = prepare_batched_tasks(root, tmp_path / "job/tasks")
+    judge = tomllib.loads((copied / "tests/judge.toml").read_text())["judge"]
+    assert models.LLMJudge(**judge).mode == "batched"
+    assert models.AgentJudge(**judge).mode == "batched"
+
+
 def _llamafactory_known_keys() -> set[str]:
     """Field names declared across LLaMA-Factory's own hparams dataclasses."""
     root = settings.llamafactory_root / "src" / "llamafactory" / "hparams"

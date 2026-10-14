@@ -26,7 +26,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from ..models.job import HarborAction
+from ..models.job import HarborAction, VerifyBatchCreate
 from . import audit_service, metrics_parser, model_service, project_service, runner
 from .scheduler import refresh_metrics, scheduler
 
@@ -51,6 +51,56 @@ _ALLOWED_DATASETS: dict[TrainStage, set[DatasetKind]] = {
 # Creation
 # --------------------------------------------------------------------------- #
 def create_job(payload: JobCreate, *, owner: User, harbor_action: HarborAction | None = None) -> Job:
+    job, project_name = _prepare_job(payload, owner=owner, harbor_action=harbor_action)
+    store.jobs.put(job)
+    _announce_created_job(job, owner=owner, project_name=project_name)
+    if job.status == JobStatus.QUEUED:
+        scheduler.dispatch()
+    return job
+
+
+def create_verify_batch(payload: VerifyBatchCreate, *, owner: User) -> list[Job]:
+    prepared: list[tuple[Job, str]] = []
+    names: set[str] = set()
+    for index, agent in enumerate(payload.agents, 1):
+        item = payload.common.model_copy(deep=True)
+        assert item.verify is not None
+        item.verify = item.verify.model_copy(update=agent.model_dump())
+        # Self-check agents have no model; never inherit another row's credentials.
+        if agent.agent in {"oracle", "nop"}:
+            item.verify.model = ""
+            item.verify.model_api_id = ""
+        try:
+            job, project_name = _prepare_job(item, owner=owner)
+        except HTTPException as exc:
+            raise HTTPException(exc.status_code, f"第 {index} 项（{agent.agent}）：{exc.detail}") from exc
+        assert job.verify is not None
+        suffix = (job.verify.model.strip().rstrip("/").rsplit("/", 1)[-1]
+                  or job.verify.agent)
+        base = f"{payload.common.name.strip()}-{suffix}"
+        name = base
+        counter = 2
+        while name in names:
+            name = f"{base}-{counter}"
+            counter += 1
+        if len(name) > 120:
+            raise HTTPException(400, f"第 {index} 项的任务名称超过 120 字符，请缩短任务名称或模型名称")
+        names.add(name)
+        job.name = name
+        prepared.append((job, project_name))
+    # No persistence or scheduling until every row has passed validation.
+    jobs = [job for job, _ in prepared]
+    store.jobs.put_many(jobs)
+    for job, project_name in prepared:
+        _announce_created_job(job, owner=owner, project_name=project_name)
+    if any(job.status == JobStatus.QUEUED for job in jobs):
+        scheduler.dispatch()
+    return jobs
+
+
+def _prepare_job(
+    payload: JobCreate, *, owner: User, harbor_action: HarborAction | None = None,
+) -> tuple[Job, str]:
     # Editing a rerun receives masked API values. Resolve them server-side only
     # for the source owner/admin; never run a literal mask as an API credential.
     data = payload.model_dump()
@@ -99,26 +149,26 @@ def create_job(payload: JobCreate, *, owner: User, harbor_action: HarborAction |
     if initial_status == JobStatus.QUEUED:
         job.queued_at = utcnow()
 
-    store.jobs.put(job)
-    project_service.touch(project.id)
+    return job, project.name
+
+
+def _announce_created_job(job: Job, *, owner: User, project_name: str) -> None:
+    project_service.touch(job.project_id)
     audit_service.record(
         "job.create",
         actor=owner,
         target_type="job",
         target_id=job.id,
-        summary=f"在项目「{project.name}」提交{_TYPE_TEXT[job.type]}任务「{job.name}」({framework.value})",
-        detail={"gpus": job.resources.n_gpus, "project_id": project.id},
+        summary=f"在项目「{project_name}」提交{_TYPE_TEXT[job.type]}任务「{job.name}」({job.framework.value})",
+        detail={"gpus": job.resources.n_gpus, "project_id": job.project_id},
     )
-    if require_approval:
+    if job.review.required:
         audit_service.notify_admins(
             "有新的任务待审核",
             body=f"{owner.email} 提交了{_TYPE_TEXT[job.type]}任务「{job.name}」",
             level="warning",
             link=f"/jobs/{job.id}",
         )
-    else:
-        scheduler.dispatch()
-    return job
 
 
 _TYPE_TEXT = {JobType.SFT: "训练", JobType.RL: "强化学习", JobType.VERIFY: "评测"}
@@ -263,6 +313,13 @@ def _validate_verify(payload: JobCreate, *, harbor_action: HarborAction | None =
                     status.HTTP_400_BAD_REQUEST,
                     detail="该任务集是 reward-kit 格式，请选择 judge 模型（用于注入 JUDGE_* 环境变量）",
                 )
+    if config.batch_judge and not config.disable_verification:
+        from .harbor_action_service import verifier_path
+        from .harbor_judge_service import batch_judge_patches
+        try:
+            batch_judge_patches(verifier_path(config))
+        except (BuildError, OSError, ValueError) as exc:
+            raise HTTPException(400, f"无法启用 Batch Judge: {exc}") from exc
     from . import model_api_service
     model_api_service.agent_protocol(config.agent, config.agent_api_protocol)
     if config.judge_model_api_id and not config.disable_verification:

@@ -248,6 +248,23 @@ def test_regrade_can_replace_judge_and_resubmit_stays_regrade(client, member_hea
     assert repeated.json()["harbor_action"]["mode"] == "regrade"
 
 
+def test_regrade_can_enable_batch_without_changing_resume_config(client, member_headers, recorded_job):
+    import tomllib
+    source, _ = recorded_job
+    judge = Path(source.verify.tasks_path) / "tests/judge.toml"
+    judge.write_text('[judge]\nmode="individual"\n')
+    response = _submit(client, member_headers, source, "regrade", batch_judge=True)
+    assert response.status_code == 201, response.text
+    assert response.json()["verify"]["batch_judge"] is True
+    child = store.jobs.get(response.json()["id"])
+    built, _, _ = runner.prepare(child)
+    path = Path(built.command[built.command.index("--task-path") + 1])
+    assert tomllib.loads((path / "tests/judge.toml").read_text())["judge"]["mode"] == "batched"
+    assert tomllib.loads(judge.read_text())["judge"]["mode"] == "individual"
+    assert not store.jobs.get(source.id).verify.batch_judge
+    assert _submit(client, member_headers, source, "resume", batch_judge=True).status_code == 400
+
+
 def test_scheduler_leaves_exited_managed_process_to_supervisor(tmp_path):
     from backend.app.services.scheduler import Scheduler
 

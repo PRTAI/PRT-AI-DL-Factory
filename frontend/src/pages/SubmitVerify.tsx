@@ -2,14 +2,15 @@ import { TaskTimeoutPanel } from '@/components/TaskTimeoutPanel'
 import * as React from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Globe, KeyRound, Rocket, Settings2 } from 'lucide-react'
+import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Globe, KeyRound, Rocket, Plus, Settings2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { Prebuild } from '@/lib/api'
-import type { ApiProtocol, Dataset, DeploymentEndpoint, ModelApi, RegistryDataset, VerifyConfig } from '@/lib/types'
+import type { ApiProtocol, Dataset, DeploymentEndpoint, ModelApi, RegistryDataset, VerifyAgentConfig, VerifyConfig } from '@/lib/types'
 import { useProject } from '@/lib/store'
 import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
+import { agentConfig, batchJobNames } from '@/lib/verify-batch'
 import { supportsProtocol } from '@/lib/model-api'
 import {
   Badge,
@@ -55,6 +56,7 @@ const DEFAULT_VERIFY: VerifyConfig = {
   verifier_kwargs: {},
   judge_model_api_id: '',
   judge_api_protocol: 'anthropic',
+  batch_judge: false,
   environment_cpus: null,
   environment_memory_mb: null,
   environment_gpus: null,
@@ -247,6 +249,154 @@ const Grid = ({ children, cols = 3 }: { children: React.ReactNode; cols?: 2 | 3 
   <div className={cn('grid gap-3', cols === 2 ? 'sm:grid-cols-2' : 'sm:grid-cols-2 lg:grid-cols-3')}>{children}</div>
 )
 
+function AgentEditor({ config, patch, title, onRemove }: {
+  config: VerifyAgentConfig
+  patch: (values: Partial<VerifyAgentConfig>) => void
+  title: string
+  onRemove?: () => void
+}) {
+  const agents = useQuery({ queryKey: ['harbor-agents'], queryFn: () => api.harborAgents() })
+  const agentInfo = agents.data?.find(item => item.name === config.agent)
+  const agentProtocol = config.agent === 'claude-code' ? 'anthropic' : config.agent === 'codex' ? 'openai' : config.agent_api_protocol || 'openai'
+  const agentWireProtocol: ApiProtocol = config.agent === 'codex' ? 'responses' : agentProtocol
+  const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
+  React.useEffect(() => {
+    const selected = modelApis.data?.find(item => item.id === config.model_api_id)
+    if (selected && !supportsProtocol(selected, agentWireProtocol)) patch({ model_api_id: '', model: '' })
+  }, [agentWireProtocol, config.model_api_id, modelApis.data])
+  React.useEffect(() => {
+    if (!agentInfo || config.model_api_id) return
+    const next = { ...config.agent_env }
+    let changed = false
+    for (const key of agentInfo.env_keys) {
+      if (!(key in next)) { next[key] = ''; changed = true }
+    }
+    if (changed) patch({ agent_env: next })
+  }, [agentInfo, config.model_api_id])
+  return (
+    <Card>
+      <CardHeader title={title} icon={<Bot className="h-4 w-4" aria-hidden />} />
+      <CardBody className="space-y-4">
+        {onRemove && <Button size="sm" variant="ghost" onClick={onRemove}>移除此项</Button>}
+        <Field label="Agent" required hint={agentInfo?.description}>
+          <Select
+            value={config.agent}
+            onValueChange={(value) => patch({ ...agentConfig(DEFAULT_VERIFY), agent: value, agent_api_protocol: value === 'claude-code' ? 'anthropic' : 'openai' })}
+            options={(agents.data ?? []).map((agent) => ({
+              value: agent.name,
+              label: agent.recommended ? `${agent.name} ★` : agent.name,
+              description: agent.description || undefined,
+            }))}
+          />
+        </Field>
+
+        {agentInfo?.needs_model && (
+          <>
+            <Field label="模型接口" required hint={config.agent === 'claude-code' || config.agent === 'codex' ? `${config.agent} 已自动选择对应接口` : '先选择接口，再选择平台与模型'}>
+              <Select value={agentProtocol} disabled={config.agent === 'claude-code' || config.agent === 'codex'} onValueChange={(value) => patch({ agent_api_protocol: value as VerifyConfig['agent_api_protocol'] })} options={[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }]} />
+            </Field>
+            <ModelApiPicker value={config.model_api_id} protocol={agentWireProtocol} onChange={(item) => patch({ model_api_id: item?.id ?? '', model: item ? '' : config.model })} />
+
+            <Field
+              label={
+                <span className="flex items-center gap-1.5">
+                  <Brain className="h-3.5 w-3.5" aria-hidden />
+                  思考模式
+                </span>
+              }
+              hint={
+                agentInfo?.effort_levels?.length
+                  ? `${config.agent} 支持：${agentInfo.effort_levels.join(' / ')}；选了不支持的档位会自动收敛到最近一档`
+                  : `${config.agent} 不支持思考模式参数`
+              }
+            >
+              <Select
+                value={config.reasoning_effort || 'default'}
+                onValueChange={(v) => patch({ reasoning_effort: (v === 'default' ? '' : v) as VerifyConfig['reasoning_effort'] })}
+                options={EFFORT_OPTIONS}
+                disabled={!agentInfo?.effort_levels?.length}
+              />
+            </Field>
+
+            {!config.model_api_id && (
+              <Field
+                label="手动指定模型"
+                required
+                hint="litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model；密钥填在下方环境变量里"
+              >
+                <Input
+                  value={config.model}
+                  onChange={(event) => patch({ model: event.target.value })}
+                  placeholder="anthropic/claude-sonnet-4-5"
+                />
+              </Field>
+            )}
+
+            <LocalEndpointPicker
+              onPick={(endpoint) => {
+                // litellm 用 hosted_vllm/ 前缀走 OpenAI 兼容协议。
+                // 地址必须用 sandbox_base_url（宿主机 IP）：agent 跑在容器里，
+                // 容器内的 127.0.0.1 是容器自己，回环地址一定连不上。
+                // OPENAI_BASE_URL 是 Harbor 的首选键，OPENAI_API_BASE 是它的回退键，
+                // 两个都给以兼容不同 agent。
+                patch({
+                  model_api_id: '',
+                  model: `hosted_vllm/${endpoint.model}`,
+                  agent_env: {
+                    ...config.agent_env,
+                    OPENAI_BASE_URL: endpoint.sandbox_base_url,
+                    OPENAI_API_BASE: endpoint.sandbox_base_url,
+                    OPENAI_API_KEY: config.agent_env.OPENAI_API_KEY || 'EMPTY',
+                  },
+                })
+                toast.success(`已指向本地部署「${endpoint.name}」`)
+              }}
+            />
+          </>
+        )}
+
+        {!agentInfo?.needs_model && (
+          <InlineHint>
+            oracle / nop 属于自检 agent：oracle 执行任务自带的 solution，reward 应接近 1.0；
+            nop 什么都不做，reward 应为 0。正式评测前先跑这两个可以确认任务集本身是可靠的。
+          </InlineHint>
+        )}
+
+        {agentInfo?.env_keys.length ? (
+          <Field
+            label={
+              <span className="flex items-center gap-1.5">
+                <KeyRound className="h-3.5 w-3.5" aria-hidden />
+                Agent 环境变量
+              </span>
+            }
+            hint="这些值会通过 --agent-env 注入到沙箱中的 agent；含 KEY/TOKEN 的字段不会出现在日志与命令记录里"
+          >
+            <KeyValueEditor
+              value={config.agent_env}
+              onChange={(next) => patch({ agent_env: next })}
+              keyPlaceholder="ANTHROPIC_API_KEY"
+              valuePlaceholder="sk-..."
+            />
+          </Field>
+        ) : (
+          <Advanced title="Agent 环境变量（可选）">
+            <KeyValueEditor value={config.agent_env} onChange={(next) => patch({ agent_env: next })} />
+          </Advanced>
+        )}
+        <Advanced title="Agent 高级参数">
+          <Field label="Agent kwargs (--agent-kwarg)">
+            <KeyValueEditor value={config.agent_kwargs} onChange={(next) => patch({ agent_kwargs: next })} secretKeys={false} />
+          </Field>
+          <Field label="自定义 Agent 导入路径（可选）">
+            <Input value={config.agent_import_path} onChange={(event) => patch({ agent_import_path: event.target.value })} />
+          </Field>
+        </Advanced>
+      </CardBody>
+    </Card>
+  )
+}
+
 const DRAFT = 'submit-verify'
 
 export default function SubmitVerify() {
@@ -286,6 +436,7 @@ export default function SubmitVerify() {
   const [taskFilter, setTaskFilter] = useDraftState(DRAFT, 'taskFilter', '')
   const [excludeFilter, setExcludeFilter] = useDraftState(DRAFT, 'excludeFilter', '')
   const [parentJobId, setParentJobId] = useDraftState<string | null>(DRAFT, 'parentJobId', null)
+  const [extraAgents, setExtraAgents] = useDraftState<{ id: string; config: VerifyAgentConfig }[]>(DRAFT, 'extraAgents', [])
   const [error, setError] = React.useState<string | null>(null)
 
   const resetForm = () => {
@@ -294,6 +445,7 @@ export default function SubmitVerify() {
     setTags('')
     setNGpus(0)
     setConfig(DEFAULT_VERIFY)
+    setExtraAgents([])
     setSource('uploaded')
     setTaskFilter('')
     setExcludeFilter('')
@@ -306,6 +458,7 @@ export default function SubmitVerify() {
     const job = rerunSource.data
     if (!job?.verify || appliedRerun.current === job.id) return
     appliedRerun.current = job.id
+    setExtraAgents([])
     const verify = job.verify
     setName(`${job.name.replace(/ \(重跑\)/g, '').trim()} (重跑)`)
     setNote(job.note ?? '')
@@ -322,7 +475,6 @@ export default function SubmitVerify() {
   }, [rerunSource.data])
 
   const patch = (values: Partial<VerifyConfig>) => setConfig((previous) => ({ ...previous, ...values }))
-  const agentInfo = agents.data?.find((item) => item.name === config.agent)
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
   const agentProtocol = config.agent === 'claude-code' ? 'anthropic' : config.agent === 'codex' ? 'openai' : config.agent_api_protocol || 'openai'
   const agentWireProtocol: ApiProtocol = config.agent === 'codex' ? 'responses' : agentProtocol
@@ -423,26 +575,11 @@ export default function SubmitVerify() {
     toast.info(`已切换到该训练任务所属的项目「${suggestion.data?.project_name ?? suggestedProject}」`)
   }, [suggestedProject, projectId, setProject, suggestion.data?.project_name])
 
-  // Pre-fill the env keys an agent typically needs so the user just pastes values.
-  React.useEffect(() => {
-    if (!agentInfo) return
-    setConfig((previous) => {
-      if (previous.model_api_id) return previous  // 密钥由模型配置注入，不用手填
-      const next = { ...previous.agent_env }
-      let changed = false
-      for (const key of agentInfo.env_keys) {
-        if (!(key in next)) {
-          next[key] = ''
-          changed = true
-        }
-      }
-      return changed ? { ...previous, agent_env: next } : previous
-    })
-  }, [agentInfo])
-
+  const batchAgents = [agentConfig(config), ...extraAgents.map(row => row.config)]
+  const batchNames = batchJobNames(name, batchAgents, modelApis.data ?? [])
   const submit = useMutation({
-    mutationFn: () =>
-      api.createJob({
+    mutationFn: async () => {
+      const common = {
         name: name.trim(),
         note,
         type: 'verify',
@@ -461,11 +598,16 @@ export default function SubmitVerify() {
           verifier_kwargs: cleanKv(config.verifier_kwargs),
         },
         parent_job_id: fromJobId ?? parentJobId,
-      }),
-    onSuccess: (job) => {
-      toast.success(job.status === 'pending_review' ? '已提交，等待管理员审核' : '已提交并进入排队')
+      }
+      if (!extraAgents.length) return [await api.createJob(common)]
+      return api.createVerifyBatch({ common, agents: batchAgents.map(row => ({
+        ...row, agent_env: cleanKv(row.agent_env), agent_kwargs: cleanKv(row.agent_kwargs),
+      })) })
+    },
+    onSuccess: (jobs) => {
+      toast.success(`已提交 ${jobs.length} 个评测任务，${jobs.some(job => job.status === 'pending_review') ? '等待管理员审核' : '已进入排队'}`)
       clearDraft(DRAFT)
-      navigate(`/jobs/${job.id}`)
+      navigate(jobs.length === 1 ? `/jobs/${jobs[0].id}` : '/jobs')
     },
     onError: (exception) => setError(exception instanceof ApiError ? exception.message : '提交失败'),
   })
@@ -478,26 +620,29 @@ export default function SubmitVerify() {
       if (config.environment_type !== 'docker' || config.registry_dataset) out.push('平台镜像仅支持 Docker 环境和上传或服务器本地任务集')
     }
     if (!config.dataset_id && !config.tasks_path && !config.registry_dataset) out.push('请选择要评测的任务集')
-    if (agentInfo?.needs_model && !config.model && !config.model_api_id) out.push(`agent ${config.agent} 需要选择或填写模型`)
+    if (config.batch_judge && !config.disable_verification && config.registry_dataset) out.push('Batch Judge 需要上传或服务器本地任务集，请先导入 Registry 任务集')
     if (judgeRequired && !config.judge_model_api_id) out.push('该任务集是 reward-kit 格式，请选择 judge 模型')
-    if (!config.disable_verification) {
-      const missing = (verifierEnv.data?.variables ?? [])
-        .filter((field) => field.required && !managedVerifierKeys.has(field.key)
-          && !managedVerifierKeys.has(field.source_variable ?? '')
-          && !config.verifier_env[field.key]?.trim() && !config.agent_env[field.key]?.trim()
-          && !(field.source_variable && (config.verifier_env[field.source_variable]?.trim()
-            || config.agent_env[field.source_variable]?.trim())))
-        .map((field) => field.key)
-      if (missing.length) out.push(`请填写任务要求的 Verifier 环境变量：${missing.join(' / ')}`)
-    }
-    if (!config.model_api_id) {
-      const missingKeys = Object.entries(config.agent_env)
-        .filter(([key, value]) => agentInfo?.env_keys.includes(key) && !value)
-        .map(([key]) => key)
-      if (missingKeys.length) out.push(`请填写 ${missingKeys.join(' / ')}（或改为选择平台的模型配置）`)
-    }
+    batchAgents.forEach((row, index) => {
+      if (!config.disable_verification) {
+        const missing = (verifierEnv.data?.variables ?? [])
+          .filter((field) => field.required && !managedVerifierKeys.has(field.key)
+            && !managedVerifierKeys.has(field.source_variable ?? '')
+            && !config.verifier_env[field.key]?.trim() && !row.agent_env[field.key]?.trim()
+            && !(field.source_variable && (config.verifier_env[field.source_variable]?.trim()
+              || row.agent_env[field.source_variable]?.trim())))
+          .map((field) => field.key)
+        if (missing.length) out.push(`第 ${index + 1} 项请填写任务要求的 Verifier 环境变量：${missing.join(' / ')}`)
+      }
+      const info = agents.data?.find(agent => agent.name === row.agent)
+      if (!['oracle', 'nop'].includes(row.agent) && !row.model.trim() && !row.model_api_id) out.push(`第 ${index + 1} 项 ${row.agent} 需要选择或填写模型`)
+      if (!row.model_api_id) {
+        const missing = (info?.env_keys ?? []).filter(key => !row.agent_env[key]?.trim())
+        if (missing.length) out.push(`第 ${index + 1} 项请填写 ${missing.join(' / ')}（或选择平台模型）`)
+      }
+      if (extraAgents.length && batchNames[index].length > 120) out.push(`第 ${index + 1} 项任务名称超过 120 字符，请缩短名称`)
+    })
     return out
-  }, [name, config, agentInfo, judgeRequired, verifierEnv.data, modelApis.data, platformImage.data])
+  }, [name, config, extraAgents, agents.data, judgeRequired, verifierEnv.data, modelApis.data, platformImage.data])
 
   return (
     <div className="space-y-4">
@@ -642,121 +787,29 @@ export default function SubmitVerify() {
                   <Select value={config.judge_api_protocol} onValueChange={(value) => patch({ judge_api_protocol: value as VerifyConfig['judge_api_protocol'] })} options={[{ value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }]} />
                 </Field>
                 <ModelApiPicker value={config.judge_model_api_id} protocol={config.judge_api_protocol} allowManual={false} onChange={(item) => patch({ judge_model_api_id: item?.id ?? '' })} />
+                <ToggleRow
+                  label="启用 Batch Judge"
+                  hint="将本次题包副本中 [judge].mode 设为 batched，同一配置内的评分项合并评判；关闭时沿用题包设置。支持上传或服务器本地任务集。"
+                  checked={Boolean(config.batch_judge)}
+                  onCheckedChange={(checked) => patch({ batch_judge: checked })}
+                />
               </CardBody>
             </Card>
           )}
 
-          <Card>
-            <CardHeader title="Agent 与模型" icon={<Bot className="h-4 w-4" aria-hidden />} />
-            <CardBody className="space-y-4">
-              <Field label="Agent" required hint={agentInfo?.description}>
-                <Select
-                  value={config.agent}
-                  onValueChange={(value) => patch({ agent: value, agent_api_protocol: value === 'claude-code' ? 'anthropic' : 'openai' })}
-                  options={(agents.data ?? []).map((agent) => ({
-                    value: agent.name,
-                    label: agent.recommended ? `${agent.name} ★` : agent.name,
-                    description: agent.description || undefined,
-                  }))}
-                />
-              </Field>
-
-              {agentInfo?.needs_model && (
-                <>
-                  <Field label="模型接口" required hint={config.agent === 'claude-code' || config.agent === 'codex' ? `${config.agent} 已自动选择对应接口` : '先选择接口，再选择平台与模型'}>
-                    <Select value={agentProtocol} disabled={config.agent === 'claude-code' || config.agent === 'codex'} onValueChange={(value) => patch({ agent_api_protocol: value as VerifyConfig['agent_api_protocol'] })} options={[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }]} />
-                  </Field>
-                  <ModelApiPicker value={config.model_api_id} protocol={agentWireProtocol} onChange={(item) => patch({ model_api_id: item?.id ?? '', model: item ? '' : config.model })} />
-
-                  <Field
-                    label={
-                      <span className="flex items-center gap-1.5">
-                        <Brain className="h-3.5 w-3.5" aria-hidden />
-                        思考模式
-                      </span>
-                    }
-                    hint={
-                      agentInfo?.effort_levels?.length
-                        ? `${config.agent} 支持：${agentInfo.effort_levels.join(' / ')}；选了不支持的档位会自动收敛到最近一档`
-                        : `${config.agent} 不支持思考模式参数`
-                    }
-                  >
-                    <Select
-                      value={config.reasoning_effort || 'default'}
-                      onValueChange={(v) => patch({ reasoning_effort: (v === 'default' ? '' : v) as VerifyConfig['reasoning_effort'] })}
-                      options={EFFORT_OPTIONS}
-                      disabled={!agentInfo?.effort_levels?.length}
-                    />
-                  </Field>
-
-                  {!config.model_api_id && (
-                    <Field
-                      label="手动指定模型"
-                      required
-                      hint="litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model；密钥填在下方环境变量里"
-                    >
-                      <Input
-                        value={config.model}
-                        onChange={(event) => patch({ model: event.target.value })}
-                        placeholder="anthropic/claude-sonnet-4-5"
-                      />
-                    </Field>
-                  )}
-
-                  <LocalEndpointPicker
-                    onPick={(endpoint) => {
-                      // litellm 用 hosted_vllm/ 前缀走 OpenAI 兼容协议。
-                      // 地址必须用 sandbox_base_url（宿主机 IP）：agent 跑在容器里，
-                      // 容器内的 127.0.0.1 是容器自己，回环地址一定连不上。
-                      // OPENAI_BASE_URL 是 Harbor 的首选键，OPENAI_API_BASE 是它的回退键，
-                      // 两个都给以兼容不同 agent。
-                      patch({
-                        model_api_id: '',
-                        model: `hosted_vllm/${endpoint.model}`,
-                        agent_env: {
-                          ...config.agent_env,
-                          OPENAI_BASE_URL: endpoint.sandbox_base_url,
-                          OPENAI_API_BASE: endpoint.sandbox_base_url,
-                          OPENAI_API_KEY: config.agent_env.OPENAI_API_KEY || 'EMPTY',
-                        },
-                      })
-                      toast.success(`已指向本地部署「${endpoint.name}」`)
-                    }}
-                  />
-                </>
-              )}
-
-              {!agentInfo?.needs_model && (
-                <InlineHint>
-                  oracle / nop 属于自检 agent：oracle 执行任务自带的 solution，reward 应接近 1.0；
-                  nop 什么都不做，reward 应为 0。正式评测前先跑这两个可以确认任务集本身是可靠的。
-                </InlineHint>
-              )}
-
-              {agentInfo?.env_keys.length ? (
-                <Field
-                  label={
-                    <span className="flex items-center gap-1.5">
-                      <KeyRound className="h-3.5 w-3.5" aria-hidden />
-                      Agent 环境变量
-                    </span>
-                  }
-                  hint="这些值会通过 --agent-env 注入到沙箱中的 agent；含 KEY/TOKEN 的字段不会出现在日志与命令记录里"
-                >
-                  <KeyValueEditor
-                    value={config.agent_env}
-                    onChange={(next) => patch({ agent_env: next })}
-                    keyPlaceholder="ANTHROPIC_API_KEY"
-                    valuePlaceholder="sk-..."
-                  />
-                </Field>
-              ) : (
-                <Advanced title="Agent 环境变量（可选）">
-                  <KeyValueEditor value={config.agent_env} onChange={(next) => patch({ agent_env: next })} />
-                </Advanced>
-              )}
-            </CardBody>
-          </Card>
+          <AgentEditor title={extraAgents.length ? 'Agent 与模型 · 1' : 'Agent 与模型'} config={config} patch={patch}
+            onRemove={extraAgents.length ? () => { patch(extraAgents[0].config); setExtraAgents(previous => previous.slice(1)) } : undefined} />
+          {extraAgents.map((row, index) => (
+            <AgentEditor key={row.id} title={`Agent 与模型 · ${index + 2}`} config={row.config}
+              patch={(values) => setExtraAgents(previous => previous.map(item => item.id === row.id ? { ...item, config: { ...item.config, ...values } } : item))}
+              onRemove={() => setExtraAgents(previous => previous.filter(item => item.id !== row.id))} />
+          ))}
+          <Button variant="secondary" disabled={extraAgents.length >= 31 || submit.isPending} onClick={() => setExtraAgents(previous => [...previous, {
+            id: crypto.randomUUID(), config: { ...agentConfig(DEFAULT_VERIFY), agent: 'claude-code', agent_api_protocol: 'anthropic' },
+          }])}>
+            <Plus className="h-4 w-4" aria-hidden /> 添加 Agent / 模型
+          </Button>
+          <p className="text-xs text-fg-muted">添加多项后将批量创建独立评测任务，共用数据集、Judge 和下方评测参数（最多 32 项）。每项可单独配置模型、密钥和思考模式。</p>
 
           <Card>
             <CardHeader
@@ -914,15 +967,6 @@ export default function SubmitVerify() {
               </Field>
 
               <Advanced title="进阶：kwargs 与容器环境变量">
-                <Field label="Agent kwargs (--agent-kwarg)">
-                  <KeyValueEditor
-                    value={config.agent_kwargs}
-                    onChange={(next) => patch({ agent_kwargs: next })}
-                    secretKeys={false}
-                    keyPlaceholder="max_turns"
-                    valuePlaceholder="40"
-                  />
-                </Field>
                 <Field label="环境 kwargs (--environment-kwarg)">
                   <KeyValueEditor
                     value={config.environment_kwargs}
@@ -948,7 +992,7 @@ export default function SubmitVerify() {
             <CardBody className="space-y-3">
               <div className="flex flex-wrap gap-1.5">
                 <Badge tone="primary">Harbor</Badge>
-                <Badge>{config.agent}</Badge>
+                {[...new Set(batchAgents.map(row => row.agent))].map(agent => <Badge key={agent}>{agent}</Badge>)}
                 <Badge tone="info">pass@{config.n_attempts}</Badge>
                 <Badge tone="success">并发 {config.n_concurrent}</Badge>
                 <Badge>{config.environment_type}</Badge>
@@ -962,23 +1006,31 @@ export default function SubmitVerify() {
                 <div className="flex justify-between gap-3">
                   <dt className="text-fg-muted">任务集</dt>
                   <dd className="truncate text-right text-fg">
-                    {config.dataset_id ? '已选择' : config.tasks_path || config.registry_dataset || '未选择'}
+                    {config.dataset_id ? selectedDataset?.name ?? '已选择' : config.tasks_path || config.registry_dataset || '未选择'}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-fg-muted">模型</dt>
                   <dd className="truncate text-right text-fg">
-                    {config.model_api_id ? modelApiName ?? '模型配置' : config.model || '（无需模型）'}
-                    {config.reasoning_effort && ` · ${config.reasoning_effort}`}
+                    {extraAgents.length ? `${batchAgents.length} 项（见下方列表）` : config.model_api_id ? modelApiName ?? '模型配置' : config.model || '（无需模型）'}
+                    {!extraAgents.length && config.reasoning_effort && ` · ${config.reasoning_effort}`}
                   </dd>
                 </div>
                 <div className="flex justify-between gap-3">
                   <dt className="text-fg-muted">密钥</dt>
                   <dd className="text-right text-fg">
-                    {Object.values(config.agent_env).filter(Boolean).length} 项已填写
+                    {batchAgents.reduce((count, row) => count + Object.values(row.agent_env).filter(Boolean).length, 0)} 项已填写
                   </dd>
                 </div>
               </dl>
+
+              {extraAgents.length > 0 && <div className="space-y-2 text-xs">
+                <p className="font-medium">将创建 {batchNames.length} 个任务</p>
+                <ul className="space-y-1">
+                  {batchNames.map((jobName, index) => <li key={index} className="break-all">{index + 1}. {jobName} <span className="text-fg-muted">（{batchAgents[index].agent}）</span></li>)}
+                </ul>
+                <p className="text-fg-muted">并发和 GPU 数量按每个任务计算，实际启动时间由审核和队列决定。</p>
+              </div>}
 
               {problems.length > 0 && (
                 <ul className="space-y-1 rounded-lg border border-warning/30 bg-warning-soft px-2.5 py-2">
@@ -1007,7 +1059,7 @@ export default function SubmitVerify() {
                   submit.mutate()
                 }}
               >
-                提交评测
+                {extraAgents.length ? `批量提交 ${extraAgents.length + 1} 个评测` : '提交评测'}
               </Button>
               <p className="text-[11px] leading-relaxed text-fg-subtle">
                 评测同样需要管理员审核。审核通过后平台会执行 <Mono>harbor run</Mono>，

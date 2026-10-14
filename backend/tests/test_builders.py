@@ -664,3 +664,31 @@ def test_harbor_multistep_builder_adapts_each_verifier_without_rewriting_config(
     assert (task / "task.toml").read_text() == config
     for name in ("prepare", "analyze"):
         assert (task / "steps" / name / "tests/_prt_rewardkit_runner.py").is_file()
+
+
+@pytest.mark.parametrize("batch, disabled", [(True, False), (False, False), (True, True)])
+def test_harbor_batch_judge_uses_per_job_task_copy(tmp_path, harbor_dataset, monkeypatch, batch, disabled):
+    import tomllib
+    from backend.app.models.job import HarborAction
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    task = Path(harbor_dataset.root_path) / "demo"
+    tests = task / "tests"
+    tests.mkdir()
+    rubric = '[judge]\nmode="individual"\njudge="claude-code"\n'
+    (tests / "judge.toml").write_text(rubric)
+    (tests / "test.sh").write_text('python3 -m rewardkit /tests\n')
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(
+        dataset_id=harbor_dataset.id, agent="nop", batch_judge=batch, disable_verification=disabled))
+    built = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    selected = Path(built.command[built.command.index("--path") + 1])
+    active = batch and not disabled
+    assert (selected != Path(harbor_dataset.root_path)) == active
+    assert tomllib.loads((selected / "demo/tests/judge.toml").read_text())["judge"]["mode"] == ("batched" if active else "individual")
+    assert (tests / "judge.toml").read_text() == rubric
+    if active:
+        # Dedicated regrade argv must point at the converted task tree too.
+        job.harbor_action = HarborAction(mode="regrade", source_job_id="original")
+        built = harbor_builder.build(job, tmp_path / "regrade", tmp_path / "regrade-out")
+        selected = Path(built.command[built.command.index("--task-path") + 1])
+        assert tomllib.loads((selected / "demo/tests/judge.toml").read_text())["judge"]["mode"] == "batched"
+        assert (tests / "judge.toml").read_text() == rubric

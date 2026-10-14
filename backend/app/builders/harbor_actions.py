@@ -6,7 +6,7 @@ from ..config import settings
 from ..models import Job
 from ..services import model_api_service, resources_service
 from ..services.harbor_action_service import snapshot_dir, verifier_path
-from .base import BuildResult, kv_flags
+from .base import BuildError, BuildResult, kv_flags
 from .harbor import _looks_secret, resolve_harbor_bin, resolve_harbor_python, validate_secret_env
 
 
@@ -41,7 +41,15 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
             argv += ["--filter-error-type", error]
         notes.append("保留已完成 trial；未完成及选定错误类型的 trial 从头执行，不恢复 Agent 会话或容器状态")
     else:
-        argv = ["job", "regrade", str(source), "--task-path", str(verifier_path(config)),
+        task_path = verifier_path(config)
+        if config.batch_judge:
+            from ..services.harbor_judge_service import prepare_batched_tasks
+            try:
+                task_path, count = prepare_batched_tasks(task_path, work_dir / "batch-judge-tasks")
+            except (OSError, ValueError) as exc:
+                raise BuildError(f"无法启用 Batch Judge: {exc}") from exc
+            notes.append(f"Batch Judge：{count} 份 Judge 配置已设置 mode=batched")
+        argv = ["job", "regrade", str(source), "--task-path", str(task_path),
                 "--job-name", job.id, "--jobs-dir", str(output_dir),
                 "--n-concurrent", str(config.n_concurrent), "--env", config.environment_type]
         argv += kv_flags("--verifier-env", verifier_env)

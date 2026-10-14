@@ -109,12 +109,14 @@ def _create_action(job_id: str, request: HarborActionRequest, *, actor: User) ->
     if not filters or any(not re.fullmatch(r"[A-Za-z_][\w.]{0,150}", value) for value in filters):
         raise HTTPException(400, "请至少选择一个有效的错误类型（默认 CancelledError）")
     if request.mode == "resume" and any(value is not None for value in (
-        request.dataset_id, request.judge_model_api_id, request.judge_api_protocol,
+        request.dataset_id, request.judge_model_api_id, request.judge_api_protocol, request.batch_judge,
     )):
         raise HTTPException(400, "恢复必须沿用原任务配置；如需更换任务集或 Judge，请使用重新判分")
     if request.mode == "regrade":
         config.disable_verification = False
         config.use_platform_image = False
+        if request.batch_judge is not None:
+            config.batch_judge = request.batch_judge
         if request.dataset_id is not None:
             config.dataset_id = request.dataset_id
             config.tasks_path = ""

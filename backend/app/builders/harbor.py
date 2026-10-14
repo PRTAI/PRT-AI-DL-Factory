@@ -168,6 +168,16 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if sources > 1:
         raise BuildError("同时指定了多个任务来源，请只保留一个")
     local_root = Path(dataset.root_path) if dataset is not None else Path(config.tasks_path) if config.tasks_path else None
+    if config.batch_judge and not config.disable_verification:
+        from ..services.harbor_judge_service import prepare_batched_tasks
+        if local_root is None:
+            raise BuildError("Batch Judge 需要本地任务集，请先导入 Registry 任务集")
+        try:
+            local_root, count = prepare_batched_tasks(local_root, work_dir / "batch-judge-tasks")
+        except (OSError, ValueError) as exc:
+            raise BuildError(f"无法启用 Batch Judge: {exc}") from exc
+        command[command.index("--path") + 1] = str(local_root)
+        notes.append(f"Batch Judge：{count} 份 Judge 配置已设置 mode=batched，原题包保持不变")
     if config.use_platform_image:
         from ..services import harbor_image_service
         if config.environment_type != "docker" or local_root is None or config.force_build:

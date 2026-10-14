@@ -12,7 +12,7 @@ from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
 from ..services import job_download_service, job_service
 from ..models.job import JobPublic, JobRenameRequest
-from ..models.job import HarborActionRequest
+from ..models.job import HarborActionRequest, VerifyBatchCreate
 from ..services import harbor_action_service
 from ..services.scheduler import gpu_snapshot
 
@@ -55,6 +55,11 @@ def overview(user: CurrentUser, project_id: str = Query(default="")) -> dict[str
 @router.post("", response_model=JobPublic, status_code=201, summary="提交任务")
 def create_job(payload: JobCreate, user: CurrentUser) -> Job:
     return job_service.create_job(payload, owner=user)
+
+
+@router.post("/verify-batch", response_model=list[JobPublic], status_code=201, summary="批量提交 Harbor 评测")
+def create_verify_batch(payload: VerifyBatchCreate, user: CurrentUser) -> list[Job]:
+    return job_service.create_verify_batch(payload, owner=user)
 
 
 @router.post("/batch-resubmit", summary="批量按原配置重跑已结束任务")

@@ -13,6 +13,7 @@ export function HarborActions({ job }: { job: Job }) {
   const [filters, setFilters] = React.useState(['CancelledError'])
   const [dataset, setDataset] = React.useState('keep')
   const [judge, setJudge] = React.useState('keep')
+  const [batchJudge, setBatchJudge] = React.useState(Boolean(job.verify?.batch_judge))
   const [protocol, setProtocol] = React.useState<'anthropic' | 'openai'>(job.verify?.judge_api_protocol ?? 'anthropic')
   const info = useQuery({
     queryKey: ['harbor-actions', job.id], queryFn: () => api.harborActions(job.id),
@@ -30,6 +31,7 @@ export function HarborActions({ job }: { job: Job }) {
       mode, filter_error_types: filters,
     } : {
       mode: 'regrade',
+      batch_judge: batchJudge,
       ...(dataset !== 'keep' ? { dataset_id: dataset } : {}),
       ...(judge !== 'keep' ? { judge_model_api_id: judge, judge_api_protocol: protocol } : {}),
     }),
@@ -45,6 +47,7 @@ export function HarborActions({ job }: { job: Job }) {
     setFilters(['CancelledError'])
     setDataset('keep')
     setJudge('keep')
+    setBatchJudge(Boolean(job.verify?.batch_judge))
     setProtocol(job.verify?.judge_api_protocol ?? 'anthropic')
     setMode(next)
   }
@@ -100,6 +103,10 @@ export function HarborActions({ job }: { job: Job }) {
               { value: 'anthropic', label: 'Anthropic Messages' }, { value: 'openai', label: 'OpenAI Chat Completions' },
             ]} />
           </Field>}
+          <label className="flex items-start gap-2">
+            <Checkbox checked={batchJudge} onCheckedChange={setBatchJudge} />
+            <span>启用 Batch Judge<span className="mt-1 block text-fg-muted">将本次评分题包副本中 [judge].mode 设为 batched；关闭时沿用题包设置。</span></span>
+          </label>
           <p className="text-fg-subtle">并发数和沙箱类型沿用原配置；评分资源和超时取评分题包配置。</p>
         </>}
         {create.isError && <ErrorBox message={create.error instanceof ApiError ? create.error.message : '提交失败'} />}
