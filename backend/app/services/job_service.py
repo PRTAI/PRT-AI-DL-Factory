@@ -324,7 +324,7 @@ def _validate_verify(payload: JobCreate, *, harbor_action: HarborAction | None =
     model_api_service.agent_protocol(config.agent, config.agent_api_protocol)
     if config.judge_model_api_id and not config.disable_verification:
         model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol)
-    if harbor_action is not None:
+    if harbor_action is not None and harbor_action.mode != "rerun":
         # Recorded configuration supplies the agent for resume; regrade never runs it.
         return
     if config.model_api_id:

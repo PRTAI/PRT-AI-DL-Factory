@@ -6,7 +6,7 @@
  * 跑着的排最前，其次失败，再是完成，最后是还没开始的。
  */
 import * as React from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle,
   Bot,
@@ -18,10 +18,13 @@ import {
   FlaskConical,
   Search,
 } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
+import { useNavigate } from 'react-router-dom'
+import { toast } from 'sonner'
+import { trialSelectionId, toggleTrialSelection } from '@/lib/trial-selection'
 import type { TrialPhase, TrialState } from '@/lib/types'
 import { cn, formatDuration, formatNumber } from '@/lib/utils'
-import { Badge, Button, Card, CardBody, CardHeader, Dialog, EmptyState, Input, Skeleton, StatusDot, Table, Td, Th, Tr } from './ui'
+import { Badge, Button, Card, CardBody, CardHeader, Dialog, EmptyState, ErrorBox, Input, Skeleton, StatusDot, Table, Td, Th, Tr } from './ui'
 import { CopyButton, Mono } from './common'
 import { AgentTrace } from './AgentTrace'
 
@@ -50,7 +53,28 @@ const FILTERS: { value: string; label: string; keys: string[] }[] = [
 
 const PAGE_SIZE = 10
 
-export function TrialBoard({ jobId, live }: { jobId: string; live: boolean }) {
+export function TrialBoard({ jobId, live, canAct = false }: { jobId: string; live: boolean; canAct?: boolean }) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [selected, setSelected] = React.useState<TrialState[]>([])
+  const action = useMutation({
+    mutationFn: (mode: 'rerun' | 'regrade' | 'resume') => api.createTrialActions(jobId, {
+      mode, trial_names: selected.map(trialSelectionId),
+    }),
+    onSuccess: (jobs) => {
+      setSelected([])
+      queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      toast.success(`已创建 ${jobs.length} 个任务，${jobs.some(job => job.status === 'pending_review') ? '等待审核' : '已进入排队'}`)
+      navigate(jobs.length === 1 ? `/jobs/${jobs[0].id}` : '/jobs')
+    },
+  })
+  const selectRows = (rows: TrialState[], checked: boolean) => {
+    const next = toggleTrialSelection(selected, rows, checked)
+    if (next.length > 100) { toast.error('每次最多选择 100 条记录'); return }
+    setSelected(next)
+    action.reset()
+  }
+  const selectedIds = new Set(selected.map(trialSelectionId))
   const [page, setPage] = React.useState(1)
   const [phase, setPhase] = React.useState('')
   const [keyword, setKeyword] = React.useState('')
@@ -112,6 +136,18 @@ export function TrialBoard({ jobId, live }: { jobId: string; live: boolean }) {
           </div>
         </div>
 
+        {canAct && <div className="space-y-2 rounded-lg border border-border bg-bg-elevated p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-auto text-xs text-fg-muted">已选 {selected.length} 条（支持跨页，最多 100 条）</span>
+            <Button size="sm" variant="secondary" disabled={!selected.length || action.isPending} loading={action.isPending && action.variables === 'rerun'} onClick={() => action.mutate('rerun')}>重新运行选中</Button>
+            <Button size="sm" variant="secondary" disabled={!selected.length || selected.some(row => !row.path) || action.isPending} loading={action.isPending && action.variables === 'regrade'} onClick={() => action.mutate('regrade')}>直接评分选中</Button>
+            <Button size="sm" variant="secondary" disabled={!selected.length || selected.some(row => row.phase === 'success') || action.isPending} loading={action.isPending && action.variables === 'resume'} onClick={() => action.mutate('resume')}>中断恢复选中</Button>
+            <Button size="sm" variant="ghost" disabled={!selected.length || action.isPending} onClick={() => { setSelected([]); action.reset() }}>清空选择</Button>
+          </div>
+          <p className="text-[11px] leading-relaxed text-fg-subtle">自动沿用原配置，每条选中记录创建一个独立任务，仅执行一次。直接评分需要已保存的产物；中断恢复仅补跑未完成或失败记录，从头执行该条数据，不恢复 Agent 对话或容器进程。全选仅作用于当前页。</p>
+          {action.isError && <ErrorBox message={action.error instanceof ApiError ? action.error.message : '提交失败'} />}
+        </div>}
+
         {trials.isLoading ? (
           <Skeleton className="h-64 w-full" />
         ) : !data?.items.length ? (
@@ -124,6 +160,7 @@ export function TrialBoard({ jobId, live }: { jobId: string; live: boolean }) {
             <Table>
               <thead>
                 <tr>
+                  {canAct && <Th className="w-10"><input type="checkbox" className="h-4 w-4 accent-primary" aria-label="全选当前页数据" disabled={action.isPending || trials.isPlaceholderData} checked={data.items.length > 0 && data.items.every(row => selectedIds.has(trialSelectionId(row)))} onChange={(event) => selectRows(data.items, event.target.checked)} /></Th>}
                   <Th>任务</Th>
                   <Th className="w-[150px]">阶段</Th>
                   <Th className="w-[90px]">reward</Th>
@@ -134,7 +171,9 @@ export function TrialBoard({ jobId, live }: { jobId: string; live: boolean }) {
               </thead>
               <tbody>
                 {data.items.map((trial) => (
-                  <TrialRow key={trial.trial_name} trial={trial} onOpen={() => setOpenTrial(trial.trial_name)} />
+                  <TrialRow key={trialSelectionId(trial)} trial={trial} onOpen={() => setOpenTrial(trial.trial_name)}
+                    selectable={canAct} checked={selectedIds.has(trialSelectionId(trial))} disabled={action.isPending || trials.isPlaceholderData}
+                    onSelect={(checked) => selectRows([trial], checked)} />
                 ))}
               </tbody>
             </Table>
@@ -168,11 +207,14 @@ const PHASE_SECONDS_ORDER: [string, string][] = [
   ['running_verifier', '验证'],
 ]
 
-function TrialRow({ trial, onOpen }: { trial: TrialState; onOpen: () => void }) {
+function TrialRow({ trial, onOpen, selectable, checked, disabled, onSelect }: {
+  trial: TrialState; onOpen: () => void; selectable: boolean; checked: boolean; disabled: boolean; onSelect: (checked: boolean) => void
+}) {
   const meta = PHASE_META[trial.phase] ?? PHASE_META.pending
-  const clickable = trial.phase !== 'pending'
+  const clickable = trial.phase !== 'pending' && Boolean(trial.path)
   return (
     <Tr className={cn(clickable && 'cursor-pointer')} onClick={clickable ? onOpen : undefined}>
+      {selectable && <Td onClick={(event) => event.stopPropagation()}><input type="checkbox" className="h-4 w-4 accent-primary" aria-label={`选择数据 ${trial.trial_name}`} checked={checked} disabled={disabled} onChange={(event) => onSelect(event.target.checked)} /></Td>}
       <Td>
         <div className="num text-xs font-medium text-fg">{trial.task_name}</div>
         <div className="num truncate text-[11px] text-fg-subtle">{trial.trial_name}</div>

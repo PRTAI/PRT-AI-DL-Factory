@@ -12,7 +12,7 @@ from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
 from ..services import job_download_service, job_service
 from ..models.job import JobPublic, JobRenameRequest
-from ..models.job import HarborActionRequest, VerifyBatchCreate
+from ..models.job import HarborActionRequest, HarborTrialActionRequest, VerifyBatchCreate
 from ..services import harbor_action_service
 from ..services.scheduler import gpu_snapshot
 
@@ -174,6 +174,12 @@ def harbor_actions(job_id: str, user: CurrentUser) -> dict[str, Any]:
 @router.post("/{job_id}/harbor-actions", response_model=JobPublic, status_code=201, summary="恢复评测或重新判分")
 def create_harbor_action(job_id: str, payload: HarborActionRequest, user: CurrentUser) -> Job:
     return harbor_action_service.create_action(job_id, payload, actor=user)
+
+
+@router.post("/{job_id}/trial-actions", response_model=list[JobPublic], status_code=201,
+             summary="对选中的 trial 批量重跑、评分或恢复")
+def create_trial_actions(job_id: str, payload: HarborTrialActionRequest, user: CurrentUser) -> list[Job]:
+    return harbor_action_service.create_trial_actions(job_id, payload, actor=user)
 
 
 @router.get("/{job_id}/verify-suggestion", summary="从训练产物发起评测的建议")

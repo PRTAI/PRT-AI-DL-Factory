@@ -1,11 +1,12 @@
 """Recovery commands use Harbor's dedicated CLI, not an oracle/nop run."""
 
+import json
 from pathlib import Path
 
 from ..config import settings
 from ..models import Job
 from ..services import model_api_service, resources_service
-from ..services.harbor_action_service import snapshot_dir, verifier_path
+from ..services.harbor_action_service import selected_config, snapshot_dir, verifier_path
 from .base import BuildError, BuildResult, kv_flags
 from .harbor import _looks_secret, resolve_harbor_bin, resolve_harbor_python, validate_secret_env
 
@@ -18,13 +19,13 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     agent_env: dict[str, str] = {}
     verifier_env: dict[str, str] = {}
     notes = ["派生任务使用原始记录副本，保留原任务的产物和评分记录"]
-    if action.mode == "resume" and config.model_api_id:
+    if action.mode in {"resume", "rerun"} and config.model_api_id:
         resolved = model_api_service.resolve(
             config.model_api_id, model_style=resources_service.model_style_for(config.agent),
             protocol=model_api_service.agent_protocol(config.agent, config.agent_api_protocol),
         )
         agent_env.update(resolved.env)
-    if action.mode == "resume":
+    if action.mode in {"resume", "rerun"}:
         agent_env.update(config.agent_env)
     if config.judge_model_api_id and not config.disable_verification:
         judge = model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol)
@@ -35,7 +36,10 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         })
     verifier_env.update(config.verifier_env)
     verifier_env = {key: value for key, value in verifier_env.items() if value}
-    if action.mode == "resume":
+    if action.mode == "rerun":
+        argv = ["run", "--config", str(work_dir / "selected-config.json")]
+        notes.append("仅重新执行选中的一次 trial，沿用其 Agent、环境和超时配置")
+    elif action.mode == "resume":
         argv = ["job", "resume", "--job-path", str(source)]
         for error in action.filter_error_types:
             argv += ["--filter-error-type", error]
@@ -55,12 +59,23 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         argv += kv_flags("--verifier-env", verifier_env)
         notes.append("仅运行独立 verifier；资源与超时取评分题包配置，不执行 Agent")
     env = {**agent_env, **verifier_env}
+    extra_files = {}
+    if action.trial_name and action.mode in {"resume", "rerun"}:
+        native = selected_config(job, output_dir)
+        for stage, target, values in (("AGENT", native["agents"][0], agent_env),
+                                      ("VERIFIER", native["verifier"], verifier_env)):
+            for key, value in values.items():
+                variable = f"PRT_SELECTED_{stage}_{key}"
+                env[variable] = value
+                target.setdefault("env", {})[key] = "${" + variable + "}"
+        extra_files["selected-config.json"] = json.dumps(native, ensure_ascii=False)
+        notes.append(f"源 trial：{action.trial_name}；本次仅执行 1 条数据")
     validate_secret_env(env)
     secrets = [value for key, value in {**env, **job.resources.env}.items() if value and _looks_secret(key)]
     runtime = "harbor_runtime.py"
     return BuildResult(
         command=[resolve_harbor_python(binary), "-u", str(work_dir / runtime), *argv],
         cwd=str(work_dir), output_dir=str(output_dir), env={"PYTHONUNBUFFERED": "1", **env},
-        files={runtime: (settings.resources_dir / runtime).read_text(encoding="utf-8")},
+        files={runtime: (settings.resources_dir / runtime).read_text(encoding="utf-8"), **extra_files},
         notes=notes, secrets=secrets,
     )

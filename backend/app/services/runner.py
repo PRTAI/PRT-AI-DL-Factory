@@ -67,7 +67,10 @@ def prepare(job: Job):
 
     if job.harbor_action is not None:
         from . import harbor_action_service
-        harbor_action_service.prepare_snapshot(job, work_dir, output_dir)
+        harbor_action_service.prepare_snapshot(
+            job, work_dir, output_dir,
+            selected_native=json.loads(result.files["selected-config.json"]) if "selected-config.json" in result.files else None,
+        )
 
     for rel_path, content in result.files.items():
         target = work_dir / rel_path

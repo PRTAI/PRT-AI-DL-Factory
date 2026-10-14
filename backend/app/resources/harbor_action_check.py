@@ -9,7 +9,68 @@ import tempfile
 from pathlib import Path
 
 
-def inspect_source(source: Path) -> dict:
+def selected_directories(source: Path, trial_names: list[str] | None) -> list[Path]:
+    if trial_names is None:
+        return sorted(source.iterdir())
+    paths = []
+    for name in trial_names:
+        if name.startswith("@planned:"):
+            continue
+        if not name or name in {".", ".."} or "/" in name or "\\" in name:
+            raise ValueError("无效的 trial 标识")
+        path = source / name
+        if not path.is_dir() or path.is_symlink():
+            raise ValueError(f"选中的记录不存在：{name}")
+        paths.append(path)
+    return paths
+
+
+def selected_job_configs(source: Path, trial_names: list[str]) -> list[dict]:
+    """Each selected attempt becomes one native job, without tasks x attempts expansion."""
+    from harbor.models.job.config import JobConfig
+    from harbor.models.trial.config import TrialConfig
+
+    original = JobConfig.model_validate_json((source / "config.json").read_text())
+    root = original.model_dump(mode="json")
+    rows = []
+    for name in trial_names:
+        if name.startswith("@planned:"):
+            try:
+                index = int(name.split(":", 1)[1])
+                if index < 0:
+                    raise ValueError()
+                block = json.loads((source / "lock.json").read_text())["trials"][index]
+                task = block["task"]
+                task_config = {key: task[key] for key in ("path", "git_url", "git_commit_id") if task.get(key)}
+                if task.get("type") == "package":
+                    task_config = {"name": task["name"], "ref": task.get("version")}
+                block = {**root, **block, "task": task_config,
+                         "extra_instructions": root.get("extra_instructions", [])}
+                trial = TrialConfig.model_validate(block)
+            except (ValueError, KeyError, IndexError, OSError, TypeError):
+                raise ValueError(f"无法恢复待开始记录的配置：{name}") from None
+        else:
+            directory = selected_directories(source, [name])[0]
+            try:
+                if (directory / "config.json").is_file():
+                    trial = TrialConfig.model_validate_json((directory / "config.json").read_text())
+                else:
+                    trial = TrialConfig.model_validate(json.loads((directory / "result.json").read_text())["config"])
+            except Exception:
+                raise ValueError(f"{name} 缺少有效的 trial 配置，不能自动重跑") from None
+        data = dict(root)
+        # Preserve per-attempt overrides, including timeouts, environment and instructions.
+        for key, value in trial.model_dump(mode="json").items():
+            if key in JobConfig.model_fields and key not in {"job_id"}:
+                data[key] = value
+        data.update(tasks=[trial.task.model_dump(mode="json")], datasets=[],
+                    agents=[trial.agent.model_dump(mode="json")], n_attempts=1, source_jobs=[])
+        native = JobConfig.model_validate(data)
+        rows.append({"trial_name": name, "job_config": native.model_dump(mode="json")})
+    return rows
+
+
+def inspect_source(source: Path, trial_names: list[str] | None = None) -> dict:
     from harbor.cli import jobs
     from harbor.models.job.config import JobConfig
     from harbor.models.trial.result import TrialResult
@@ -26,7 +87,7 @@ def inspect_source(source: Path) -> dict:
     regrade_error = ""
     if not callable(getattr(jobs, "regrade", None)):
         regrade_error = "当前 Harbor 未提供 job regrade，请升级 Harbor"
-    for trial in sorted(source.iterdir()):
+    for trial in selected_directories(source, trial_names):
         if not trial.is_dir() or trial.name.startswith("."):
             continue
         try:
@@ -54,7 +115,7 @@ def inspect_source(source: Path) -> dict:
             "error_types": errors, "regrade_error": regrade_error}
 
 
-def check_regrade(source: Path, task_path: Path) -> None:
+def check_regrade(source: Path, task_path: Path, trial_names: list[str] | None = None) -> None:
     from harbor.models.trial.config import SourceTrialConfig, TaskConfig, TrialConfig
     from harbor.models.trial.result import TrialResult
     from harbor.trial.regrade import RegradeError, check_task_regradable, expand_task_path, local_task_name
@@ -66,7 +127,7 @@ def check_regrade(source: Path, task_path: Path) -> None:
         if name in tasks:
             raise ValueError(f"评分任务集存在同名任务：{name}")
         tasks[name] = path
-    for trial in sorted(source.iterdir()):
+    for trial in selected_directories(source, trial_names):
         if not trial.is_dir():
             continue
         try:
@@ -108,11 +169,14 @@ def main() -> None:
     try:
         request = json.load(sys.stdin)
         source = Path(request["source"])
-        result = inspect_source(source)
+        names = request.get("trial_names")
+        result = inspect_source(source, names)
+        if names is not None:
+            result["selected"] = selected_job_configs(source, names)
         if request.get("task_path"):
             if result["regrade_error"]:
                 raise ValueError(result["regrade_error"])
-            check_regrade(source, Path(request["task_path"]))
+            check_regrade(source, Path(request["task_path"]), names)
         print(json.dumps({"ok": True, **result}, ensure_ascii=False))
     except ValueError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))

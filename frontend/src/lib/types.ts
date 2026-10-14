@@ -374,7 +374,7 @@ export interface JobReview {
 }
 
 export interface Job {
-  harbor_action?: { mode: 'resume' | 'regrade'; source_job_id: string; filter_error_types: string[] } | null
+  harbor_action?: { mode: 'rerun' | 'resume' | 'regrade'; source_job_id: string; trial_name?: string | null; filter_error_types: string[] } | null
   id: string
   name: string
   note: string
@@ -811,6 +811,7 @@ export type TrialPhase =
   | 'failed'
 
 export interface TrialState {
+  selection_id?: string
   trial_name: string
   task_name: string
   phase: TrialPhase

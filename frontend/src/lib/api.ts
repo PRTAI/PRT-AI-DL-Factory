@@ -334,6 +334,8 @@ export const api = {
   harborActions: (id: string) => request<{
     recorded_trials: number; unfinished_trials: number; error_types: Record<string, number>; regrade_error: string
   }>(`/api/jobs/${id}/harbor-actions`),
+  createTrialActions: (id: string, payload: { mode: 'rerun' | 'regrade' | 'resume'; trial_names: string[] }) =>
+    request<Job[]>(`/api/jobs/${id}/trial-actions`, { method: 'POST', body: JSON.stringify(payload) }),
   createHarborAction: (id: string, payload: {
     mode: 'resume' | 'regrade'; filter_error_types?: string[]; dataset_id?: string
     judge_model_api_id?: string; judge_api_protocol?: 'anthropic' | 'openai'

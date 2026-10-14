@@ -357,8 +357,10 @@ class JobMetricsSummary(Base):
 
 
 class HarborAction(Base):
-    mode: Literal["resume", "regrade"]
+    mode: Literal["rerun", "resume", "regrade"]
     source_job_id: str
+    trial_name: str | None = None
+    selected_job_config: dict[str, Any] | None = None
     filter_error_types: list[str] = Field(default_factory=lambda: ["CancelledError"], max_length=50)
 
 
@@ -369,6 +371,13 @@ class HarborActionRequest(Base):
     judge_api_protocol: Literal["anthropic", "openai"] | None = None
     dataset_id: str | None = None
     batch_judge: bool | None = None
+
+
+class HarborTrialActionRequest(Base):
+    model_config = {"extra": "forbid"}
+
+    mode: Literal["rerun", "resume", "regrade"]
+    trial_names: list[str] = Field(min_length=1, max_length=100)
 
 
 class Job(Base):
@@ -423,7 +432,10 @@ class JobPublic(Job):
 
     @model_serializer(mode="wrap")
     def serialize_public(self, handler) -> dict[str, Any]:
-        return public_payload(handler(self))
+        payload = public_payload(handler(self))
+        if payload.get("harbor_action"):
+            payload["harbor_action"].pop("selected_job_config", None)
+        return payload
 
 
 class JobCreate(Base):

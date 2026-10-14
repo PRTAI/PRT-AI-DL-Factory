@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from ..builders.base import BuildError
 from ..config import settings
 from ..models import DatasetKind, Job, JobCreate, JobType, User, VerifyConfig
-from ..models.job import HarborAction, HarborActionRequest
+from ..models.job import HarborAction, HarborActionRequest, HarborTrialActionRequest
 from ..store import store
 from . import metrics_parser
 
@@ -55,13 +55,13 @@ def _source(job_id: str, actor: User) -> Job:
     return job
 
 
-def _check(source: Path, task_path: Path | None = None) -> dict:
+def _check(source: Path, task_path: Path | None = None, trial_names: list[str] | None = None) -> dict:
     from ..builders.harbor import resolve_harbor_bin, resolve_harbor_python
     binary = resolve_harbor_bin()
     try:
         result = subprocess.run(
             [resolve_harbor_python(binary), str(settings.resources_dir / "harbor_action_check.py")],
-            input=json.dumps({"source": str(source), "task_path": str(task_path) if task_path else None}),
+            input=json.dumps({"source": str(source), "task_path": str(task_path) if task_path else None, "trial_names": trial_names}),
             capture_output=True, text=True, timeout=45,
         )
         data = json.loads(result.stdout)
@@ -141,11 +141,70 @@ def _create_action(job_id: str, request: HarborActionRequest, *, actor: User) ->
     return job_service.create_job(payload, owner=actor, harbor_action=action)
 
 
+def create_trial_actions(job_id: str, request: HarborTrialActionRequest, *, actor: User) -> list[Job]:
+    from . import harbor_trials, job_service
+
+    with SOURCE_LOCK:
+        source = _source(job_id, actor)
+        names = list(dict.fromkeys(request.trial_names))
+        try:
+            root = source_dir(source)
+            states = {row.selection_id or row.trial_name: row for row in
+                      harbor_trials.scan(root, job_status=source.status.value)}
+            for name in names:
+                state = states.get(name)
+                if state is None:
+                    raise BuildError(f"选中的记录不存在或已变化：{name}")
+                if request.mode == "resume" and state.phase == "success":
+                    raise BuildError(f"{state.trial_name} 已完成，请使用重新运行或直接评分")
+                if request.mode == "regrade" and not state.path:
+                    raise BuildError(f"{state.trial_name} 尚未执行，没有可评分的产物")
+            checked = _check(root, verifier_path(source.verify) if request.mode == "regrade" else None, names)
+        except BuildError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        prepared = []
+        label = {"rerun": "重跑", "regrade": "评分", "resume": "恢复"}[request.mode]
+        for row in checked["selected"]:
+            config = source.verify.model_copy(deep=True)
+            native = row["job_config"]
+            config.n_attempts = 1
+            config.n_tasks = None
+            config.task_names = [states[row["trial_name"]].task_name]
+            config.exclude_task_names = []
+            if request.mode == "regrade":
+                config.disable_verification = False
+                config.use_platform_image = False
+            action = HarborAction(mode=request.mode, source_job_id=source.id,
+                                  trial_name=row["trial_name"], selected_job_config=native)
+            payload = JobCreate(
+                name=f"{source.name[:50]} ({label}) {row['trial_name'][:60]}",
+                note=source.note, type=JobType.VERIFY, project_id=source.project_id,
+                tags=source.tags, parent_job_id=source.id,
+                resources=source.resources.model_copy(deep=True, update={"gpu_ids": []}), verify=config,
+            )
+            prepared.append(job_service._prepare_job(payload, owner=actor, harbor_action=action))
+        jobs = [job for job, _ in prepared]
+        store.jobs.put_many(jobs)
+        for job, project_name in prepared:
+            job_service._announce_created_job(job, owner=actor, project_name=project_name)
+        if any(job.status.value == "queued" for job in jobs):
+            job_service.scheduler.dispatch()
+        return jobs
+
+
+def selected_config(job: Job, output_dir: Path) -> dict:
+    """A new native plan contains exactly one selected attempt and no inherited results."""
+    import copy
+    config = copy.deepcopy(job.harbor_action.selected_job_config)
+    config.update(job_name=job.id, jobs_dir=str(output_dir), source_jobs=[], datasets=[], n_attempts=1)
+    return config
+
+
 def snapshot_dir(job: Job, work_dir: Path, output_dir: Path) -> Path:
-    return output_dir / job.id if job.harbor_action.mode == "resume" else work_dir / "regrade-source"
+    return output_dir / job.id if job.harbor_action.mode in {"resume", "rerun"} else work_dir / "regrade-source"
 
 
-def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path) -> None:
+def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path, *, selected_native: dict | None = None) -> None:
     """Only called for execution, never from command preview. Atomic publication."""
     action = job.harbor_action
     source = store.jobs.get(action.source_job_id)
@@ -159,8 +218,21 @@ def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path) -> None:
     try:
         if staging.exists():
             shutil.rmtree(staging)
-        shutil.copytree(original, staging)
-        if action.mode == "resume":
+        if action.trial_name:
+            staging.mkdir(parents=True)
+            if action.mode == "regrade":
+                # Copy only the selected attempt, never siblings or aggregate results.
+                trial = original / action.trial_name
+                if not trial.is_dir() or trial.parent != original:
+                    raise BuildError("选中的 trial 记录已不存在")
+                shutil.copytree(trial, staging / trial.name)
+                shutil.copy2(original / "config.json", staging / "config.json")
+            else:
+                native = selected_native or selected_config(job, output_dir)
+                (staging / "config.json").write_text(json.dumps(native, ensure_ascii=False), encoding="utf-8")
+        else:
+            shutil.copytree(original, staging)
+        if action.mode == "resume" and not action.trial_name:
             config_path = staging / "config.json"
             config = json.loads(config_path.read_text())
             config.update(job_name=job.id, jobs_dir=str(output_dir))

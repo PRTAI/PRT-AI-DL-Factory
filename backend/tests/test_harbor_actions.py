@@ -291,3 +291,133 @@ def test_scheduler_leaves_exited_managed_process_to_supervisor(tmp_path):
     finally:
         runner._PROCESSES.pop(job.id, None)
         store.jobs.delete(job.id)
+
+
+def _selected(client, headers, source, mode, names):
+    return client.post(f"/api/jobs/{source.id}/trial-actions", headers=headers,
+                       json={"mode": mode, "trial_names": names})
+
+
+@pytest.mark.parametrize("mode, trial_name", [("rerun", "demo__done"), ("resume", "demo__cancelled")])
+def test_selected_attempt_runs_exactly_once(client, member_headers, recorded_job, mode, trial_name):
+    from harbor.job import Job as NativeJob
+    from harbor.models.job.config import JobConfig
+    source, root = recorded_job
+    before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    response = _selected(client, member_headers, source, mode, [trial_name])
+    assert response.status_code == 201, response.text
+    row = response.json()[0]
+    assert row["harbor_action"]["trial_name"] == trial_name
+    assert "selected_job_config" not in row["harbor_action"]
+    assert row["verify"]["n_attempts"] == 1
+    child = store.jobs.get(row["id"])
+    built, work, output = runner.prepare(child)
+    config = JobConfig.model_validate_json((output / child.id / "config.json").read_text())
+    assert config.n_attempts == 1
+    assert config.datasets == [] and config.source_jobs == []
+    native = asyncio.run(NativeJob.create(config))
+    assert len(native._remaining_trial_configs) == 1
+    assert native._remaining_trial_configs[0].task.path == Path(source.verify.tasks_path)
+    assert not native._remaining_trial_configs[0].is_regrade
+    native._close_logger_handlers()
+    assert not (output / child.id / "demo__done").exists()
+    assert not (output / child.id / "demo__cancelled").exists()
+    assert "resume" in built.command if mode == "resume" else "run" in built.command
+    for name, content in before.items():
+        assert (root / name).read_bytes() == content
+
+
+def test_selected_regrade_ignores_unselected_missing_artifacts(client, member_headers, recorded_job):
+    from harbor.cli import jobs as native_cli
+    from harbor.job import Job as NativeJob
+    from unittest.mock import patch
+    source, root = recorded_job
+    (root / "demo__cancelled/artifacts/manifest.json").unlink()
+    response = _selected(client, member_headers, source, "regrade", ["demo__done"])
+    assert response.status_code == 201, response.text
+    child = store.jobs.get(response.json()[0]["id"])
+    built, work, output = runner.prepare(child)
+    snapshot = work / "regrade-source"
+    assert (snapshot / "demo__done/artifacts/manifest.json").is_file()
+    assert not (snapshot / "demo__cancelled").exists()
+    assert not (snapshot / "demo__unfinished").exists()
+    seen = []
+
+    async def fake_run(job):
+        seen.append(job)
+        from types import SimpleNamespace
+        return SimpleNamespace(trial_results=[])
+
+    with patch.object(NativeJob, "run", fake_run), patch.object(native_cli, "print_job_results_tables"), \
+            patch("harbor.environments.docker.docker.DockerEnvironment.preflight"):
+        native_cli.regrade(source=str(snapshot), task_paths=[Path(source.verify.tasks_path)],
+                          jobs_dir=output, job_name=child.id)
+    assert len(seen[0]._trial_configs) == 1
+    assert seen[0]._trial_configs[0].is_regrade
+    assert "--agent" not in built.command
+
+
+def test_selected_batch_is_atomic_and_checks_permissions(client, admin_headers, member_headers, recorded_job):
+    source, _ = recorded_job
+    before = store.jobs.count()
+    for mode, names in [("rerun", ["demo__done", "../outside"]),
+                        ("resume", ["demo__cancelled", "demo__done"]),
+                        ("rerun", ["demo__done", "demo__unfinished"])]:
+        response = _selected(client, member_headers, source, mode, names)
+        assert response.status_code == 400, response.text
+        assert store.jobs.count() == before
+    source.owner_id = "other-owner"
+    store.jobs.put(source)
+    assert _selected(client, member_headers, source, "rerun", ["demo__done"]).status_code == 403
+    source.status = JobStatus.RUNNING
+    store.jobs.put(source)
+    assert _selected(client, admin_headers, source, "rerun", ["demo__done"]).status_code == 409
+
+
+def test_selected_batch_keeps_attempts_distinct_and_deduplicates_clicks(client, member_headers, recorded_job):
+    source, _ = recorded_job
+    response = _selected(client, member_headers, source, "rerun", ["demo__done", "demo__cancelled", "demo__done"])
+    assert response.status_code == 201, response.text
+    rows = response.json()
+    assert len(rows) == 2
+    assert len({row["id"] for row in rows}) == 2
+    assert {row["harbor_action"]["trial_name"] for row in rows} == {"demo__done", "demo__cancelled"}
+    assert all(row["status"] == "pending_review" for row in rows)
+    assert all(row["parent_job_id"] == source.id for row in rows)
+
+
+def test_selected_pending_uses_lock_identity_and_one_attempt(client, member_headers, recorded_job):
+    from harbor.job import Job as NativeJob
+    from harbor.models.job.config import JobConfig
+    from backend.app.services import harbor_trials
+    source, root = recorded_job
+    original = asyncio.run(NativeJob.create(JobConfig.model_validate_json((root / "config.json").read_text())))
+    original._init_job_lock()
+    original._write_job_lock()
+    original._close_logger_handlers()
+    states = harbor_trials.scan(root, job_status=source.status.value)
+    pending = [row for row in states if row.selection_id]
+    assert len(pending) == 1
+    response = _selected(client, member_headers, source, "resume", [pending[0].selection_id])
+    assert response.status_code == 201, response.text
+    child = store.jobs.get(response.json()[0]["id"])
+    built, work, output = runner.prepare(child)
+    config = JobConfig.model_validate_json((output / child.id / "config.json").read_text())
+    assert config.n_attempts == 1 and len(config.tasks) == 1
+    assert config.tasks[0].path == Path(source.verify.tasks_path)
+    assert _selected(client, member_headers, source, "regrade", [pending[0].selection_id]).status_code == 400
+
+
+def test_selected_credentials_stay_in_environment(client, member_headers, recorded_job):
+    source, _ = recorded_job
+    source.verify.agent_env = {"PRIVATE_API_KEY": "secret-for-selected-trial"}
+    store.jobs.put(source)
+    response = _selected(client, member_headers, source, "rerun", ["demo__done"])
+    assert response.status_code == 201, response.text
+    assert "secret-for-selected-trial" not in response.text
+    child = store.jobs.get(response.json()[0]["id"])
+    built, work, output = runner.prepare(child)
+    assert "secret-for-selected-trial" in built.secrets
+    assert "secret-for-selected-trial" not in built.files["selected-config.json"]
+    assert built.env["PRT_SELECTED_AGENT_PRIVATE_API_KEY"] == "secret-for-selected-trial"
+    assert json.loads((output / child.id / "config.json").read_text())["agents"][0]["env"]["PRIVATE_API_KEY"] == "${PRT_SELECTED_AGENT_PRIVATE_API_KEY}"

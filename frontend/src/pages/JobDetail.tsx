@@ -328,7 +328,8 @@ export default function JobDetail() {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <StatusBadge status={liveStatus} />
           <JobTypeBadge type={data.type} framework={data.framework} />
-          {data.harbor_action && <Badge tone="info">{data.harbor_action.mode === 'resume' ? '中断恢复' : '重新判分'}</Badge>}
+          {data.harbor_action?.trial_name && <Badge>{data.harbor_action.trial_name}</Badge>}
+          {data.harbor_action && <Badge tone="info">{{ rerun: '选中数据重跑', resume: '中断恢复', regrade: '重新判分' }[data.harbor_action.mode]}</Badge>}
           {data.tags.map((tag) => (
             <Badge key={tag}>{tag}</Badge>
           ))}
@@ -470,7 +471,7 @@ export default function JobDetail() {
         </TabsContent>
 
         <TabsContent value="trials" className="mt-3">
-          <TrialBoard jobId={data.id} live={isActive} />
+          <TrialBoard key={data.id} jobId={data.id} live={isActive} canAct={canControl && ['succeeded', 'failed', 'cancelled'].includes(data.status)} />
         </TabsContent>
 
         <TabsContent value="config" className="mt-3">

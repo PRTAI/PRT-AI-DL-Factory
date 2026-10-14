@@ -38,6 +38,7 @@ class TrialState:
     trial_name: str
     task_name: str
     phase: str
+    selection_id: str = ""
     detail: str = ""  # 子状态：启动容器 / 安装 agent / …
     reward: float | None = None
     rewards: dict[str, Any] = field(default_factory=dict)
@@ -324,7 +325,7 @@ def _planned_trials(job_dir: Path) -> list[dict[str, Any]]:
     """job 级 lock.json 里的 trials 清单（一开始就写好），用来补出还没开始的。"""
     lock = _read_json(job_dir / "lock.json") or {}
     rows: list[dict[str, Any]] = []
-    for entry in lock.get("trials") or []:
+    for plan_index, entry in enumerate(lock.get("trials") or []):
         if not isinstance(entry, dict):
             continue
         task, agent = entry.get("task") or {}, entry.get("agent") or {}
@@ -333,7 +334,7 @@ def _planned_trials(job_dir: Path) -> list[dict[str, Any]]:
         name = task.get("name")
         if not isinstance(name, str) or not name:
             continue
-        rows.append({"task_name": name, "agent": agent.get("name") or "",
+        rows.append({"plan_index": plan_index, "task_name": name, "agent": agent.get("name") or "",
                      "model": agent.get("model_name") or ""})
     return rows
 
@@ -416,6 +417,7 @@ def scan(job_dir: Path, *, job_status: str = "", finished_at: str | None = None)
     for row in _unstarted_trials(_planned_trials(job_dir), states):
         name = row["task_name"]
         states.append(TrialState(trial_name=f"{name} (待开始)", task_name=name,
+                                 selection_id=f"@planned:{row['plan_index']}",
                                  phase="failed" if context.terminal else "pending",
                                  detail="任务已结束，trial 未执行" if context.terminal else "排队中",
                                  exception_type="TrialNotStarted" if context.terminal else None,
