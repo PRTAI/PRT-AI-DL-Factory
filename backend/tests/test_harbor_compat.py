@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+import tomllib
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
@@ -169,3 +170,114 @@ def test_multistep_upload_rejects_invalid_structure(client, member_headers, make
             data={"name": "bad-steps", "kind": "harbor_tasks"})
     assert response.status_code == 400, response.text
     assert expected in response.json()["detail"]
+
+
+@pytest.mark.parametrize("agent", ["claude-code", "codex", "fx"])
+@pytest.mark.parametrize("isolation", ["", "isolated = false\n", "isolated = true\n"])
+def test_agent_isolation_preserves_rubric_and_is_idempotent(tmp_path, agent, isolation):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tmp_path / "task.toml").write_text('version = "1.0"\n')
+    rubric = tests / "quality.toml"
+    content = (
+        f'[judge]\njudge = "{agent}"\n{isolation}'
+        'model = "example/model"\nmode = "individual"\ntimeout = 600\n'
+        '[[judge.mcp_servers]]\nname = "data"\ntransport = "stdio"\n'
+        'command = "python"\nargs = ["server.py"]\n'
+        '[[criterion]]\nid = "q1"\ndescription = "检查结果\\n含中文及换行"\n'
+        'weight = 0.75\nnegate = true\noptional = false\n'
+        '[criterion.annotations]\nsource = "原始标准"\n'
+        '[scoring]\naggregation = "weighted_mean"\n'
+    )
+    rubric.write_text(content, encoding="utf-8")
+    expected = tomllib.loads(content)
+    expected["judge"]["isolated"] = True
+    assert harbor_compat.prepare_rewardkit_isolation(tmp_path) == (isolation != "isolated = true\n")
+    assert tomllib.loads(rubric.read_text()) == expected
+    first = rubric.read_bytes()
+    assert harbor_compat.prepare_rewardkit_isolation(tmp_path) == 0
+    assert rubric.read_bytes() == first
+    if isolation == "isolated = true\n":
+        assert rubric.read_text() == content
+
+
+def test_isolation_leaves_llm_and_non_rewardkit_configs_unchanged(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tmp_path / "task.toml").write_text("")
+    configs = {
+        "llm.toml": '[judge]\njudge = "openai/model"\nisolated = false\n[[criterion]]\ndescription = "test"\n',
+        "default.toml": '[judge]\n[[criterion]]\ndescription = "default LLM"\n',
+        "other.toml": '[judge]\njudge = "codex"\n',
+        "reward.toml": '[[reward]]\nname = "total"\n',
+    }
+    for name, content in configs.items():
+        (tests / name).write_text(content)
+    assert harbor_compat.prepare_rewardkit_isolation(tmp_path) == 0
+    for name, content in configs.items():
+        assert (tests / name).read_text() == content
+
+
+@pytest.mark.parametrize("prefix", ["", "if ! ", "exec ", "  "])
+def test_rewardkit_cli_uses_isolation_fallback(tmp_path, prefix):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tmp_path / "task.toml").write_text("")
+    script = tests / "test.sh"
+    untouched = '# rewardkit /tests\necho "rewardkit /tests"\n'
+    script.write_text(untouched + prefix + "rewardkit /tests --workspace /app\n")
+    assert harbor_compat.prepare_rewardkit_tasks(tmp_path) == 1
+    assert script.read_text() == untouched + prefix + f"python3 /tests/{harbor_compat.RUNNER_NAME} /tests --workspace /app\n"
+    assert harbor_compat.prepare_rewardkit_tasks(tmp_path) == 0
+
+
+@pytest.mark.parametrize("multistep", [False, True])
+def test_upload_and_replace_enable_agent_isolation(client, member_headers, make_zip, multistep):
+    files = {
+        "task/task.toml": '[[steps]]\nname = "one"\n[[steps]]\nname = "two"\n' if multistep else '',
+        "task/environment/Dockerfile": "FROM python:3.12-slim\n",
+        "task/tests/test.sh": "python3 -m rewardkit /tests --workspace /app\n",
+    }
+    units = ["task/steps/one", "task/steps/two"] if multistep else ["task"]
+    for unit in units:
+        files[f"{unit}/instruction.md"] = "Check the answer"
+    rubrics = ["task/tests/quality_a/judge.toml"] + [f"{unit}/tests/quality_b/judge.toml" for unit in units]
+    for rubric in rubrics:
+        files[rubric] = '[judge]\njudge = "claude-code"\nisolated = false\n[[criterion]]\ndescription = "检查结果"\n'
+    path = make_zip(files)
+    with path.open("rb") as handle:
+        response = client.post("/api/datasets", headers=member_headers,
+            files={"file": (path.name, handle, "application/zip")},
+            data={"name": "auto-isolation", "kind": "harbor_tasks"})
+    assert response.status_code == 201, response.text
+    dataset_id = response.json()["id"]
+    for attempt in range(2):
+        body = response.json()
+        assert any(f"{len(rubrics)} 个 RewardKit Agent Judge" in warning for warning in body["stats"]["warnings"])
+        root = Path(body["root_path"])
+        for rubric in rubrics:
+            assert tomllib.loads((root / rubric.removeprefix("task/")).read_text())["judge"]["isolated"] is True
+        assert harbor_compat.prepare_rewardkit_isolation(root) == 0
+        if attempt == 0:
+            with path.open("rb") as handle:
+                response = client.put(f"/api/datasets/{dataset_id}/file", headers=member_headers,
+                    files={"file": (path.name, handle, "application/zip")})
+            assert response.status_code == 200, response.text
+
+
+@pytest.mark.parametrize("invalid", ["malformed", "symlink"])
+def test_isolation_rejects_invalid_config_before_writing(tmp_path, invalid):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tmp_path / "task.toml").write_text("")
+    content = '[judge]\njudge = "codex"\n[[criterion]]\ndescription = "test"\n'
+    valid = tests / "a.toml"
+    valid.write_text(content)
+    broken = tests / "z.toml"
+    if invalid == "malformed":
+        broken.write_text('[judge')
+    else:
+        broken.symlink_to(valid)
+    with pytest.raises(ValueError, match="评分配置|符号链接"):
+        harbor_compat.prepare_rewardkit_isolation(tmp_path)
+    assert valid.read_text() == content

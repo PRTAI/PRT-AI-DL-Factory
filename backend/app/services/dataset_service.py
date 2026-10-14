@@ -249,9 +249,12 @@ def _validate_harbor_tasks(root: Path) -> tuple[DatasetStats, list[DatasetFileIn
                 f"例如: {missing_environment[:3]}"
             ),
         )
+    isolated = harbor_compat.prepare_rewardkit_isolation(root)
     adapted = harbor_compat.prepare_rewardkit_tasks(root)
     if adapted:
         stats.warnings.append(f"已为 {adapted} 个 reward-kit 评分入口启用无挂载权限时的独立工作区副本隔离")
+    if isolated:
+        stats.warnings.append(f"已为 {isolated} 个 RewardKit Agent Judge 自动设置 isolated = true（包括原先为 false 的配置）")
     if missing_tests:
         stats.warnings.append(
             f"{len(missing_tests)} 个任务没有 tests/test.*，评测时必须使用 --disable-verification 或补齐测试"
