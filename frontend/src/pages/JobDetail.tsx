@@ -18,7 +18,7 @@ import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/store'
 import { useJobStream } from '@/lib/ws'
-import type { Job } from '@/lib/types'
+import type { Job, VerifyConfig } from '@/lib/types'
 import {
   cn,
   downloadText,
@@ -665,6 +665,7 @@ function ConfigSummary({ job }: { job: Job }) {
     const config = job.verify
     return (
       <>
+        <KeyValue label="数据集"><VerifyDataset config={config} /></KeyValue>
         <KeyValue label="Agent">{config.agent}</KeyValue>
         <KeyValue label="模型">{config.model || '（无需模型）'}</KeyValue>
         <KeyValue label="pass@k">{config.n_attempts}</KeyValue>
@@ -683,6 +684,25 @@ function ConfigSummary({ job }: { job: Job }) {
     )
   }
   return null
+}
+
+function VerifyDataset({ config }: { config: VerifyConfig }) {
+  const dataset = useQuery({
+    queryKey: ['dataset', config.dataset_id],
+    queryFn: () => api.dataset(config.dataset_id),
+    enabled: Boolean(config.dataset_id),
+    retry: false,
+  })
+
+  if (config.dataset_id) {
+    return (
+      <span title={config.dataset_id}>
+        {dataset.data?.name || config.dataset_id}
+        {dataset.isError && <span className="ml-1 text-fg-muted">（名称读取失败）</span>}
+      </span>
+    )
+  }
+  return <>{config.tasks_path || config.registry_dataset || '未配置'}</>
 }
 
 /* -------------------------------------------------------------------------- */
