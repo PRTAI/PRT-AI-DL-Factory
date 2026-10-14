@@ -10,7 +10,7 @@ import type { ApiProtocol, Dataset, DeploymentEndpoint, ModelApi, RegistryDatase
 import { useProject } from '@/lib/store'
 import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
-import { agentConfig, batchJobNames } from '@/lib/verify-batch'
+import { agentConfig, appendVerifyAgent, batchJobNames } from '@/lib/verify-batch'
 import { supportsProtocol } from '@/lib/model-api'
 import {
   Badge,
@@ -804,9 +804,9 @@ export default function SubmitVerify() {
               patch={(values) => setExtraAgents(previous => previous.map(item => item.id === row.id ? { ...item, config: { ...item.config, ...values } } : item))}
               onRemove={() => setExtraAgents(previous => previous.filter(item => item.id !== row.id))} />
           ))}
-          <Button variant="secondary" disabled={extraAgents.length >= 31 || submit.isPending} onClick={() => setExtraAgents(previous => [...previous, {
-            id: crypto.randomUUID(), config: { ...agentConfig(DEFAULT_VERIFY), agent: 'claude-code', agent_api_protocol: 'anthropic' },
-          }])}>
+          <Button variant="secondary" disabled={extraAgents.length >= 31 || submit.isPending} onClick={() => setExtraAgents(previous => appendVerifyAgent(previous, {
+            ...agentConfig(DEFAULT_VERIFY), agent: 'claude-code', agent_api_protocol: 'anthropic',
+          }))}>
             <Plus className="h-4 w-4" aria-hidden /> 添加 Agent / 模型
           </Button>
           <p className="text-xs text-fg-muted">添加多项后将批量创建独立评测任务，共用数据集、Judge 和下方评测参数（最多 32 项）。每项可单独配置模型、密钥和思考模式。</p>

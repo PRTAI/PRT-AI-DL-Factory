@@ -22,3 +22,19 @@ export function batchJobNames(name: string, agents: VerifyAgentConfig[], models:
     return result
   })
 }
+
+export interface VerifyAgentRow {
+  id: string
+  config: VerifyAgentConfig
+}
+
+// These IDs only identify draft rows. Keep this updater pure and usable over LAN HTTP.
+export function appendVerifyAgent(rows: VerifyAgentRow[], config: VerifyAgentConfig): VerifyAgentRow[] {
+  const used = new Set(rows.map(row => row.id))
+  let index = 1
+  while (used.has(`agent-${index}`)) index++
+  return [...rows, {
+    id: `agent-${index}`,
+    config: { ...agentConfig(config), agent_env: { ...config.agent_env }, agent_kwargs: { ...config.agent_kwargs } },
+  }]
+}

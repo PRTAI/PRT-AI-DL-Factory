@@ -33,3 +33,21 @@ test('per-agent overrides exclude dataset, Judge and resources', () => {
   assert.equal('judge_model_api_id' in result, false)
   assert.equal('n_concurrent' in result, false)
 })
+
+test('adding agents works without crypto in a LAN HTTP context and preserves existing rows', () => {
+  const config = { agent: 'claude-code', model: '', agent_env: {}, agent_kwargs: {} }
+  const { appendVerifyAgent } = context.exports
+  const initial = [{ id: 'agent-1', config: { ...config, model: 'existing-model' } }]
+  const added = appendVerifyAgent(initial, config)
+  assert.equal(initial.length, 1)
+  assert.equal(added.length, 2)
+  assert.equal(added[0].config.model, 'existing-model')
+  assert.equal(added[1].id, 'agent-2')
+  assert.deepEqual(plain(appendVerifyAgent(initial, config)), plain(added))
+  added[1].config.agent_env.API_KEY = 'new-row-only'
+  assert.equal(config.agent_env.API_KEY, undefined)
+  assert.equal(added[0].config.agent_env.API_KEY, undefined)
+  const removed = added.filter(row => row.id !== 'agent-1')
+  const readded = appendVerifyAgent(removed, config)
+  assert.equal(new Set(readded.map(row => row.id)).size, 2)
+})
