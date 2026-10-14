@@ -66,7 +66,8 @@ def selected_job_configs(source: Path, trial_names: list[str]) -> list[dict]:
         data.update(tasks=[trial.task.model_dump(mode="json")], datasets=[],
                     agents=[trial.agent.model_dump(mode="json")], n_attempts=1, source_jobs=[])
         native = JobConfig.model_validate(data)
-        rows.append({"trial_name": name, "job_config": native.model_dump(mode="json")})
+        rows.append({"trial_name": name, "job_config": native.model_dump(mode="json"),
+                     "trial_config": trial.model_dump(mode="json")})
     return rows
 
 

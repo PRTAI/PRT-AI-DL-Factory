@@ -128,6 +128,9 @@ def resolve_harbor_python(binary: str) -> str:
 
 
 def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
+    if job.harbor_rerun is not None:
+        from .harbor_actions import build_inplace_rerun
+        return build_inplace_rerun(job, work_dir, output_dir)
     if job.harbor_action is not None:
         from .harbor_actions import build_action
         return build_action(job, work_dir, output_dir)

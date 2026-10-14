@@ -65,7 +65,7 @@ def prepare(job: Job):
 
     result = build_job(job, work_dir, output_dir)
 
-    if job.harbor_action is not None:
+    if job.harbor_action is not None and job.harbor_rerun is None:
         from . import harbor_action_service
         harbor_action_service.prepare_snapshot(
             job, work_dir, output_dir,

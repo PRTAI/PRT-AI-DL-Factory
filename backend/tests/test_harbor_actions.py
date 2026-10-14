@@ -298,7 +298,7 @@ def _selected(client, headers, source, mode, names):
                        json={"mode": mode, "trial_names": names})
 
 
-@pytest.mark.parametrize("mode, trial_name", [("rerun", "demo__done"), ("resume", "demo__cancelled")])
+@pytest.mark.parametrize("mode, trial_name", [("resume", "demo__cancelled")])
 def test_selected_attempt_runs_exactly_once(client, member_headers, recorded_job, mode, trial_name):
     from harbor.job import Job as NativeJob
     from harbor.models.job.config import JobConfig
@@ -374,16 +374,29 @@ def test_selected_batch_is_atomic_and_checks_permissions(client, admin_headers, 
     assert _selected(client, admin_headers, source, "rerun", ["demo__done"]).status_code == 409
 
 
-def test_selected_batch_keeps_attempts_distinct_and_deduplicates_clicks(client, member_headers, recorded_job):
-    source, _ = recorded_job
+def test_selected_batch_reruns_original_job_once(client, member_headers, recorded_job):
+    source, root = recorded_job
+    count = store.jobs.count()
+    before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
     response = _selected(client, member_headers, source, "rerun", ["demo__done", "demo__cancelled", "demo__done"])
     assert response.status_code == 201, response.text
     rows = response.json()
-    assert len(rows) == 2
-    assert len({row["id"] for row in rows}) == 2
-    assert {row["harbor_action"]["trial_name"] for row in rows} == {"demo__done", "demo__cancelled"}
-    assert all(row["status"] == "pending_review" for row in rows)
-    assert all(row["parent_job_id"] == source.id for row in rows)
+    assert len(rows) == 1 and rows[0]["id"] == source.id
+    assert rows[0]["name"] == source.name
+    assert rows[0]["status"] == "pending_review"
+    assert rows[0]["parent_job_id"] == source.parent_job_id
+    assert "harbor_rerun" not in rows[0]
+    assert store.jobs.count() == count
+    updated = store.jobs.get(source.id)
+    assert len(updated.harbor_rerun.selections) == 2
+    built, _, _ = runner.prepare(updated)
+    assert "harbor_inplace_rerun.py" in built.command[2]
+    plan = json.loads(built.files["inplace-rerun.json"])
+    assert {row["trial_name"] for row in plan["trials"]} == {"demo__done", "demo__cancelled"}
+    assert all(Path(row["trials_dir"]) == root.resolve() for row in plan["trials"])
+    assert _selected(client, member_headers, source, "rerun", ["demo__done"]).status_code == 409
+    for name, content in before.items():
+        assert (root / name).read_bytes() == content
 
 
 def test_selected_pending_uses_lock_identity_and_one_attempt(client, member_headers, recorded_job):
@@ -418,6 +431,104 @@ def test_selected_credentials_stay_in_environment(client, member_headers, record
     child = store.jobs.get(response.json()[0]["id"])
     built, work, output = runner.prepare(child)
     assert "secret-for-selected-trial" in built.secrets
-    assert "secret-for-selected-trial" not in built.files["selected-config.json"]
+    assert "secret-for-selected-trial" not in built.files["inplace-rerun.json"]
     assert built.env["PRT_SELECTED_AGENT_PRIVATE_API_KEY"] == "secret-for-selected-trial"
-    assert json.loads((output / child.id / "config.json").read_text())["agents"][0]["env"]["PRIVATE_API_KEY"] == "${PRT_SELECTED_AGENT_PRIVATE_API_KEY}"
+    assert json.loads(built.files["inplace-rerun.json"])["trials"][0]["agent"]["env"]["PRIVATE_API_KEY"] == "${PRT_SELECTED_AGENT_PRIVATE_API_KEY}"
+
+
+def test_inplace_native_execution_replaces_only_selected_result(client, member_headers, recorded_job, monkeypatch):
+    from backend.app.resources import harbor_inplace_rerun as runtime
+    from harbor.trial.trial import Trial
+    from harbor.models.trial.result import TrialResult
+    from harbor.models.job.result import JobResult
+
+    source, root = recorded_job
+    source.verify.agent_env = {"PRIVATE_API_KEY": "new-runtime-secret"}
+    store.jobs.put(source)
+    before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    response = _selected(client, member_headers, source, "rerun", ["demo__done"])
+    assert response.status_code == 201, response.text
+    built, _, _ = runner.prepare(store.jobs.get(source.id))
+    plan = json.loads(built.files["inplace-rerun.json"])
+    seen = []
+    record = json.loads(before["demo__done/result.json"])
+
+    class FakeTrial:
+        def __init__(self, config):
+            self.config = config
+
+        def add_hook(self, *args):
+            return self
+
+        async def run(self):
+            seen.append(self.config)
+            record["config"] = self.config.model_dump(mode="json")
+            record["verifier_result"] = {"rewards": {"reward": 0.25}}
+            result = TrialResult.model_validate(record)
+            (root / self.config.trial_name / "result.json").write_text(result.model_dump_json())
+            return result
+
+    async def fake_create(config):
+        return FakeTrial(config)
+
+    monkeypatch.setattr(Trial, "create", fake_create)
+    for key, value in built.env.items():
+        monkeypatch.setenv(key, value)
+    asyncio.run(runtime.run(plan))
+    assert [trial.trial_name for trial in seen] == ["demo__done"]
+    assert seen[0].trials_dir == root.resolve()
+    from harbor.models.trial.config import TrialConfig
+    assert TrialConfig.model_validate_json((root / "demo__done/config.json").read_text()) == TrialConfig.model_validate_json(before["demo__done/config.json"])
+    for name, content in before.items():
+        if not name.startswith("demo__done/"):
+            assert (root / name).read_bytes() == content
+    assert (root / "demo__unfinished").is_dir()
+    assert (Path(plan["backup"]) / "demo__done/result.json").read_bytes() == before["demo__done/result.json"]
+    aggregate = JobResult.model_validate_json((root / "result.json").read_text())
+    assert aggregate.stats.n_completed_trials == 2
+    assert aggregate.stats.n_errored_trials == 1
+    assert aggregate.stats.evals["nop__adhoc"].reward_stats["reward"][0.25] == ["demo__done"]
+    assert aggregate.finished_at is not None
+    with pytest.raises(ValueError, match="already started"):
+        asyncio.run(runtime.run(plan))
+
+
+def test_inplace_rejects_active_source_dependencies(client, member_headers, recorded_job):
+    source, _ = recorded_job
+    child = _selected(client, member_headers, source, "regrade", ["demo__done"])
+    assert child.status_code == 201
+    response = _selected(client, member_headers, source, "rerun", ["demo__done"])
+    assert response.status_code == 409
+    assert store.jobs.get(source.id).status == JobStatus.CANCELLED
+
+
+@pytest.mark.parametrize("cancelled", [False, True])
+def test_inplace_interruption_keeps_backup_and_unselected_records(client, member_headers, recorded_job, monkeypatch, cancelled):
+    from backend.app.resources import harbor_inplace_rerun as runtime
+    from harbor.trial.queue import TrialQueue
+    from harbor.models.job.result import JobResult
+
+    source, root = recorded_job
+    before = (root / "demo__done/result.json").read_bytes()
+    other = (root / "demo__cancelled/result.json").read_bytes()
+    response = _selected(client, member_headers, source, "rerun", ["demo__done"])
+    assert response.status_code == 201
+    built, _, _ = runner.prepare(store.jobs.get(source.id))
+    plan = json.loads(built.files["inplace-rerun.json"])
+
+    async def interrupt(self, config):
+        if cancelled:
+            asyncio.current_task().get_loop().call_soon(asyncio.current_task().cancel)
+            await asyncio.sleep(0)
+        raise RuntimeError("simulated launch failure")
+
+    monkeypatch.setattr(TrialQueue, "_run_trial", interrupt)
+    # TaskGroup treats an individually cancelled trial as completed; the runtime
+    # must still avoid reporting the operation as successfully finished.
+    with pytest.raises(asyncio.CancelledError if cancelled else ExceptionGroup):
+        asyncio.run(runtime.run(plan))
+    assert (Path(plan["backup"]) / "demo__done/result.json").read_bytes() == before
+    assert (root / "demo__cancelled/result.json").read_bytes() == other
+    assert not (root / "demo__done/result.json").exists()
+    assert (root / "demo__unfinished").is_dir()
+    assert JobResult.model_validate_json((root / "result.json").read_text()).finished_at is None

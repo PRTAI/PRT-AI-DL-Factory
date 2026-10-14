@@ -61,10 +61,17 @@ export function TrialBoard({ jobId, live, canAct = false }: { jobId: string; liv
     mutationFn: (mode: 'rerun' | 'regrade' | 'resume') => api.createTrialActions(jobId, {
       mode, trial_names: selected.map(trialSelectionId),
     }),
-    onSuccess: (jobs) => {
+    onSuccess: (jobs, mode) => {
       setSelected([])
       queryClient.invalidateQueries({ queryKey: ['jobs'] })
-      toast.success(`已创建 ${jobs.length} 个任务，${jobs.some(job => job.status === 'pending_review') ? '等待审核' : '已进入排队'}`)
+      if (mode === 'rerun') {
+        for (const key of ['job', 'job-trials', 'job-trial', 'job-metrics', 'job-command', 'job-artifacts']) {
+          queryClient.invalidateQueries({ queryKey: [key, jobId] })
+        }
+        toast.success(`已提交原地重跑，${jobs[0]?.status === 'pending_review' ? '等待审核' : '已进入排队'}`)
+      } else {
+        toast.success(`已创建 ${jobs.length} 个任务，${jobs.some(job => job.status === 'pending_review') ? '等待审核' : '已进入排队'}`)
+      }
       navigate(jobs.length === 1 ? `/jobs/${jobs[0].id}` : '/jobs')
     },
   })
@@ -144,7 +151,7 @@ export function TrialBoard({ jobId, live, canAct = false }: { jobId: string; liv
             <Button size="sm" variant="secondary" disabled={!selected.length || selected.some(row => row.phase === 'success') || action.isPending} loading={action.isPending && action.variables === 'resume'} onClick={() => action.mutate('resume')}>中断恢复选中</Button>
             <Button size="sm" variant="ghost" disabled={!selected.length || action.isPending} onClick={() => { setSelected([]); action.reset() }}>清空选择</Button>
           </div>
-          <p className="text-[11px] leading-relaxed text-fg-subtle">自动沿用原配置，每条选中记录创建一个独立任务，仅执行一次。直接评分需要已保存的产物；中断恢复仅补跑未完成或失败记录，从头执行该条数据，不恢复 Agent 对话或容器进程。全选仅作用于当前页。</p>
+          <p className="text-[11px] leading-relaxed text-fg-subtle">自动沿用原配置。重新运行会在原任务内替换选中记录，保留未选中数据，不创建新任务。直接评分和中断恢复仍创建独立任务；直接评分需要已保存的产物；中断恢复仅补跑未完成或失败记录，从头执行该条数据，不恢复 Agent 对话或容器进程。全选仅作用于当前页。</p>
           {action.isError && <ErrorBox message={action.error instanceof ApiError ? action.error.message : '提交失败'} />}
         </div>}
 

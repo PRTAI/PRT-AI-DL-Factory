@@ -364,6 +364,11 @@ class HarborAction(Base):
     filter_error_types: list[str] = Field(default_factory=lambda: ["CancelledError"], max_length=50)
 
 
+class HarborRerun(Base):
+    operation_id: str = Field(default_factory=lambda: new_id("rerun"))
+    selections: list[dict[str, Any]]
+
+
 class HarborActionRequest(Base):
     mode: Literal["resume", "regrade"]
     filter_error_types: list[str] = Field(default_factory=lambda: ["CancelledError"], max_length=50)
@@ -410,6 +415,7 @@ class Job(Base):
     parent_job_id: str | None = None
     # Server-created only; generic job submission cannot supply recovery paths.
     harbor_action: HarborAction | None = None
+    harbor_rerun: HarborRerun | None = None
 
     @model_validator(mode="after")
     def _check_config_present(self) -> "Job":
@@ -435,6 +441,7 @@ class JobPublic(Job):
         payload = public_payload(handler(self))
         if payload.get("harbor_action"):
             payload["harbor_action"].pop("selected_job_config", None)
+        payload.pop("harbor_rerun", None)
         return payload
 
 

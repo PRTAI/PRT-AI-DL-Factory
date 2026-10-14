@@ -79,3 +79,43 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         files={runtime: (settings.resources_dir / runtime).read_text(encoding="utf-8"), **extra_files},
         notes=notes, secrets=secrets,
     )
+
+
+def build_inplace_rerun(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
+    from ..models.job import HarborAction
+    from ..services.harbor_action_service import source_dir
+
+    root = source_dir(job)
+    operation = job.harbor_rerun
+    trials, recorded, env, secrets = [], {}, {}, []
+    for row in operation.selections:
+        action = HarborAction(mode="rerun", source_job_id=job.id,
+                              trial_name=row["trial_name"], selected_job_config=row["job_config"])
+        built = build_action(job.model_copy(update={"harbor_action": action}), work_dir, output_dir)
+        native = json.loads(built.files["selected-config.json"])
+        trial = dict(row["trial_config"])
+        trial.update(trials_dir=str(root), agent=native["agents"][0], verifier=native["verifier"],
+                     source_trial=None)
+        if not row["trial_name"].startswith("@planned:"):
+            trial["trial_name"] = row["trial_name"]
+        canonical = dict(row["trial_config"])
+        canonical.update(trial_name=trial["trial_name"], source_trial=None)
+        if row["trial_name"].startswith("@planned:"):
+            canonical["trials_dir"] = str(root)
+        recorded[trial["trial_name"]] = canonical
+        trials.append(trial)
+        env.update(built.env)
+        secrets.extend(built.secrets)
+    plan = {"root": str(root), "trials": trials, "recorded_configs": recorded,
+            "backup": str(work_dir / "rerun-history" / operation.operation_id)}
+    script = "harbor_inplace_rerun.py"
+    return BuildResult(
+        command=[resolve_harbor_python(resolve_harbor_bin()), "-u", str(work_dir / script),
+                 str(work_dir / "inplace-rerun.json")],
+        cwd=str(work_dir), output_dir=str(output_dir), env=env, secrets=secrets,
+        files={script: (settings.resources_dir / script).read_text(encoding="utf-8"),
+               "harbor_runtime.py": (settings.resources_dir / "harbor_runtime.py").read_text(encoding="utf-8"),
+               "inplace-rerun.json": json.dumps(plan, ensure_ascii=False)},
+        notes=[f"在原任务内重跑选中的 {len(trials)} 条数据，保留 trial 名称和未选中记录",
+               "执行前备份选中记录；完成后重算原任务评分汇总"],
+    )

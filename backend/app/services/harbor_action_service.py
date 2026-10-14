@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from ..builders.base import BuildError
 from ..config import settings
 from ..models import DatasetKind, Job, JobCreate, JobType, User, VerifyConfig
-from ..models.job import HarborAction, HarborActionRequest, HarborTrialActionRequest
+from ..models.job import HarborAction, HarborActionRequest, HarborTrialActionRequest, HarborRerun
 from ..store import store
 from . import metrics_parser
 
@@ -162,6 +162,8 @@ def create_trial_actions(job_id: str, request: HarborTrialActionRequest, *, acto
             checked = _check(root, verifier_path(source.verify) if request.mode == "regrade" else None, names)
         except BuildError as exc:
             raise HTTPException(400, str(exc)) from exc
+        if request.mode == "rerun":
+            return [_rerun_in_place(source, checked["selected"], actor)]
         prepared = []
         label = {"rerun": "重跑", "regrade": "评分", "resume": "恢复"}[request.mode]
         for row in checked["selected"]:
@@ -190,6 +192,44 @@ def create_trial_actions(job_id: str, request: HarborTrialActionRequest, *, acto
         if any(job.status.value == "queued" for job in jobs):
             job_service.scheduler.dispatch()
         return jobs
+
+
+def _rerun_in_place(source: Job, selections: list[dict], actor: User) -> Job:
+    from ..models import JobRuntime, JobProgress, utcnow
+    from . import audit_service, job_service, runner
+
+    # A queued descendant must not snapshot records while they are being replaced.
+    if store.jobs.find(lambda item: item.harbor_action is not None
+                       and item.harbor_action.source_job_id == source.id
+                       and not item.status.is_terminal):
+        raise HTTPException(409, "还有待执行的恢复或评分任务引用原记录，请等待结束或先取消")
+    payload = JobCreate(name=source.name, note=source.note, type=source.type,
+                        project_id=source.project_id, tags=source.tags,
+                        resources=source.resources.model_copy(deep=True, update={"gpu_ids": []}),
+                        verify=source.verify.model_copy(deep=True))
+    validated, _ = job_service._prepare_job(
+        payload, owner=actor, harbor_action=HarborAction(mode="rerun", source_job_id=source.id))
+    with runner.LIFECYCLE_LOCK:
+        if runner.has_supervisor(source.id):
+            raise HTTPException(409, "原任务仍在收尾，请稍后重试")
+
+        def mutate(item: Job) -> None:
+            item.harbor_rerun = HarborRerun(selections=selections)
+            item.status = validated.status
+            item.review = validated.review
+            item.queued_at = validated.queued_at
+            item.runtime = JobRuntime()
+            item.progress = JobProgress(message=f"等待原地重跑 {len(selections)} 条数据")
+            item.resources.gpu_ids = []
+            item.updated_at = utcnow()
+
+        updated = store.jobs.update(source.id, mutate)
+    audit_service.record("job.rerun_trials", actor=actor, target_type="job", target_id=source.id,
+                         summary=f"原地重跑「{source.name}」的 {len(selections)} 条数据",
+                         detail={"trial_names": [row["trial_name"] for row in selections]})
+    if updated.status.value == "queued":
+        job_service.scheduler.dispatch()
+    return updated
 
 
 def selected_config(job: Job, output_dir: Path) -> dict:
