@@ -11,7 +11,7 @@ from starlette.background import BackgroundTask
 from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
 from ..services import job_download_service, job_service
-from ..models.job import JobPublic
+from ..models.job import JobPublic, JobRenameRequest
 from ..models.job import HarborActionRequest
 from ..services import harbor_action_service
 from ..services.scheduler import gpu_snapshot
@@ -80,6 +80,11 @@ def batch_export(
 @router.get("/{job_id}", response_model=JobPublic, summary="任务详情")
 def get_job(job_id: str, user: CurrentUser) -> Job:
     return job_service.get_job_for(job_id, user)
+
+
+@router.patch("/{job_id}/name", response_model=JobPublic, summary="修改已结束任务的名称")
+def rename_job(job_id: str, payload: JobRenameRequest, user: CurrentUser) -> Job:
+    return job_service.rename_job(job_id, name=payload.name, actor=user)
 
 
 @router.get("/{job_id}/log", summary="任务日志")

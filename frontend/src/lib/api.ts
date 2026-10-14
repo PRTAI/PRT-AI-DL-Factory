@@ -283,6 +283,8 @@ export const api = {
       gpu: GpuSnapshot
     }>(`/api/jobs/overview${qs({ project_id: projectId })}`),
   job: (id: string) => request<Job>(`/api/jobs/${id}`),
+  renameJob: (id: string, name: string) =>
+    request<Job>(`/api/jobs/${id}/name`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   createJob: (payload: unknown) =>
     request<Job>('/api/jobs', { method: 'POST', body: JSON.stringify(payload) }),
   jobLog: (id: string, offset = 0) =>

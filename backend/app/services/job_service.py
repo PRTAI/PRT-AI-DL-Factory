@@ -368,6 +368,32 @@ def cancel_job(job_id: str, *, actor: User, reason: str = "") -> Job:
     return store.jobs.get(job_id) or updated
 
 
+def rename_job(job_id: str, *, name: str, actor: User) -> Job:
+    old_name = ""
+
+    def mutate(item: Job) -> None:
+        nonlocal old_name
+        _assert_can_control(item, actor)
+        if not item.status.is_terminal:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="仅已结束的任务可以改名")
+        old_name = item.name
+        item.name = name
+        item.updated_at = utcnow()
+
+    updated = store.jobs.update(job_id, mutate)
+    if updated is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="任务不存在")
+    audit_service.record(
+        "job.rename",
+        actor=actor,
+        target_type="job",
+        target_id=job_id,
+        summary=f"将任务「{old_name}」改名为「{updated.name}」",
+        detail={"old_name": old_name, "new_name": updated.name},
+    )
+    return updated
+
+
 def resubmit_job(job_id: str, *, actor: User) -> Job:
     """Clone a finished/rejected job back into the review queue."""
     source = get_job(job_id)

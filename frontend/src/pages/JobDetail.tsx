@@ -8,6 +8,7 @@ import {
   FileCode2,
   FlaskConical,
   Package,
+  Pencil,
   RefreshCw,
   Repeat,
   Terminal,
@@ -38,6 +39,8 @@ import {
   Dialog,
   EmptyState,
   ErrorBox,
+  Field,
+  Input,
   KeyValue,
   Progress,
   SectionTitle,
@@ -71,6 +74,8 @@ export default function JobDetail() {
   const tabParam = searchParams.get('tab')
   const [rejectOpen, setRejectOpen] = React.useState(false)
   const [rejectComment, setRejectComment] = React.useState('')
+  const [renameOpen, setRenameOpen] = React.useState(false)
+  const [newName, setNewName] = React.useState('')
   const download = useMutation({
     mutationFn: () => api.downloadJob(jobId!),
     onError: (error) => toast.error(error instanceof ApiError ? error.message : '导出下载失败'),
@@ -128,6 +133,20 @@ export default function JobDetail() {
     queryClient.invalidateQueries({ queryKey: ['jobs'] })
     queryClient.invalidateQueries({ queryKey: ['job-overview'] })
   }
+
+  const rename = useMutation({
+    mutationFn: () => api.renameJob(jobId!, newName.trim()),
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['job', updated.id], updated)
+      invalidate()
+      queryClient.invalidateQueries({ queryKey: ['projects'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['audit'] })
+      setRenameOpen(false)
+      toast.success('任务名称已更新')
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : '改名失败'),
+  })
 
   const review = useMutation({
     mutationFn: ({ approve, comment }: { approve: boolean; comment: string }) =>
@@ -262,6 +281,10 @@ export default function JobDetail() {
             )}
             {canControl && ['succeeded', 'failed', 'cancelled', 'rejected'].includes(data.status) && (
               <>
+                <Button variant="outline" size="sm" onClick={() => { setNewName(data.name); setRenameOpen(true) }}>
+                  <Pencil className="h-3.5 w-3.5" aria-hidden />
+                  改名
+                </Button>
                 {data.type === 'verify' && data.status !== 'rejected' && <HarborActions key={data.id} job={data} />}
                 <Button
                   variant="secondary"
@@ -589,6 +612,29 @@ export default function JobDetail() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={renameOpen}
+        onOpenChange={(open) => { if (!rename.isPending) setRenameOpen(open) }}
+        title="修改任务名称"
+        footer={
+          <>
+            <Button variant="ghost" disabled={rename.isPending} onClick={() => setRenameOpen(false)}>取消</Button>
+            <Button
+              variant="primary"
+              loading={rename.isPending}
+              disabled={!newName.trim() || newName.trim() === data.name}
+              onClick={() => rename.mutate()}
+            >
+              保存
+            </Button>
+          </>
+        }
+      >
+        <Field label="任务名称" required>
+          <Input value={newName} onChange={(event) => setNewName(event.target.value)} maxLength={120} disabled={rename.isPending} />
+        </Field>
+      </Dialog>
 
       <Dialog
         open={rejectOpen}

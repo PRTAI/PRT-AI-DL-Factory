@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import Field, model_serializer, model_validator
+from pydantic import Field, field_validator, model_serializer, model_validator
 
 from ..redaction import public_payload
 
@@ -435,6 +435,17 @@ class JobCreate(Base):
     rl: RLConfig | None = None
     verify: VerifyConfig | None = None
     parent_job_id: str | None = None
+
+
+class JobRenameRequest(Base):
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value: Any) -> Any:
+        return value.strip() if isinstance(value, str) else value
 
 
 class JobReviewRequest(Base):
