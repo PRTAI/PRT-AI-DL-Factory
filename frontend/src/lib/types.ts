@@ -774,6 +774,20 @@ export interface ModelPlatform {
   updated_at: string
   updated_by: string
 }
+/** 「个人设置 → 我的 API Key」：每个账号按平台（或未挂平台的模型配置）配置自己的密钥 */
+export interface UserApiKey {
+  target_id: string
+  kind: 'platform' | 'model'
+  name: string
+  vendor: PlatformVendor
+  vendor_label: string
+  endpoints: Partial<Record<ApiProtocol, string>>
+  models: string[]
+  enabled: boolean
+  has_api_key: boolean
+  api_key_masked: string
+  updated_at?: string | null
+}
 export interface PlatformCatalog {
   id: PlatformVendor
   label: string

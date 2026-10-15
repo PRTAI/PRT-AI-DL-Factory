@@ -416,14 +416,14 @@ def _receive_archive(dataset_id: str, filename: str, stream: BinaryIO) -> Path:
     """把上传流落到 uploads 目录，超限/为空直接拒绝。"""
     archive_path = settings.uploads_dir / f"{dataset_id}-{new_id('up')}{_archive_suffix(filename)}"
     total = 0
-    limit = settings.max_upload_mb * 1024 * 1024
+    limit = settings.max_upload_mb * 1024 * 1024  # 0 = 不限制
     with archive_path.open("wb") as handle:
         while True:
             chunk = stream.read(CHUNK)
             if not chunk:
                 break
             total += len(chunk)
-            if total > limit:
+            if limit and total > limit:
                 handle.close()
                 archive_path.unlink(missing_ok=True)
                 raise HTTPException(

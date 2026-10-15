@@ -5,7 +5,7 @@ import { ChevronDown, Cpu, Database, Eraser, Rocket, Server, Settings2 } from 'l
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { AlgorithmInfo, DatasetKind, ModelEntry, RLConfig, SFTConfig, TrainStage } from '@/lib/types'
-import { useProject } from '@/lib/store'
+import { useAuth, useProject } from '@/lib/store'
 import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
 import {
@@ -16,6 +16,7 @@ import {
   CardHeader,
   ErrorBox,
   Field,
+  HelpTip,
   Input,
   NumberInput,
   ScientificInput,
@@ -204,6 +205,7 @@ const DRAFT = 'submit-train'
 export default function SubmitTraining() {
   const navigate = useNavigate()
   const { projectId, setProject } = useProject()
+  const isAdmin = useAuth((state) => state.user?.role === 'admin')
   const [searchParams] = useSearchParams()
   // 任务详情页「重跑」带过来的源任务：用它的配置预填表单，改完再提交
   const rerunId = searchParams.get('rerun')
@@ -350,7 +352,7 @@ export default function SubmitTraining() {
     <div className="space-y-4">
       <PageHeader
         title={rerunId ? "编辑配置并重跑" : "提交训练任务"}
-        description="SFT / 偏好对齐 / 强化学习，平台会按框架生成命令并在审核通过后自动排队执行"
+        description="SFT / 偏好对齐 / 强化学习，平台按框架生成命令并排队执行"
         actions={
           <>
             <Button variant="ghost" size="sm" onClick={resetForm} title="表单内容会自动缓存，点这里恢复成默认值">
@@ -391,35 +393,37 @@ export default function SubmitTraining() {
               />
             </Field>
 
-            <Field label="训练算法" required hint={current?.summary}>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="训练算法" required>
+              <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 lg:grid-cols-5">
                 {trainingAlgorithms.map((item) => {
                   const selected = item.id === algorithm
                   return (
                     <button
                       key={item.id}
                       type="button"
+                      title={item.summary}
                       onClick={() => setAlgorithm(item.id as TrainStage)}
                       aria-pressed={selected}
                       className={cn(
-                        'rounded-lg border px-3 py-2 text-left transition-colors',
+                        'flex h-8 items-center justify-between gap-2 rounded-md border px-2.5 text-left transition-colors',
                         selected ? 'border-primary bg-primary-soft' : 'border-border hover:bg-card-hover',
                       )}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={cn('text-sm font-medium', selected && 'text-primary')}>{item.label}</span>
-                        <Badge tone={item.job_type === 'rl' ? 'info' : 'primary'}>
-                          {item.job_type === 'rl' ? 'RL' : '训练'}
-                        </Badge>
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-fg-subtle">{item.summary}</p>
+                      <span className={cn('truncate text-[13px] font-medium', selected && 'text-primary')}>{item.label}</span>
+                      <Badge tone={item.job_type === 'rl' ? 'info' : 'primary'}>
+                        {item.job_type === 'rl' ? 'RL' : '训练'}
+                      </Badge>
                     </button>
                   )
                 })}
               </div>
+              {current && (
+                <p className="mt-1.5 flex items-center gap-1 text-xs text-fg-muted">
+                  <span className="truncate">{current.summary}</span>
+                  {current.doc && <HelpTip>{current.doc}</HelpTip>}
+                </p>
+              )}
             </Field>
-
-            {current && <InlineHint>{current.doc}</InlineHint>}
 
             {isRl && (
               <Field label="RL 框架" required hint="Harbor 任务树只能用 TRL 做 agentic RL；parquet 数据两者都支持">
@@ -431,13 +435,13 @@ export default function SubmitTraining() {
                       onClick={() => setRl((previous) => ({ ...previous, framework: framework as RLConfig['framework'] }))}
                       aria-pressed={rl.framework === framework}
                       className={cn(
-                        'flex-1 rounded-lg border px-3 py-2 text-sm transition-colors',
+                        'h-8 flex-1 rounded-md border px-3 text-[13px] transition-colors',
                         rl.framework === framework
                           ? 'border-primary bg-primary-soft text-primary'
                           : 'border-border hover:bg-card-hover',
                       )}
                     >
-                      {framework === 'verl' ? 'verl（大规模 / Megatron）' : 'TRL（HF 生态 / Harbor 环境）'}
+                      {framework === 'verl' ? 'verl · 大规模' : 'TRL · Harbor 环境'}
                     </button>
                   ))}
                 </div>
@@ -661,7 +665,9 @@ export default function SubmitTraining() {
                 提交任务
               </Button>
               <p className="text-[11px] leading-relaxed text-fg-subtle">
-                提交后进入「待审核」，管理员通过后才会占用 GPU 开始训练。审核人可以在任务详情里查看平台生成的完整命令。
+                {isAdmin
+                  ? '管理员提交无需审核，直接进入 GPU 排队。'
+                  : '提交后进入「待审核」，管理员通过后才会占用 GPU 开始训练。审核人可以在任务详情里查看平台生成的完整命令。'}
               </p>
             </CardBody>
           </Card>
@@ -1008,7 +1014,7 @@ function RlParams({ rl, setRl }: { rl: RLConfig; setRl: React.Dispatch<React.Set
             onValueChange={(value) => patch({ finetuning_type: value as RLConfig['finetuning_type'] })}
             options={[
               { value: 'full', label: '全参数', description: '显存占用最高' },
-              { value: 'lora', label: 'LoRA', description: '显存友好，单卡首选' },
+              { value: 'lora', label: 'LoRA', description: rl.framework === 'verl' ? 'verl 暂未接入，请使用 TRL' : '显存友好，单卡首选', disabled: rl.framework === 'verl' },
             ]}
           />
         </Field>
@@ -1055,7 +1061,7 @@ function RlParams({ rl, setRl }: { rl: RLConfig; setRl: React.Dispatch<React.Set
               onValueChange={(value) => patchRollout({ backend: value as RLConfig['rollout']['backend'] })}
               options={[
                 { value: 'vllm', label: 'vLLM（推荐）' },
-                { value: 'sglang', label: 'SGLang' },
+                { value: 'sglang', label: 'SGLang', disabled: rl.framework === 'trl' },
                 { value: 'hf', label: 'HuggingFace generate' },
               ]}
             />

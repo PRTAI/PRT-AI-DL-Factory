@@ -39,7 +39,9 @@ summary: Harbor pass@k、并发、agent 与密钥怎么配
 
 ## 模型与密钥
 
-模型由管理员在「平台管理 → 模型 API」统一维护，全员可选、密钥不外露。每条配置有一个
+平台与模型由管理员在「平台管理 → 模型 API」统一维护，全员可选；平台**不提供统一密钥**，
+每个账号需在「个人设置 → 我的 API Key」为要用的平台填写自己的密钥（同平台下的模型共用一份），
+运行时注入的是提交人自己的密钥，未填写的平台在提交页不可选。每条配置有一个
 **厂家/协议**，它决定运行时注入哪些环境变量（变量名与 Harbor 自己的
 `model_connection.py` 完全一致）：
 
@@ -128,7 +130,7 @@ summary: Harbor pass@k、并发、agent 与密钥怎么配
 
 | 现象 | 原因 |
 |---|---|
-| 全部 reward = 0 | 先用 `oracle` 验一遍任务集；再检查 API Key 是否填了 |
+| 全部 reward = 0 | 先用 `oracle` 验一遍任务集；再检查「个人设置 → 我的 API Key」是否填了 |
 | `VerifierTimeoutError` | verifier 超时，多见于 test.sh 里要联网装依赖；调大超时倍数 |
 | 任务被跳过、trial 数比预期少 | 任务缺 `environment/`，Harbor 会静默跳过 |
 | 提交页顶部提示 docker 不可用 | 运行平台的用户不在 `docker` 组，见管理员指南 |

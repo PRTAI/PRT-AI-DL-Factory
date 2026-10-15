@@ -21,7 +21,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.shared import Mm, Pt, RGBColor
 
-from ..models import ReviewCheck, ReviewFinding, ReviewTask, ReviewVerdict
+from ..models import CheckStatus, ReviewCheck, ReviewFinding, ReviewTask, ReviewVerdict
 
 # ----------------------------------------------------------------- 固定样式 ---
 FONT_CN = "微软雅黑"
@@ -61,11 +61,27 @@ def build_report(
     checks: list[ReviewCheck],
     findings: list[ReviewFinding],
 ) -> dict[str, Any]:
-    """逐题汇总。任一项不合格 → 不合格；否则有待确认 → 需人工复核；都没有 → 通过。"""
+    """逐题汇总；只有所有检查都有结论且没有失败或待确认项时才通过。"""
     tasks = manifest.get("tasks") or []
     order = {t["task_id"]: i for i, t in enumerate(tasks)}
     rel_of = {t["task_id"]: t.get("rel_path", "") for t in tasks}
     check_of = {c.code: c for c in checks}
+
+    findings = list(findings)
+    covered = {(f.check_code, f.task_id) for f in findings}
+    uncertain = {(f.check_code, f.task_id) for f in findings if f.verdict == ReviewVerdict.NEEDS_REVIEW}
+    for check in checks:
+        for item in tasks:
+            pair = (check.code, item["task_id"])
+            if (check.status == CheckStatus.FAILED and pair not in uncertain) or pair not in covered:
+                findings.append(ReviewFinding(check_code=check.code, task_id=item["task_id"],
+                                              rel_path=item.get("rel_path", ""),
+                                              verdict=ReviewVerdict.NEEDS_REVIEW,
+                                              problems=["检查未完成或执行失败，无法判定"]))
+    if not checks:
+        findings.extend(ReviewFinding(check_code="", task_id=item["task_id"],
+                                      verdict=ReviewVerdict.NEEDS_REVIEW,
+                                      problems=["没有完成任何检查项"]) for item in tasks)
 
     fails: dict[str, list[ReviewFinding]] = {}
     manual: dict[str, list[ReviewFinding]] = {}

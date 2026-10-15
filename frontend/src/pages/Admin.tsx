@@ -36,7 +36,7 @@ import { HarborImagePanel } from '@/components/HarborImagePanel'
 import { ModelApiPanel } from '@/components/ModelApiPanel'
 
 export default function Admin() {
-  // /admin?tab=models 可以直接分享给要填密钥的人
+  // /admin?tab=models 可以直接分享给要维护模型平台的人
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = searchParams.get('tab') ?? 'users'
   const setTab = (next: string) => {
@@ -588,7 +588,7 @@ function ToolchainPanel() {
             </div>
             <div className="flex justify-between gap-3">
               <span className="text-fg-muted">上传大小上限</span>
-              <span className="num">{info.data.max_upload_mb} MB</span>
+              <span className="num">{info.data.max_upload_mb > 0 ? `${info.data.max_upload_mb} MB` : '不限'}</span>
             </div>
             <div className="flex justify-between gap-3">
               <span className="text-fg-muted">采样间隔</span>

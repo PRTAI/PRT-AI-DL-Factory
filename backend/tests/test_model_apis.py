@@ -47,22 +47,34 @@ def test_only_admin_can_write(client, admin_headers, member_headers):
     payload = {"name": "member-try", "provider": "openai", "api_key": "sk-x"}
     assert client.post("/api/model-apis", headers=member_headers, json=payload).status_code == 403
 
-    created = client.post(
-        "/api/model-apis",
-        headers=admin_headers,
-        json={"name": "relay-gpt", "provider": "openai", "base_url": "https://relay.example/v1",
-              "api_key": "sk-relay-abcdefghijklmnop", "note": "中转站"},
-    )
+    shared = {"name": "relay-gpt", "provider": "openai", "base_url": "https://relay.example/v1", "note": "中转站"}
+    # 平台不再收统一密钥：管理员也只能维护配置本身
+    rejected = client.post("/api/model-apis", headers=admin_headers, json={**shared, "api_key": "sk-shared"})
+    assert rejected.status_code == 400 and "个人设置" in rejected.json()["detail"]
+    created = client.post("/api/model-apis", headers=admin_headers, json=shared)
     assert created.status_code == 201, created.text
     body = created.json()
-    assert body["api_key_masked"] == "sk-…mnop"
-    assert body["has_api_key"] and body["ready"]
+    assert not body["has_api_key"] and not body["ready"]
     assert body["env_names"] == ["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE"]
+    assert client.patch(f"/api/model-apis/{body['id']}", headers=admin_headers, json={"api_key": "sk-x"}).status_code == 400
 
-    # 编辑时没动 api_key（None）→ 保留；传 "" → 清空
+    # 每个账号各填各的，互不可见
+    put = client.put(f"/api/model-apis/my-keys/{body['id']}", headers=member_headers, json={"api_key": "sk-relay-abcdefghijklmnop"})
+    assert put.status_code == 200, put.text
+    assert put.json()["api_key_masked"] == "sk-…mnop" and "api_key" not in put.json()
+    mine = next(r for r in client.get("/api/model-apis", headers=member_headers).json() if r["id"] == body["id"])
+    assert mine["has_api_key"] and mine["ready"] and mine["api_key_masked"] == "sk-…mnop"
+    theirs = next(r for r in client.get("/api/model-apis", headers=admin_headers).json() if r["id"] == body["id"])
+    assert not theirs["has_api_key"] and not theirs["ready"]
+    keys = client.get("/api/model-apis/my-keys", headers=member_headers).json()
+    assert next(r for r in keys if r["target_id"] == body["id"])["has_api_key"]
+    assert client.put("/api/model-apis/my-keys/nope", headers=member_headers, json={"api_key": "sk"}).status_code == 404
+
+    # 编辑配置不影响个人密钥；个人可以清除自己的
     kept = client.patch(f"/api/model-apis/{body['id']}", headers=admin_headers, json={"note": "改备注"}).json()
-    assert kept["has_api_key"] is True
-    cleared = client.patch(f"/api/model-apis/{body['id']}", headers=admin_headers, json={"api_key": ""}).json()
+    assert kept["note"] == "改备注"
+    assert client.delete(f"/api/model-apis/my-keys/{body['id']}", headers=member_headers).status_code == 204
+    cleared = next(r for r in client.get("/api/model-apis", headers=member_headers).json() if r["id"] == body["id"])
     assert cleared["has_api_key"] is False and cleared["ready"] is False
 
     assert client.patch(f"/api/model-apis/{body['id']}", headers=member_headers, json={"note": "x"}).status_code == 403
@@ -150,9 +162,10 @@ def test_builder_injects_standard_env_from_model_config(client, admin_headers, m
 
     cfg = client.post(
         "/api/model-apis", headers=admin_headers,
-        json={"name": "claude-test", "provider": "anthropic", "base_url": "https://relay.example/anthropic",
-              "api_key": "sk-ant-secret-1234567890"},
+        json={"name": "claude-test", "provider": "anthropic", "base_url": "https://relay.example/anthropic"},
     ).json()
+    from .conftest import grant_key
+    grant_key("usr_x", cfg["id"], "sk-ant-secret-1234567890")  # 用的是任务提交人自己的密钥
     binary = tmp_path / "harbor"
     binary.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr(harbor_builder, "resolve_harbor_bin", lambda: str(binary))
@@ -168,8 +181,9 @@ def test_builder_injects_standard_env_from_model_config(client, admin_headers, m
 
     command, result = build("claude-code")
     assert command[command.index("--model") + 1] == "claude-test"  # CLI agent：裸模型名
-    assert "ANTHROPIC_API_KEY=sk-ant-secret-1234567890" in command
-    assert "ANTHROPIC_BASE_URL=https://relay.example/anthropic" in command
+    assert "ANTHROPIC_API_KEY=${PRT_AGENT_ANTHROPIC_API_KEY}" in command
+    assert "ANTHROPIC_BASE_URL=${PRT_AGENT_ANTHROPIC_BASE_URL}" in command
+    assert result.env["PRT_AGENT_ANTHROPIC_BASE_URL"] == "https://relay.example/anthropic"
     assert "reasoning_effort=max" in command
     assert "--debug" in command
     assert "sk-ant-secret-1234567890" not in result.masked_command_line()
@@ -219,8 +233,10 @@ def test_verify_rewardkit_requires_judge(client, admin_headers, member_headers, 
 
     judge = client.post(
         "/api/model-apis", headers=admin_headers,
-        json={"name": "judge-qwen", "provider": "openai", "api_key": "sk-judge-xyz"},
+        json={"name": "judge-qwen", "provider": "openai"},
     ).json()
+    # 管理员自己的密钥不会借给成员
+    client.put(f"/api/model-apis/my-keys/{judge['id']}", headers=admin_headers, json={"api_key": "sk-admin-own"})
 
     def submit(**verify_extra):
         return client.post(
@@ -234,6 +250,9 @@ def test_verify_rewardkit_requires_judge(client, admin_headers, member_headers, 
     assert missing.status_code == 400
     assert "judge" in missing.json()["detail"].lower()
 
+    no_key = submit(judge_model_api_id=judge["id"], judge_api_protocol="openai")
+    assert no_key.status_code == 400 and "dev@prt.local" in no_key.json()["detail"]
+    client.put(f"/api/model-apis/my-keys/{judge['id']}", headers=member_headers, json={"api_key": "sk-judge-xyz"})
     ok = submit(judge_model_api_id=judge["id"], judge_api_protocol="openai")
     assert ok.status_code == 201, ok.text
     assert ok.json()["verify"]["judge_model_api_id"] == judge["id"]

@@ -148,7 +148,7 @@ def create_review(
     docs: list[tuple[str, BinaryIO]],
     owner: User,
 ) -> ReviewTask:
-    config = _model_api_or_400(payload.model_api_id)
+    config = _model_api_or_400(payload.model_api_id, owner.id)
     if not docs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请至少上传一份需求文档（质检规范）")
     if len(docs) > MAX_DOCS:
@@ -205,14 +205,14 @@ def create_review(
 
 def _save(stream: BinaryIO, dest: Path) -> int:
     total = 0
-    limit = settings.max_upload_mb * 1024 * 1024
+    limit = settings.max_upload_mb * 1024 * 1024  # 0 = 不限制
     with dest.open("wb") as handle:
         while True:
             chunk = stream.read(CHUNK)
             if not chunk:
                 break
             total += len(chunk)
-            if total > limit:
+            if limit and total > limit:
                 handle.close()
                 dest.unlink(missing_ok=True)
                 raise HTTPException(
@@ -234,20 +234,19 @@ def _safe_name(filename: str) -> str:
     return name[:180]
 
 
-def _model_api_or_400(model_api_id: str) -> ModelApiConfig:
+def _model_api_or_400(model_api_id: str, user_id: str) -> ModelApiConfig:
     if not model_api_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择用于审核的模型 API")
     config = store.model_apis.get(model_api_id)
     if config is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="模型 API 配置不存在")
     from . import model_api_service
-    config = model_api_service.effective(config)
-    if not config.ready:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail=f"模型 API「{config.name}」不可用：{'已停用' if not config.enabled else '没有配置密钥'}",
-        )
-    return config
+    resolved = model_api_service.effective(config, user_id=user_id)
+    if not resolved.enabled:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"模型 API「{resolved.name}」已停用")
+    if not resolved.ready:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=model_api_service.missing_key_message(config, user_id))
+    return resolved
 
 
 # --------------------------------------------------------------------------- #
@@ -331,7 +330,7 @@ async def run_review(review_id: str) -> None:
     store.reviews.update(review_id, start)
 
     try:
-        config = _model_api_or_400(item.model_api_id)
+        config = _model_api_or_400(item.model_api_id, item.owner_id)
         manifest = await asyncio.to_thread(_stage_collect, review_id)
         if not manifest["tasks"]:
             raise HTTPException(
@@ -641,6 +640,11 @@ async def _stage_check(
         if isinstance(result, BaseException):
             _set_check(review_id, check.code, status=CheckStatus.FAILED, error=f"{type(result).__name__}: {result}")
             _note(review_id, f"质检项 {check.code} {check.title} 执行失败：{result}")
+            findings.extend(ReviewFinding(check_code=check.code, task_id=task["task_id"],
+                                         rel_path=task.get("rel_path", ""),
+                                         verdict=ReviewVerdict.NEEDS_REVIEW,
+                                         problems=["该检查项执行失败，无法判定，请重新检查"])
+                            for task in manifest.get("tasks", []))
             continue
         findings.extend(result)
     return findings
@@ -813,6 +817,8 @@ def _stage_report(
     item = _current(review_id)
     paths = _paths(item)
 
+    current_checks = {check.code: check for check in item.checks}
+    checks = [current_checks.get(check.code, check) for check in checks]
     report = review_report.build_report(item, manifest, checks, findings)
     review_report.write_report_json(report, paths["report_json"])
     review_report.render_docx(report, paths["report_docx"])
@@ -830,7 +836,10 @@ def _stage_report(
             n_findings=len(findings),
         )
         entry.report_path = str(paths["report_docx"])
-        entry.status = ReviewStatus.SUCCEEDED
+        failed = any(check.status == CheckStatus.FAILED for check in checks)
+        entry.status = ReviewStatus.FAILED if failed else ReviewStatus.SUCCEEDED
+        if failed:
+            entry.error = "部分检查项执行失败，已生成需人工复核的报告"
         entry.stage = ReviewStage.DONE
         entry.finished_at = utcnow()
         entry.updated_at = utcnow()

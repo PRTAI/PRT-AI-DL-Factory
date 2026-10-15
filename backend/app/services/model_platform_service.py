@@ -1,4 +1,7 @@
-"""平台级凭据、官方接入目录与旧模型配置迁移。"""
+"""平台配置（接口地址）、官方接入目录与旧模型配置迁移。
+
+平台不再保存可用的共享密钥：密钥由每个账号自己填（见 ``api_key_service``）。
+"""
 
 from __future__ import annotations
 
@@ -15,7 +18,7 @@ from ..models import (
     ModelPlatformPublic, ModelPlatformUpdate, User, utcnow,
 )
 from ..store import store
-from . import audit_service
+from . import api_key_service, audit_service
 
 
 @lru_cache(maxsize=1)
@@ -27,15 +30,15 @@ def spec(vendor: str) -> dict[str, Any]:
     return next(item for item in catalog() if item["id"] == vendor)
 
 
-def mask_key(key: str) -> str:
-    key = key.strip()
-    return (f"{key[:3]}…{key[-4:]}" if len(key) > 10 else "…" + key[-2:]) if key else ""
+SHARED_KEY_GONE = "平台不再配置统一的 API Key，请每个账号在「个人设置 → 我的 API Key」中填写自己的密钥"
 
 
-def public(item: ModelPlatformConfig) -> ModelPlatformPublic:
+def public(item: ModelPlatformConfig, user_id: str | None = None) -> ModelPlatformPublic:
+    """``has_api_key`` / ``api_key_masked`` 指的是 ``user_id`` 这个账号自己的密钥。"""
+    key = api_key_service.get_key(user_id, item.id)
     return ModelPlatformPublic(
         **item.model_dump(exclude={"api_key", "created_at", "created_by", "presets_seeded"}),
-        has_api_key=bool(item.api_key.strip()), api_key_masked=mask_key(item.api_key),
+        has_api_key=bool(key), api_key_masked=api_key_service.mask_key(key),
     )
 
 
@@ -58,9 +61,11 @@ def _endpoints(values: dict[str, str]) -> dict[str, str]:
 def create(payload: ModelPlatformCreate, *, actor: User) -> ModelPlatformConfig:
     if payload.access_mode != "standard":
         raise HTTPException(400, "此处使用普通 API；专属地址请在高级设置中填写")
+    if payload.api_key.strip():
+        raise HTTPException(400, SHARED_KEY_GONE)
     item = ModelPlatformConfig(
         vendor=payload.vendor, name=payload.name.strip() or spec(payload.vendor)["label"],
-        api_key=payload.api_key.strip(), enabled=payload.enabled,
+        enabled=payload.enabled,
         endpoints=_endpoints(payload.endpoints if payload.endpoints is not None else spec(payload.vendor)["endpoints"]),
         created_by=actor.email, updated_by=actor.email,
     )
@@ -72,19 +77,19 @@ def create(payload: ModelPlatformCreate, *, actor: User) -> ModelPlatformConfig:
 
 def update(platform_id: str, payload: ModelPlatformUpdate, *, actor: User) -> ModelPlatformConfig:
     item = get(platform_id).model_copy(deep=True)
+    if payload.api_key:
+        raise HTTPException(400, SHARED_KEY_GONE)
     if payload.name is not None:
         if not payload.name.strip():
             raise HTTPException(400, "平台名称不能为空")
         item.name = payload.name.strip()
-    if payload.api_key is not None:
-        item.api_key = payload.api_key.strip()
     if payload.endpoints is not None:
         item.endpoints = _endpoints(payload.endpoints)
     if payload.enabled is not None:
         item.enabled = payload.enabled
     item.updated_at, item.updated_by = utcnow(), actor.email
     store.model_platforms.put(item)
-    audit_service.record("model_platform.update", actor=actor, target_type="model_platform", target_id=item.id, summary=f"更新平台「{item.name}」", detail={"key_changed": payload.api_key is not None})
+    audit_service.record("model_platform.update", actor=actor, target_type="model_platform", target_id=item.id, summary=f"更新平台「{item.name}」")
     return item
 
 
@@ -93,6 +98,7 @@ def delete(platform_id: str, *, actor: User) -> None:
     if store.model_apis.first(lambda row: row.platform_id == item.id):
         raise HTTPException(409, "请先删除该平台下的模型，或停用平台")
     store.model_platforms.delete(item.id)
+    api_key_service.purge_target(item.id)
     audit_service.record("model_platform.delete", actor=actor, target_type="model_platform", target_id=item.id, summary=f"删除平台「{item.name}」")
 
 

@@ -170,8 +170,11 @@ def _honest_results(code: str, task_ids: list[str]) -> list[dict]:
 def _model_api() -> ModelApiConfig:
     config = store.model_apis.first(lambda c: c.name == "review-stub")
     if config is None:
-        config = ModelApiConfig(name="review-stub", provider="openai", api_key="sk-stub-key")
+        config = ModelApiConfig(name="review-stub", provider="openai")
         store.model_apis.put(config)
+    from .conftest import grant_key
+    for user in store.users.all():  # 每个账号用自己的密钥，测试里大家都填同一个
+        grant_key(user.id, config.id, "sk-stub-key")
     return config
 
 
@@ -369,8 +372,11 @@ def test_non_json_reply_is_retried_then_fails_the_check(monkeypatch, samples_zip
     _run(review_id)
 
     item = store.reviews.get(review_id)
-    # 一条质检项失败不该拖垮整次审核，但必须留下痕迹
-    assert item.status is ReviewStatus.SUCCEEDED, item.error
+    # 保留报告，但不能把检查执行失败当作审核全部完成。
+    assert item.status is ReviewStatus.FAILED
+    assert item.report_path
+    assert item.stats.n_pass == 0
+    assert item.stats.n_needs_review >= 1
     assert attempts.count("F08") == 2  # 追加「只输出 JSON」重试一次
     failed = [c for c in item.checks if c.status is CheckStatus.FAILED]
     assert [c.code for c in failed] == ["F08"]

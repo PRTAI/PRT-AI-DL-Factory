@@ -104,10 +104,18 @@ def _mtime(path: Path) -> float | None:
 
 
 def _primary_reward(rewards: dict[str, Any]) -> float | None:
-    if "reward" in rewards and isinstance(rewards["reward"], (int, float)):
-        return float(rewards["reward"])
-    numeric = [v for v in rewards.values() if isinstance(v, (int, float))]
-    return sum(numeric) / len(numeric) if numeric else None
+    import math
+    if rewards.get("verifier_error"):
+        return None
+    values = {key: float(value) for key, value in rewards.items()
+              if key not in {"verifier_error", "criteria_counted"}
+              and not key.endswith("_error") and isinstance(value, (int, float))
+              and not isinstance(value, bool) and math.isfinite(value)}
+    for key in ("reward", "graded_score"):
+        if key in values:
+            return values[key]
+    # reward-kit 多维评分（如 {"correctness": 1.0, "format": 1.0}）没有总分键，取各项平均
+    return sum(values.values()) / len(values) if values else None
 
 
 def _from_result(trial_dir: Path, payload: dict[str, Any]) -> TrialState:

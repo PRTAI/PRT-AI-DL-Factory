@@ -90,7 +90,7 @@ function SubmitDialog({
   const [submitting, setSubmitting] = React.useState(false)
 
   const ready = (modelApis.data ?? []).filter((item) => item.ready)
-  // 一个都没配密钥时不让提交——审核全程靠模型判定，没有 API 走不下去。
+  // 当前账号一个都没配密钥时不让提交——审核全程靠模型判定，没有 API 走不下去。
   const noModel = !modelApis.isLoading && ready.length === 0
 
   React.useEffect(() => {
@@ -163,7 +163,7 @@ function SubmitDialog({
       <div className="space-y-4">
         {noModel && (
           <InlineHint>
-            还没有可用的模型 API（需要已填密钥且启用）。请先到「平台管理 → 模型 API」配置一个。
+            还没有可用的模型 API（需要你已填密钥且配置已启用）。请先到「个人设置 → 我的 API Key」为平台填写自己的密钥。
           </InlineHint>
         )}
 
@@ -225,7 +225,7 @@ function SubmitDialog({
           />
         </Field>
 
-        <Field label="模型 API" required hint="只列已填密钥并启用的配置">
+        <Field label="模型 API" required hint="只列你已在个人设置中填写密钥、且已启用的配置">
           <Select
             value={modelApiId}
             onValueChange={setModelApiId}

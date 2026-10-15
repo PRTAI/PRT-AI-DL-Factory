@@ -231,8 +231,9 @@ def test_regrade_can_replace_judge_and_resubmit_stays_regrade(client, member_hea
     source.verify.model_api_id = "deleted-agent-model"
     source.verify.verifier_env = {"JUDGE_MODEL": "old-override", "JUDGE_API_KEY": "old-secret"}
     store.jobs.put(source)
-    judge = ModelApiConfig(name="replacement-judge", provider="openai", model="new-model", api_key="new-test-secret")
+    judge = ModelApiConfig(name="replacement-judge", provider="openai", model="new-model")
     store.model_apis.put(judge)
+    client.put(f"/api/model-apis/my-keys/{judge.id}", headers=member_headers, json={"api_key": "new-test-secret"})
     response = _submit(client, member_headers, source, "regrade", judge_model_api_id=judge.id, judge_api_protocol="openai")
     assert response.status_code == 201, response.text
     assert "new-test-secret" not in response.text
@@ -532,3 +533,98 @@ def test_inplace_interruption_keeps_backup_and_unselected_records(client, member
     assert not (root / "demo__done/result.json").exists()
     assert (root / "demo__unfinished").is_dir()
     assert JobResult.model_validate_json((root / "result.json").read_text()).finished_at is None
+
+
+def test_whole_resume_preserves_separate_stage_keys_and_native_config_matching(client, member_headers, recorded_job, monkeypatch):
+    from harbor.job import Job as NativeJob
+    from harbor.models.job.config import JobConfig
+    from harbor.utils.env import resolve_env_vars
+    source, root = recorded_job
+    source.verify.agent_env = {"OPENAI_API_KEY": "resume-agent-private"}
+    source.verify.verifier_env = {"OPENAI_API_KEY": "resume-judge-private"}
+    store.jobs.put(source)
+    response = _submit(client, member_headers, source, "resume")
+    assert response.status_code == 201, response.text
+    child = store.jobs.get(response.json()["id"])
+    built, _, output = runner.prepare(child)
+    for key, value in built.env.items():
+        monkeypatch.setenv(key, value)
+    config = JobConfig.model_validate_json((output / child.id / "config.json").read_text())
+    assert resolve_env_vars(config.agents[0].env)["OPENAI_API_KEY"] == "resume-agent-private"
+    assert resolve_env_vars(config.verifier.env)["OPENAI_API_KEY"] == "resume-judge-private"
+    native = asyncio.run(NativeJob.create(config))
+    try:
+        assert len(native._existing_trial_results) == 2
+        assert len(native._remaining_trial_configs) == 1
+        assert "resume-agent-private" not in built.masked_command_line()
+        assert "resume-judge-private" not in built.masked_command_line()
+    finally:
+        native._close_logger_handlers()
+
+
+def test_whole_resume_accepts_recorded_lock_with_stage_env(client, member_headers, recorded_job, monkeypatch):
+    """A real run writes lock.json with the original env refs; resume swaps refs."""
+    from harbor.cli import jobs as native_cli
+    from harbor.job import Job as NativeJob
+    from harbor.models.job.config import JobConfig
+    from harbor.models.trial.config import TrialConfig
+    from unittest.mock import patch
+
+    source, root = recorded_job
+    source.verify.agent_env = {"OPENAI_API_KEY": "resume-agent-private"}
+    source.verify.verifier_env = {"JUDGE_API_KEY": "resume-judge-private"}
+    store.jobs.put(source)
+    # Mirror what the original platform run recorded: env as ${PRT_<STAGE>_*} refs.
+    native = JobConfig.model_validate_json((root / "config.json").read_text())
+    native.agents[0].env = {"OPENAI_API_KEY": "${PRT_AGENT_OPENAI_API_KEY}"}
+    native.verifier.env = {"JUDGE_API_KEY": "${PRT_VERIFIER_JUDGE_API_KEY}"}
+    (root / "config.json").write_text(native.model_dump_json())
+    for name in ("demo__done", "demo__cancelled"):
+        trial = TrialConfig.model_validate_json((root / name / "config.json").read_text())
+        trial.agent, trial.verifier = native.agents[0], native.verifier
+        (root / name / "config.json").write_text(trial.model_dump_json())
+        record = json.loads((root / name / "result.json").read_text())
+        record["config"] = json.loads(trial.model_dump_json())
+        (root / name / "result.json").write_text(json.dumps(record))
+    with monkeypatch.context() as original_env:
+        original_env.setenv("PRT_AGENT_OPENAI_API_KEY", "old-run")
+        original = asyncio.run(NativeJob.create(native))
+    original._init_job_lock()
+    original._write_job_lock()
+    original._close_logger_handlers()
+
+    response = _submit(client, member_headers, source)
+    assert response.status_code == 201, response.text
+    child = store.jobs.get(response.json()["id"])
+    built, _, output = runner.prepare(child)
+    target = output / child.id
+    assert "resume-agent-private" not in (target / "lock.json").read_text()
+    # Only what the platform injects; stale ${PRT_AGENT_*} refs would fail here.
+    for key, value in built.env.items():
+        monkeypatch.setenv(key, value)
+    seen = []
+
+    async def fake_run(job):
+        job._init_job_lock()
+        job._write_job_lock()
+        seen.append(job)
+        return None
+
+    with patch.object(NativeJob, "run", fake_run), patch.object(native_cli, "print_job_results_tables"), \
+            patch("harbor.environments.docker.docker.DockerEnvironment.preflight"):
+        native_cli.resume(job_path=target, filter_error_types=["CancelledError"])
+    assert len(seen) == 1
+    assert [result.trial_name for result in seen[0]._existing_trial_results] == ["demo__done"]
+
+
+def test_regrade_adapts_rewardkit_entry_of_selected_grading_set(client, member_headers, recorded_job):
+    from backend.app.services.harbor_compat import RUNNER_NAME
+    source, _ = recorded_job
+    script = Path(source.verify.tasks_path) / "tests" / "test.sh"
+    script.write_text("#!/bin/bash\npython3 -m rewardkit /tests --workspace /app\n")
+    response = _submit(client, member_headers, source, "regrade")
+    assert response.status_code == 201, response.text
+    built, _, _ = runner.prepare(store.jobs.get(response.json()["id"]))
+    assert f"python3 /tests/{RUNNER_NAME}" in script.read_text()
+    assert (script.parent / RUNNER_NAME).is_file()
+    assert any("reward-kit" in note for note in built.notes)

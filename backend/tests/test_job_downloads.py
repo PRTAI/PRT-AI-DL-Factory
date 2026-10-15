@@ -14,7 +14,7 @@ from backend.app.models import JobStatus, ModelApiConfig
 from backend.app.services import job_download_service, runner
 from backend.app.store import store
 
-from .conftest import FAKE_MODEL_ID, project_id
+from .conftest import FAKE_MODEL_ID, grant_key, project_id, user_id_of
 
 
 @pytest.fixture
@@ -117,8 +117,9 @@ def test_export_redacts_old_runtime_env_key(client, member_headers, export_job):
 def test_export_redacts_injected_model_key(client, member_headers, tmp_path):
     key = "injected-model-api-key"
     extra_token = "injected-extra-env-token"
-    model = ModelApiConfig(name="export-test-model", api_key=key, extra_env={"ACCESS_TOKEN": extra_token})
+    model = ModelApiConfig(name="export-test-model", extra_env={"ACCESS_TOKEN": extra_token})
     store.model_apis.put(model)
+    grant_key(user_id_of("dev@prt.local"), model.id, key)
     response = client.post("/api/jobs", headers=member_headers, json={
         "name": "model-key-export", "type": "verify", "project_id": project_id(),
         "resources": {"n_gpus": 0},

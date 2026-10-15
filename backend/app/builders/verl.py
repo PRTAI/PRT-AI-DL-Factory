@@ -37,6 +37,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if config is None:
         raise BuildError("缺少 RL 配置")
 
+    from .trl import validate_options
+    validate_options(config, job.resources.n_gpus)
     root = settings.verl_root
     if not (root / "verl").is_dir():
         raise BuildError(f"verl 源码目录无效: {root}")

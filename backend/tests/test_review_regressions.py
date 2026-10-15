@@ -26,7 +26,8 @@ def no_dispatch(monkeypatch):
 
 
 def test_job_responses_mask_secrets_but_keep_stored_config(client, admin_headers, member_headers, no_dispatch, tmp_path):
-    response = client.post('/api/jobs', headers=admin_headers, json={
+    # 成员提交才会进入待审核，下方 /review 的响应也要覆盖到
+    response = client.post('/api/jobs', headers=member_headers, json={
         'name': 'private configuration', 'type': 'verify', 'project_id': project_id(),
         'resources': {'n_gpus': 0, 'env': {'ACCESS_TOKEN': 'resource-secret-value', 'THREADS': '4'}},
         'verify': {'agent': 'nop', 'tasks_path': str(tmp_path),

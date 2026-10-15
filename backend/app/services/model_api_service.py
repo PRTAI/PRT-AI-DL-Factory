@@ -1,6 +1,8 @@
 """模型 API 配置的增删改查，以及「选了某个配置 → 该给 Harbor 注入什么」。
 
 可见性：所有人都能看列表（提交评测要选），只有管理员能改。
+平台不提供统一密钥：每个账号用自己在「个人设置 → 我的 API Key」里填的密钥
+（``api_key_service``），所以 ``effective`` / ``resolve`` 都要带上是谁在用。
 密钥只在两处出现：db 文件（0600）和子进程环境；接口返回永远是尾号。
 """
 
@@ -22,11 +24,11 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from . import audit_service, model_platform_service
+from . import api_key_service, audit_service, model_platform_service
 
 # 首批要有的四个模型。provider 是「协议」：中转站基本都走 OpenAI 兼容，
 # Claude 系走 Anthropic 协议（claude-code 只认 ANTHROPIC_*）。
-# 密钥留空 —— 管理员在平台管理页填；没密钥之前提交页里灰着，不会让人拿去跑。
+# 密钥由每个账号自己填；没填之前提交页里灰着，不会让人拿去跑。
 DEFAULT_MODELS: list[dict[str, Any]] = [
     {
         "name": "gpt-5.6-sol",
@@ -61,17 +63,19 @@ def seed_defaults() -> int:
             continue
         store.model_apis.put(ModelApiConfig(created_by="system", updated_by="system", **spec))
         created += 1
-    return created + model_platform_service.seed_and_migrate()
+    created += model_platform_service.seed_and_migrate()
+    api_key_service.migrate_shared_keys()
+    return created
 
 
 # --------------------------------------------------------------------------- #
 # Reads
 # --------------------------------------------------------------------------- #
-def list_public(*, include_disabled: bool = True) -> list[ModelApiPublic]:
+def list_public(user_id: str, *, include_disabled: bool = True) -> list[ModelApiPublic]:
     items = store.model_apis.all()
     if not include_disabled:
         items = [i for i in items if i.enabled]
-    rows = [public(i) for i in items]
+    rows = [public(i, user_id) for i in items]
     rows.sort(key=lambda i: (not i.ready, i.vendor, i.name.lower()))
     return rows
 
@@ -82,8 +86,10 @@ def protocols(item: ModelApiConfig) -> list[str]:
     return ["anthropic"] if item.provider == "anthropic" else ["openai", "responses"] if item.provider == "openai" else ["openai"] if item.provider in {"dashscope", "deepseek", "openrouter"} else []
 
 
-def effective(item: ModelApiConfig, protocol: str | None = None) -> ModelApiConfig:
+def effective(item: ModelApiConfig, protocol: str | None = None, *, user_id: str | None = None) -> ModelApiConfig:
+    """合并平台地址并填入 ``user_id`` 自己的密钥；不带 user_id 时密钥为空。"""
     resolved = item.model_copy(deep=True)
+    resolved.api_key = api_key_service.key_for(item, user_id)
     if protocol and protocol not in protocols(item):
         raise HTTPException(400, f"模型「{item.name}」不支持所选接口 {protocol}")
     if item.platform_id:
@@ -94,7 +100,6 @@ def effective(item: ModelApiConfig, protocol: str | None = None) -> ModelApiConf
             resolved.provider = "anthropic" if selected == "anthropic" else "openai"
         if protocol and not platform.endpoints.get(selected):
             raise HTTPException(400, f"平台「{platform.name}」未配置所选接口地址 {protocol}")
-        resolved.api_key = platform.api_key
         resolved.base_url = platform.endpoints.get(selected, item.base_url)
         resolved.enabled = item.enabled and platform.enabled
     if protocol:
@@ -104,8 +109,9 @@ def effective(item: ModelApiConfig, protocol: str | None = None) -> ModelApiConf
     return resolved
 
 
-def public(item: ModelApiConfig) -> ModelApiPublic:
-    result = ModelApiPublic.of(effective(item))
+def public(item: ModelApiConfig, user_id: str | None = None) -> ModelApiPublic:
+    """``has_api_key`` / ``ready`` 针对 ``user_id`` 这个账号。"""
+    result = ModelApiPublic.of(effective(item, user_id=user_id))
     result.platform_id = item.platform_id
     result.supported_protocols = protocols(item)
     if item.platform_id:
@@ -158,11 +164,13 @@ def create(payload: ModelApiCreate, *, actor: User) -> ModelApiConfig:
         raise HTTPException(400, "模型名称不能为空")
     if store.model_apis.first(lambda i: i.name.lower() == name.lower() and (not payload.platform_id or i.platform_id == payload.platform_id)):
         raise HTTPException(status.HTTP_409_CONFLICT, detail=f"已存在同名模型配置：{name}")
+    if payload.api_key.strip():
+        raise HTTPException(400, model_platform_service.SHARED_KEY_GONE)
     supported = payload.supported_protocols
     if payload.platform_id:
         platform = model_platform_service.get(payload.platform_id)
-        if payload.api_key or payload.base_url or payload.extra_env:
-            raise HTTPException(400, "共享平台模型的密钥和地址请在平台配置中修改")
+        if payload.base_url or payload.extra_env:
+            raise HTTPException(400, "平台模型的接口地址请在平台配置中修改")
         preset = next((p for p in model_platform_service.spec(platform.vendor)["models"] if p["model"] == (payload.model.strip() or name)), None)
         supported = supported if supported is not None else (preset["protocols"] if preset else list(platform.endpoints))
         if not supported:
@@ -175,7 +183,6 @@ def create(payload: ModelApiCreate, *, actor: User) -> ModelApiConfig:
         model=payload.model.strip(),
         model_is_server_id=bool(payload.platform_id),
         base_url=payload.base_url.strip(),
-        api_key=payload.api_key.strip(),
         extra_env={k.strip(): v for k, v in payload.extra_env.items() if k.strip()},
         note=payload.note,
         enabled=payload.enabled,
@@ -190,7 +197,7 @@ def create(payload: ModelApiCreate, *, actor: User) -> ModelApiConfig:
         target_type="model_api",
         target_id=item.id,
         summary=f"新增模型配置「{item.name}」({item.provider})",
-        detail={"has_api_key": bool(item.api_key), "base_url": item.base_url},
+        detail={"base_url": item.base_url},
     )
     return item
 
@@ -198,8 +205,10 @@ def create(payload: ModelApiCreate, *, actor: User) -> ModelApiConfig:
 def update(config_id: str, payload: ModelApiUpdate, *, actor: User) -> ModelApiConfig:
     item = get(config_id)
     data = payload.model_dump(exclude_unset=True)
-    if item.platform_id and any(data.get(key) is not None for key in ("api_key", "base_url", "provider")):
-        raise HTTPException(400, "该模型复用平台配置，请在平台中修改密钥或地址")
+    if data.get("api_key"):
+        raise HTTPException(400, model_platform_service.SHARED_KEY_GONE)
+    if item.platform_id and any(data.get(key) is not None for key in ("base_url", "provider")):
+        raise HTTPException(400, "该模型复用平台配置，请在平台中修改接口地址")
     if "name" in data and data["name"] is not None:
         new_name = data["name"].strip()
         if not new_name:
@@ -220,10 +229,8 @@ def update(config_id: str, payload: ModelApiUpdate, *, actor: User) -> ModelApiC
             row.supported_protocols = data["supported_protocols"]
         if row.platform_id and data.get("model") is not None:
             row.model_is_server_id = True
-        # api_key: None=不改，""=清空，其他=覆盖 —— 编辑表单不回显密钥，
-        # 所以「没动这一栏」必须表示保留原值。
-        if data.get("api_key") is not None:
-            row.api_key = data["api_key"].strip()
+        if data.get("api_key") is not None:  # 只允许清空遗留的共享密钥
+            row.api_key = ""
         if data.get("extra_env") is not None:
             row.extra_env = {k.strip(): v for k, v in data["extra_env"].items() if k.strip()}
         for key in ("enabled", "supports_reasoning_effort"):
@@ -240,8 +247,7 @@ def update(config_id: str, payload: ModelApiUpdate, *, actor: User) -> ModelApiC
         target_type="model_api",
         target_id=item.id,
         summary=f"更新模型配置「{updated.name}」",
-        # 审计里绝不能带密钥本身，只记「改了没」
-        detail={k: ("***" if k == "api_key" else v) for k, v in data.items()},
+        detail={k: v for k, v in data.items() if k != "api_key"},
     )
     return updated
 
@@ -249,6 +255,8 @@ def update(config_id: str, payload: ModelApiUpdate, *, actor: User) -> ModelApiC
 def delete(config_id: str, *, actor: User) -> None:
     item = get(config_id)
     store.model_apis.delete(item.id)
+    if not item.platform_id:
+        api_key_service.purge_target(item.id)
     audit_service.record(
         "model_api.delete",
         actor=actor,
@@ -269,25 +277,30 @@ class ResolvedModel:
     notes: list[str] = field(default_factory=list)
 
 
-def require_ready(config_id: str, protocol: str | None = None) -> ModelApiConfig:
-    """取出模型配置并确认可用（已启用且填了密钥），否则抛 400。
+def require_ready(config_id: str, protocol: str | None = None, *, user_id: str) -> ModelApiConfig:
+    """取出模型配置并确认可用（已启用且 ``user_id`` 填了自己的密钥），否则抛 400。
 
     调用方需要裸字段（``model_id`` / ``provider`` / ``base_url``）时用它，
     不要走 ``resolve()`` —— 后者会顺带生成一整套标准环境变量。
     """
     original = get(config_id)
-    item = effective(original)
+    item = effective(original, user_id=user_id)
     if not item.enabled:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"模型配置「{item.name}」已停用")
     if not item.api_key.strip():
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail=f"模型配置「{item.name}」还没有填 API Key，请管理员在「平台管理 → 模型 API」里补上",
-        )
-    return effective(original, protocol) if protocol else item
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=missing_key_message(original, user_id))
+    return effective(original, protocol, user_id=user_id) if protocol else item
 
 
-def resolve(config_id: str, *, model_style: str, protocol: str | None = None) -> ResolvedModel:
+def missing_key_message(item: ModelApiConfig, user_id: str | None) -> str:
+    platform = store.model_platforms.get(item.platform_id) if item.platform_id else None
+    target = f"平台「{platform.name}」" if platform else f"模型配置「{item.name}」"
+    user = store.users.get(user_id) if user_id else None
+    who = f"账号 {user.email} " if user else ""
+    return f"{who}还没有为{target}配置自己的 API Key，请到「个人设置 → 我的 API Key」填写"
+
+
+def resolve(config_id: str, *, user_id: str, model_style: str, protocol: str | None = None) -> ResolvedModel:
     """把一条模型配置翻译成 Harbor 能吃的 ``--model`` + 标准环境变量。
 
     ``model_style``：
@@ -296,7 +309,7 @@ def resolve(config_id: str, *, model_style: str, protocol: str | None = None) ->
     * ``bare``    —— codex / claude-code 这类 CLI，模型名原样传给 CLI 自己的
       ``--model``，加了前缀反而会被当成模型名的一部分发给 API。
     """
-    item = require_ready(config_id, protocol)
+    item = require_ready(config_id, protocol, user_id=user_id)
 
     spec = PROVIDERS[item.provider]
     key_envs: list[str] = list(spec["api_key_envs"])  # type: ignore[arg-type]

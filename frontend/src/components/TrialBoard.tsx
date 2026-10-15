@@ -24,7 +24,7 @@ import { toast } from 'sonner'
 import { trialSelectionId, toggleTrialSelection } from '@/lib/trial-selection'
 import type { TrialPhase, TrialState } from '@/lib/types'
 import { cn, formatDuration, formatNumber } from '@/lib/utils'
-import { Badge, Button, Card, CardBody, CardHeader, Dialog, EmptyState, ErrorBox, Input, Skeleton, StatusDot, Table, Td, Th, Tr } from './ui'
+import { Badge, Button, Card, CardBody, CardHeader, Dialog, EmptyState, ErrorBox, HelpTip, Input, Skeleton, StatusDot, Table, Td, Th, Tr } from './ui'
 import { CopyButton, Mono } from './common'
 import { AgentTrace } from './AgentTrace'
 
@@ -143,15 +143,24 @@ export function TrialBoard({ jobId, live, canAct = false }: { jobId: string; liv
           </div>
         </div>
 
-        {canAct && <div className="space-y-2 rounded-lg border border-border bg-bg-elevated p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-auto text-xs text-fg-muted">已选 {selected.length} 条（支持跨页，最多 100 条）</span>
-            <Button size="sm" variant="secondary" disabled={!selected.length || action.isPending} loading={action.isPending && action.variables === 'rerun'} onClick={() => action.mutate('rerun')}>重新运行选中</Button>
-            <Button size="sm" variant="secondary" disabled={!selected.length || selected.some(row => !row.path) || action.isPending} loading={action.isPending && action.variables === 'regrade'} onClick={() => action.mutate('regrade')}>直接评分选中</Button>
-            <Button size="sm" variant="secondary" disabled={!selected.length || selected.some(row => row.phase === 'success') || action.isPending} loading={action.isPending && action.variables === 'resume'} onClick={() => action.mutate('resume')}>中断恢复选中</Button>
-            <Button size="sm" variant="ghost" disabled={!selected.length || action.isPending} onClick={() => { setSelected([]); action.reset() }}>清空选择</Button>
+        {canAct && <div className="space-y-2">
+          <div className="flex min-h-8 flex-wrap items-center gap-2 text-xs text-fg-muted">
+            <span className="mr-auto flex items-center gap-1">
+              {selected.length ? `已选 ${selected.length} 条` : '勾选 trial 后可重新运行 / 直接评分 / 中断恢复'}
+              <HelpTip>
+                自动沿用原配置；支持跨页勾选，最多 100 条，全选仅作用于当前页。
+                <br />· 重新运行：在原任务内替换选中记录，不创建新任务。
+                <br />· 直接评分：创建独立任务，需要已保存的产物。
+                <br />· 中断恢复：创建独立任务，只补跑未完成或失败记录，从头执行，不恢复 Agent 对话或容器进程。
+              </HelpTip>
+            </span>
+            {selected.length > 0 && <>
+              <Button size="sm" variant="secondary" disabled={action.isPending} loading={action.isPending && action.variables === 'rerun'} onClick={() => action.mutate('rerun')}>重新运行</Button>
+              <Button size="sm" variant="secondary" disabled={selected.some(row => !row.path) || action.isPending} loading={action.isPending && action.variables === 'regrade'} onClick={() => action.mutate('regrade')}>直接评分</Button>
+              <Button size="sm" variant="secondary" disabled={selected.some(row => row.phase === 'success') || action.isPending} loading={action.isPending && action.variables === 'resume'} onClick={() => action.mutate('resume')}>中断恢复</Button>
+              <Button size="sm" variant="ghost" disabled={action.isPending} onClick={() => { setSelected([]); action.reset() }}>清空</Button>
+            </>}
           </div>
-          <p className="text-[11px] leading-relaxed text-fg-subtle">自动沿用原配置。重新运行会在原任务内替换选中记录，保留未选中数据，不创建新任务。直接评分和中断恢复仍创建独立任务；直接评分需要已保存的产物；中断恢复仅补跑未完成或失败记录，从头执行该条数据，不恢复 Agent 对话或容器进程。全选仅作用于当前页。</p>
           {action.isError && <ErrorBox message={action.error instanceof ApiError ? action.error.message : '提交失败'} />}
         </div>}
 

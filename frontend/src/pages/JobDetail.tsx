@@ -11,6 +11,7 @@ import {
   Pencil,
   RefreshCw,
   Repeat,
+  RotateCcw,
   Terminal,
   XCircle,
   XOctagon,
@@ -42,6 +43,7 @@ import {
   Field,
   Input,
   KeyValue,
+  Menu,
   Progress,
   SectionTitle,
   Skeleton,
@@ -54,6 +56,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  Tooltip,
   Tr,
 } from '@/components/ui'
 import { CopyButton, FRAMEWORK_LABEL, JobTypeBadge, Mono, PageHeader, StatusBadge } from '@/components/common'
@@ -218,6 +221,7 @@ export default function JobDetail() {
 
   const data = job.data
   const canControl = user?.role === 'admin' || data.owner_id === user?.id
+  const finished = canControl && ['succeeded', 'failed', 'cancelled', 'rejected'].includes(data.status)
   const liveProgress = stream.progress ?? data.progress
   const liveStatus = stream.status ?? data.status
   const logContent = isActive ? stream.log : (staticLog.data?.content ?? '')
@@ -244,23 +248,14 @@ export default function JobDetail() {
             <Link to="/jobs">
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
-                返回列表
+                返回
               </Button>
             </Link>
-            <Button variant="outline" size="sm" onClick={() => { job.refetch(); metrics.refetch(); staticLog.refetch() }}>
-              <RefreshCw className={cn('h-3.5 w-3.5', job.isFetching && 'animate-spin')} aria-hidden />
-              刷新
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              loading={download.isPending}
-              onClick={() => download.mutate()}
-              title="下载 ZIP：任务配置、日志、指标与当前产物"
-            >
-              <Download className="h-3.5 w-3.5" aria-hidden />
-              导出下载
-            </Button>
+            <Tooltip label="刷新">
+              <Button variant="outline" size="sm" className="w-8 justify-center px-0" aria-label="刷新" onClick={() => { job.refetch(); metrics.refetch(); staticLog.refetch() }}>
+                <RefreshCw className={cn('h-3.5 w-3.5', job.isFetching && 'animate-spin')} aria-hidden />
+              </Button>
+            </Tooltip>
             {user?.role === 'admin' && data.status === 'pending_review' && (
               <>
                 <Button variant="success" size="sm" loading={review.isPending} onClick={() => review.mutate({ approve: true, comment: '' })}>
@@ -279,29 +274,7 @@ export default function JobDetail() {
                 终止任务
               </Button>
             )}
-            {canControl && ['succeeded', 'failed', 'cancelled', 'rejected'].includes(data.status) && (
-              <>
-                <Button variant="outline" size="sm" onClick={() => { setNewName(data.name); setRenameOpen(true) }}>
-                  <Pencil className="h-3.5 w-3.5" aria-hidden />
-                  改名
-                </Button>
-                {data.type === 'verify' && data.status !== 'rejected' && <HarborActions key={data.id} job={data} />}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  title={data.harbor_action ? '载入完整评测提交页，将重新执行 Agent' : '载入这次的配置到提交页，修改后再提交'}
-                  onClick={() =>
-                    navigate(`${data.type === 'verify' ? '/submit/verify' : '/submit/train'}?rerun=${data.id}`)
-                  }
-                >
-                  <Repeat className="h-3.5 w-3.5" aria-hidden />
-                  {data.harbor_action ? '编辑为完整评测' : '编辑后重跑'}
-                </Button>
-                <Button variant="ghost" size="sm" loading={resubmit.isPending} onClick={() => resubmit.mutate()}>
-                  原样重跑
-                </Button>
-              </>
-            )}
+            {finished && data.type === 'verify' && data.status !== 'rejected' && <HarborActions key={data.id} job={data} />}
             {canControl && exportable.data?.exportable && (
               <Button
                 variant="secondary"
@@ -322,6 +295,36 @@ export default function JobDetail() {
                 </Button>
               </Link>
             )}
+            <Menu
+              size="sm"
+              items={[
+                {
+                  label: download.isPending ? '正在打包…' : '导出下载（ZIP）',
+                  icon: <Download className="h-3.5 w-3.5" aria-hidden />,
+                  disabled: download.isPending,
+                  onSelect: () => download.mutate(),
+                },
+                {
+                  label: '改名',
+                  icon: <Pencil className="h-3.5 w-3.5" aria-hidden />,
+                  hidden: !finished,
+                  onSelect: () => { setNewName(data.name); setRenameOpen(true) },
+                },
+                {
+                  label: data.harbor_action ? '编辑为完整评测' : '编辑后重跑',
+                  icon: <Repeat className="h-3.5 w-3.5" aria-hidden />,
+                  hidden: !finished,
+                  onSelect: () => navigate(`${data.type === 'verify' ? '/submit/verify' : '/submit/train'}?rerun=${data.id}`),
+                },
+                {
+                  label: '原样重跑',
+                  icon: <RotateCcw className="h-3.5 w-3.5" aria-hidden />,
+                  hidden: !finished,
+                  disabled: resubmit.isPending,
+                  onSelect: () => resubmit.mutate(),
+                },
+              ]}
+            />
           </>
         }
       >

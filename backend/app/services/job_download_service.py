@@ -14,7 +14,7 @@ from ..config import settings
 from ..models import Job, User, utcnow
 from ..redaction import SECRET_KEY as _SECRET_KEY, secret_values as _secret_values, mask_values as _mask
 from ..store import store
-from . import audit_service, job_service, runner
+from . import api_key_service, audit_service, job_service, runner
 
 _BINARY_SUFFIXES = {".bin", ".pt", ".pth", ".ckpt", ".safetensors", ".zip", ".gz", ".png", ".jpg", ".jpeg", ".pdf", ".docx", ".xlsx", ".parquet", ".npy", ".npz"}
 _PRIVATE_NAMES = {"secrets.json", "credentials.json", "auth.json"}
@@ -28,6 +28,8 @@ def _secrets_for(job: Job, payload: dict[str, Any], work: Path) -> list[str]:
             model = store.model_apis.get(model_id) if model_id else None
             if model and model.api_key:
                 secrets.add(model.api_key)
+            if model and (own := api_key_service.key_for(model, job.owner_id)):
+                secrets.add(own)
             if model:
                 secrets.update(_secret_values(model.extra_env))
                 platform = store.model_platforms.get(model.platform_id) if model.platform_id else None

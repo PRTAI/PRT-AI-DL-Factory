@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     monitor_interval_seconds: float = 2.0
     monitor_history_points: int = 900  # ~30 min at 2s resolution
     log_tail_bytes: int = 200_000
-    max_upload_mb: int = 8192
+    max_upload_mb: int = 0  # 单次上传大小上限，0 表示不限制
 
     # Jobs must be approved by an admin before they run. Kept configurable so a
     # single-user install can opt out; the UI surfaces it as a system setting.

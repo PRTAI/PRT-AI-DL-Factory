@@ -6,8 +6,9 @@ Harbor 的 agent 不吃「平台自己发明的」变量名——每个 provider
 ``OPENAI_BASE_URL``……）。这里的 ``PROVIDERS`` 是它的镜像，
 ``tests/test_model_apis.py`` 会去解析 Harbor 源码确认没有写错。
 
-配置对全员可见（大家都要选模型），但只有管理员能增删改；API Key 只进
-``BuildResult.secrets`` 和子进程环境，接口返回时永远是打码后的尾号。
+配置对全员可见（大家都要选模型），但只有管理员能增删改；平台不再提供统一的
+API Key，每个账号在「个人设置」里为平台填自己的密钥（``UserApiKey``），任务按
+提交人的密钥注入。密钥只进 ``BuildResult.secrets`` 和子进程环境，接口返回永远是尾号。
 """
 
 from __future__ import annotations
@@ -92,7 +93,7 @@ class ModelPlatformConfig(Base):
     vendor: PlatformVendor
     name: str
     access_mode: str = "standard"
-    api_key: str = ""
+    api_key: str = ""  # 旧版的平台共享密钥，启动时迁移到个人密钥后清空，不再用于调用
     endpoints: dict[ApiProtocol, str] = Field(default_factory=dict)
     enabled: bool = True
     presets_seeded: bool = False
@@ -130,6 +131,40 @@ class ModelPlatformUpdate(Base):
     endpoints: dict[ApiProtocol, str] | None = None
     enabled: bool | None = None
 
+
+class UserApiKey(Base):
+    """某个账号在某个平台（或未挂平台的旧模型配置）上的个人 API Key。"""
+
+    id: str
+    user_id: str
+    target_id: str  # 平台 id；未挂平台的模型配置用模型 id
+    api_key: str = ""  # 明文只存在 db 文件里（0600），接口永不返回
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+    @staticmethod
+    def key_id(user_id: str, target_id: str) -> str:
+        return f"{user_id}:{target_id}"
+
+
+class UserApiKeyPublic(Base):
+    target_id: str
+    kind: Literal["platform", "model"]
+    name: str
+    vendor: PlatformVendor = "custom"
+    vendor_label: str = ""
+    endpoints: dict[ApiProtocol, str] = Field(default_factory=dict)
+    models: list[str] = Field(default_factory=list)
+    enabled: bool = True
+    has_api_key: bool = False
+    api_key_masked: str = ""
+    updated_at: datetime | None = None
+
+
+class UserApiKeySet(Base):
+    api_key: str = Field(min_length=1, max_length=4096)
+
+
 # 思考模式。Harbor 各 agent 接受的集合不一样，builder 会按 agent 收敛（见 resources_service）。
 ReasoningEffort = Literal["", "low", "medium", "high", "xhigh", "max"]
 EFFORT_ORDER: list[str] = ["low", "medium", "high", "xhigh", "max"]
@@ -146,7 +181,7 @@ class ModelApiConfig(Base):
     # 新平台模型填写服务器标识；旧配置可能已经包含 LiteLLM 客户端前缀。
     model_is_server_id: bool = False
     base_url: str = ""
-    api_key: str = ""  # 明文只存在 db 文件里（文件权限 0600），接口永不返回
+    api_key: str = ""  # 旧版共享密钥，启动时迁移到个人密钥后清空；运行时由 effective() 填入提交人的密钥
     extra_env: dict[str, str] = Field(default_factory=dict)  # 额外要注入的变量
     note: str = ""
     enabled: bool = True
@@ -162,7 +197,7 @@ class ModelApiConfig(Base):
 
     @property
     def ready(self) -> bool:
-        """有密钥才算可用；没密钥的配置在提交页里灰掉并说明原因。"""
+        """有密钥才算可用（对 effective() 的结果而言即「当前账号配了密钥」）。"""
         return self.enabled and bool(self.api_key.strip())
 
 

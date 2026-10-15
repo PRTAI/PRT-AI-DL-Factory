@@ -2,12 +2,12 @@ import { TaskTimeoutPanel } from '@/components/TaskTimeoutPanel'
 import * as React from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Globe, KeyRound, Rocket, Plus, Settings2 } from 'lucide-react'
+import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Globe, KeyRound, Rocket, Plus, Settings2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { Prebuild } from '@/lib/api'
 import type { ApiProtocol, Dataset, DeploymentEndpoint, ModelApi, RegistryDataset, VerifyAgentConfig, VerifyConfig } from '@/lib/types'
-import { useProject } from '@/lib/store'
+import { useAuth, useProject } from '@/lib/store'
 import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
 import { agentConfig, appendVerifyAgent, batchJobNames } from '@/lib/verify-batch'
@@ -20,6 +20,7 @@ import {
   CardHeader,
   ErrorBox,
   Field,
+  HelpTip,
   Input,
   NumberInput,
   Select,
@@ -81,7 +82,7 @@ const EFFORT_OPTIONS = [
   { value: 'max', label: 'max', description: '最深思考，最慢最贵' },
 ]
 
-/** 协议已确定后，按平台、模型逐级选择；密钥由后台注入。 */
+/** 协议已确定后，按平台、模型逐级选择；后台注入提交人自己在该平台的密钥。 */
 function ModelApiPicker({ value, onChange, protocol, allowManual = true }: {
   value: string
   onChange: (item: ModelApi | null) => void
@@ -109,10 +110,11 @@ function ModelApiPicker({ value, onChange, protocol, allowManual = true }: {
         ]} />
       </Field>
       <Field label="模型" required>
-        <Select value={current?.id ?? ''} disabled={!vendor || vendor === 'manual'} placeholder={vendor ? '再选择模型' : '请先选择平台'} onValueChange={(next) => onChange(rows.find((m) => m.id === next) ?? null)} options={shown.map((m) => ({ value: m.id, label: m.name, description: `${m.platform_name}${m.ready ? '' : ' · 未配置密钥'}`, disabled: !m.ready }))} />
+        <Select value={current?.id ?? ''} disabled={!vendor || vendor === 'manual'} placeholder={vendor ? '再选择模型' : '请先选择平台'} onValueChange={(next) => onChange(rows.find((m) => m.id === next) ?? null)} options={shown.map((m) => ({ value: m.id, label: m.name, description: `${m.platform_name}${m.ready ? '' : ' · 你未配置该平台密钥'}`, disabled: !m.ready }))} />
       </Field>
     </div>
-    {current && <div className="flex items-center justify-between gap-2"><p className="min-w-0 break-all text-[11px] text-fg-subtle">共用「{current.platform_name}」的平台密钥 · {current.endpoints[protocol]}</p><Button size="sm" variant="ghost" onClick={() => onChange(null)}>清除选择</Button></div>}
+    {rows.some((m) => m.enabled && !m.ready) && <p className="text-[11px] text-fg-subtle">灰色的平台 / 模型需要先在 <Link to="/settings" className="text-primary">个人设置 → 我的 API Key</Link> 填写对应平台的密钥</p>}
+    {current && <div className="flex items-center justify-between gap-2"><p className="min-w-0 break-all text-[11px] text-fg-subtle">使用你在「{current.platform_name}」的个人密钥 · {current.endpoints[protocol]}</p><Button size="sm" variant="ghost" onClick={() => onChange(null)}>清除选择</Button></div>}
     {!rows.length && !models.isLoading && <p className="text-[11px] text-fg-subtle">暂无符合此接口的模型，请在「平台管理 → 模型 API」配置。</p>}
     {models.error && <p className="text-xs text-danger">{models.error.message}</p>}
   </div>
@@ -275,9 +277,9 @@ function AgentEditor({ config, patch, title, onRemove }: {
   }, [agentInfo, config.model_api_id])
   return (
     <Card>
-      <CardHeader title={title} icon={<Bot className="h-4 w-4" aria-hidden />} />
+      <CardHeader title={title} icon={<Bot className="h-4 w-4" aria-hidden />}
+        actions={onRemove && <Button size="sm" variant="ghost" onClick={onRemove}><Trash2 className="h-3.5 w-3.5" aria-hidden />移除</Button>} />
       <CardBody className="space-y-4">
-        {onRemove && <Button size="sm" variant="ghost" onClick={onRemove}>移除此项</Button>}
         <Field label="Agent" required hint={agentInfo?.description}>
           <Select
             value={config.agent}
@@ -356,10 +358,10 @@ function AgentEditor({ config, patch, title, onRemove }: {
         )}
 
         {!agentInfo?.needs_model && (
-          <InlineHint>
-            oracle / nop 属于自检 agent：oracle 执行任务自带的 solution，reward 应接近 1.0；
-            nop 什么都不做，reward 应为 0。正式评测前先跑这两个可以确认任务集本身是可靠的。
-          </InlineHint>
+          <p className="flex items-center gap-1 text-xs text-fg-muted">
+            自检 agent：oracle 期望 reward≈1，nop 期望 0
+            <HelpTip>oracle 执行任务自带的 solution，nop 什么都不做。正式评测前先跑这两个可以确认任务集本身是可靠的。</HelpTip>
+          </p>
         )}
 
         {agentInfo?.env_keys.length ? (
@@ -402,6 +404,7 @@ const DRAFT = 'submit-verify'
 export default function SubmitVerify() {
   const navigate = useNavigate()
   const { projectId, setProject } = useProject()
+  const isAdmin = useAuth((state) => state.user?.role === 'admin')
   const [searchParams] = useSearchParams()
   const fromJobId = searchParams.get('from')
   // 任务详情页「重跑」带过来的源评测任务：预填它的配置，改完再提交
@@ -716,7 +719,6 @@ export default function SubmitVerify() {
           <Card>
             <CardHeader
               title="任务集"
-              description="Harbor 任务树：每个任务包含 task.toml / instruction.md / environment / tests"
               icon={<Database className="h-4 w-4" aria-hidden />}
               actions={
                 <Link to="/datasets">
@@ -779,20 +781,23 @@ export default function SubmitVerify() {
             <Card>
               <CardHeader
                 title={judgeRequired ? 'Judge 模型（reward-kit 打分）' : 'Judge 模型（可选）'}
-                description="任务使用 LLM 打分时，平台按所选接口注入 JUDGE_API_KEY / JUDGE_BASE_URL / JUDGE_MODEL / JUDGE_PROVIDER / JUDGE_API_PROTOCOL；reward-kit 任务需要选择 Judge。"
+                description="LLM 打分任务使用；平台注入 JUDGE_* 环境变量"
                 icon={<Bot className="h-4 w-4" aria-hidden />}
               />
               <CardBody className="space-y-4">
-                <Field label="Judge 接口" required hint="先选择接口，再选择支持该接口的平台与模型">
-                  <Select value={config.judge_api_protocol} onValueChange={(value) => patch({ judge_api_protocol: value as VerifyConfig['judge_api_protocol'] })} options={[{ value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }]} />
-                </Field>
+                <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+                  <Field label="Judge 接口" required>
+                    <Select value={config.judge_api_protocol} onValueChange={(value) => patch({ judge_api_protocol: value as VerifyConfig['judge_api_protocol'] })} options={[{ value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }]} />
+                  </Field>
+                  <ToggleRow
+                    label="启用 Batch Judge"
+                    hint="将本次题包副本中 [judge].mode 设为 batched，同一配置内的评分项合并评判；关闭时沿用题包设置。支持上传或服务器本地任务集。"
+                    checked={Boolean(config.batch_judge)}
+                    onCheckedChange={(checked) => patch({ batch_judge: checked })}
+                    className="self-end"
+                  />
+                </div>
                 <ModelApiPicker value={config.judge_model_api_id} protocol={config.judge_api_protocol} allowManual={false} onChange={(item) => patch({ judge_model_api_id: item?.id ?? '' })} />
-                <ToggleRow
-                  label="启用 Batch Judge"
-                  hint="将本次题包副本中 [judge].mode 设为 batched，同一配置内的评分项合并评判；关闭时沿用题包设置。支持上传或服务器本地任务集。"
-                  checked={Boolean(config.batch_judge)}
-                  onCheckedChange={(checked) => patch({ batch_judge: checked })}
-                />
               </CardBody>
             </Card>
           )}
@@ -804,17 +809,18 @@ export default function SubmitVerify() {
               patch={(values) => setExtraAgents(previous => previous.map(item => item.id === row.id ? { ...item, config: { ...item.config, ...values } } : item))}
               onRemove={() => setExtraAgents(previous => previous.filter(item => item.id !== row.id))} />
           ))}
-          <Button variant="secondary" disabled={extraAgents.length >= 31 || submit.isPending} onClick={() => setExtraAgents(previous => appendVerifyAgent(previous, {
-            ...agentConfig(DEFAULT_VERIFY), agent: 'claude-code', agent_api_protocol: 'anthropic',
-          }))}>
-            <Plus className="h-4 w-4" aria-hidden /> 添加 Agent / 模型
-          </Button>
-          <p className="text-xs text-fg-muted">添加多项后将批量创建独立评测任务，共用数据集、Judge 和下方评测参数（最多 32 项）。每项可单独配置模型、密钥和思考模式。</p>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" disabled={extraAgents.length >= 31 || submit.isPending} onClick={() => setExtraAgents(previous => appendVerifyAgent(previous, {
+              ...agentConfig(DEFAULT_VERIFY), agent: 'claude-code', agent_api_protocol: 'anthropic',
+            }))}>
+              <Plus className="h-4 w-4" aria-hidden /> 添加 Agent / 模型
+            </Button>
+            <HelpTip>添加多项后将批量创建独立评测任务，共用数据集、Judge 和下方评测参数（最多 32 项）。每项可单独配置模型、密钥和思考模式。</HelpTip>
+          </div>
 
           <Card>
             <CardHeader
               title="评测超参数"
-              description="pass@k 与并发是最影响耗时与成本的两个参数"
               icon={<Settings2 className="h-4 w-4" aria-hidden />}
             />
             <CardBody className="space-y-4">
@@ -867,7 +873,7 @@ export default function SubmitVerify() {
                 </Field>
               </Grid>
 
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-4">
                 <ToggleRow
                   label="导出轨迹"
                   hint="评测结束后导出 ATIF 轨迹，可用于后续 SFT / 蒸馏"
@@ -1062,7 +1068,7 @@ export default function SubmitVerify() {
                 {extraAgents.length ? `批量提交 ${extraAgents.length + 1} 个评测` : '提交评测'}
               </Button>
               <p className="text-[11px] leading-relaxed text-fg-subtle">
-                评测同样需要管理员审核。审核通过后平台会执行 <Mono>harbor run</Mono>，
+                {isAdmin ? '管理员提交直接进入排队。' : '评测同样需要管理员审核。审核通过后'}平台会执行 <Mono>harbor run</Mono>，
                 并把 pass@k、reward 分布与花费回填到任务详情。
               </p>
             </CardBody>

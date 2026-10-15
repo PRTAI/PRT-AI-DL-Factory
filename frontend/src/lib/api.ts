@@ -25,6 +25,7 @@ import type {
   ModelProviderInfo,
   ModelPlatform,
   PlatformCatalog,
+  UserApiKey,
   RegistryDataset,
   ReviewFinding,
   ReviewTask,
@@ -519,6 +520,11 @@ export const api = {
   updateModelPlatform: (id: string, payload: Record<string, unknown>) => request<ModelPlatform>(`/api/model-apis/platforms/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteModelPlatform: (id: string) => request<void>(`/api/model-apis/platforms/${id}`, { method: 'DELETE' }),
   modelProviders: () => request<ModelProviderInfo[]>('/api/model-apis/providers'),
+  myApiKeys: () => request<UserApiKey[]>('/api/model-apis/my-keys'),
+  setMyApiKey: (targetId: string, api_key: string) =>
+    request<UserApiKey>(`/api/model-apis/my-keys/${encodeURIComponent(targetId)}`, { method: 'PUT', body: JSON.stringify({ api_key }) }),
+  deleteMyApiKey: (targetId: string) =>
+    request<void>(`/api/model-apis/my-keys/${encodeURIComponent(targetId)}`, { method: 'DELETE' }),
   createModelApi: (payload: Record<string, unknown>) =>
     request<ModelApi>('/api/model-apis', { method: 'POST', body: JSON.stringify(payload) }),
   updateModelApi: (id: string, payload: Record<string, unknown>) =>

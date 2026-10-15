@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { Job } from '@/lib/types'
-import { Button, Checkbox, Dialog, ErrorBox, Field, Select } from '@/components/ui'
+import { Button, Checkbox, Dialog, ErrorBox, Field, HelpTip, Select } from '@/components/ui'
 
 export function HarborActions({ job }: { job: Job }) {
   const navigate = useNavigate()
@@ -59,7 +59,7 @@ export function HarborActions({ job }: { job: Job }) {
     <Button variant="secondary" size="sm" onClick={() => open('regrade')}>重新判分</Button>
     <Dialog open={mode !== null} onOpenChange={(value) => { if (!value && !create.isPending) setMode(null) }}
       title={mode === 'resume' ? '恢复中断的评测' : '使用已有产物重新判分'}
-      description="创建新任务，沿用平台审核与调度流程，保留原任务记录。"
+      description={<span className="flex items-center gap-1">创建新任务，保留原任务记录{mode === 'regrade' && <HelpTip>仅运行评分器。需要 trial 的 result.json、产物清单及实际产物；评分题包必须使用独立 verifier，并从保存的产物读取输入。只有散装产物文件的目录暂不支持。并发数和沙箱类型沿用原配置；评分资源和超时取评分题包配置。</HelpTip>}</span>}
       footer={<>
         <Button variant="ghost" disabled={create.isPending} onClick={() => setMode(null)}>取消</Button>
         <Button loading={create.isPending} disabled={blocked} onClick={() => create.mutate()}>
@@ -73,8 +73,7 @@ export function HarborActions({ job }: { job: Job }) {
           已记录 {info.data.recorded_trials} 个 trial，另有 {info.data.unfinished_trials} 个目录尚无有效结果。
         </p>}
         {mode === 'resume' ? <>
-          <p className="leading-relaxed text-fg-muted">保留已完成结果，补跑尚未开始、未完成及下方选定错误类型的 trial。中断的 trial 会从头执行，不会恢复 Agent 对话、容器文件或进程。</p>
-          <Field label="需要重新执行的错误类型">
+          <Field label="需要重新执行的错误类型" hint="保留已完成结果，补跑尚未开始、未完成及选定错误类型的 trial。中断的 trial 会从头执行，不会恢复 Agent 对话、容器文件或进程。">
             <div className="space-y-2">
               {errorTypes.map((value) => <label key={value} className="flex items-center gap-2">
                 <Checkbox checked={filters.includes(value)} onCheckedChange={(checked) => setFilters((current) =>
@@ -84,7 +83,6 @@ export function HarborActions({ job }: { job: Job }) {
             </div>
           </Field>
         </> : <>
-          <p className="leading-relaxed text-fg-muted">仅运行评分器。需要 trial 的 result.json、产物清单及实际产物；评分题包必须使用独立 verifier，并从保存的产物读取输入。只有散装产物文件的目录暂不支持。</p>
           {info.data?.regrade_error && <ErrorBox message={info.data.regrade_error} />}
           <Field label="评分任务集" hint="任务名称须与原记录一致。可选择更新后的评分题包。">
             <Select value={dataset} onValueChange={setDataset} options={[
@@ -103,11 +101,11 @@ export function HarborActions({ job }: { job: Job }) {
               { value: 'anthropic', label: 'Anthropic Messages' }, { value: 'openai', label: 'OpenAI Chat Completions' },
             ]} />
           </Field>}
-          <label className="flex items-start gap-2">
+          <label className="flex items-center gap-2">
             <Checkbox checked={batchJudge} onCheckedChange={setBatchJudge} />
-            <span>启用 Batch Judge<span className="mt-1 block text-fg-muted">将本次评分题包副本中 [judge].mode 设为 batched；关闭时沿用题包设置。</span></span>
+            <span>启用 Batch Judge</span>
+            <HelpTip>将本次评分题包副本中 [judge].mode 设为 batched；关闭时沿用题包设置。</HelpTip>
           </label>
-          <p className="text-fg-subtle">并发数和沙箱类型沿用原配置；评分资源和超时取评分题包配置。</p>
         </>}
         {create.isError && <ErrorBox message={create.error instanceof ApiError ? create.error.message : '提交失败'} />}
       </div>

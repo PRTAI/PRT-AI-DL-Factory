@@ -162,7 +162,7 @@ judge 需要的 API Key 填在提交评测页的「Verifier 环境变量」里�
 
 | 变量 | 取值 |
 |---|---|
-| `JUDGE_API_KEY` | 模型配置的 API Key |
+| `JUDGE_API_KEY` | 提交人在「我的 API Key」里为该平台填写的密钥 |
 | `JUDGE_BASE_URL` | 模型配置的 base_url（为空则不发） |
 | `JUDGE_MODEL` | 模型配置的裸模型名 |
 | `JUDGE_PROVIDER` | 模型配置的 provider（openai / anthropic / dashscope …） |

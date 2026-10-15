@@ -122,10 +122,13 @@ def _prepare_job(
     elif payload.type == JobType.RL:
         _validate_rl(payload)
     else:
-        _validate_verify(payload, harbor_action=harbor_action)
+        _validate_verify(payload, owner=owner, harbor_action=harbor_action)
 
     system = store.system_settings()
     require_approval = system.require_approval if system.updated_by else settings.require_approval
+    # 管理员就是审核人，自己提交的不必再给自己点通过
+    admin_approved = require_approval and owner.is_admin
+    require_approval = require_approval and not owner.is_admin
     initial_status = JobStatus.PENDING_REVIEW if require_approval else JobStatus.QUEUED
 
     job = Job(
@@ -146,6 +149,11 @@ def _prepare_job(
         harbor_action=harbor_action,
     )
     job.review.required = require_approval
+    if admin_approved:
+        job.review.reviewer_id = owner.id
+        job.review.reviewer_email = owner.email
+        job.review.reviewed_at = utcnow()
+        job.review.comment = "管理员提交，自动通过"
     if initial_status == JobStatus.QUEUED:
         job.queued_at = utcnow()
 
@@ -258,6 +266,11 @@ def _validate_sft(payload: JobCreate) -> None:
 def _validate_rl(payload: JobCreate) -> None:
     config = payload.rl
     assert config is not None
+    from ..builders.trl import validate_options
+    try:
+        validate_options(config, payload.resources.n_gpus)
+    except BuildError as exc:
+        raise HTTPException(400, str(exc)) from exc
     _check_learning_rate(config.learning_rate, upper=0.01, label="RL ")
     config.model_path = model_service.resolve_model_path(config.model_id, config.model_path)
     if not config.dataset_id:
@@ -281,7 +294,7 @@ def _validate_rl(payload: JobCreate) -> None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="组相对算法的 rollout 组大小至少为 2")
 
 
-def _validate_verify(payload: JobCreate, *, harbor_action: HarborAction | None = None) -> None:
+def _validate_verify(payload: JobCreate, *, owner: User, harbor_action: HarborAction | None = None) -> None:
     config = payload.verify
     assert config is not None
     from ..builders.harbor import validate_secret_env
@@ -321,27 +334,28 @@ def _validate_verify(payload: JobCreate, *, harbor_action: HarborAction | None =
         except (BuildError, OSError, ValueError) as exc:
             raise HTTPException(400, f"无法启用 Batch Judge: {exc}") from exc
     from . import model_api_service
-    model_api_service.agent_protocol(config.agent, config.agent_api_protocol)
+    agent = config.agent_import_path.strip() or config.agent
+    model_api_service.agent_protocol(agent, config.agent_api_protocol)
     if config.judge_model_api_id and not config.disable_verification:
-        model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol)
+        model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol, user_id=owner.id)
     if harbor_action is not None and harbor_action.mode != "rerun":
         # Recorded configuration supplies the agent for resume; regrade never runs it.
         return
     if config.model_api_id:
-        # 提交时就把「没填密钥 / 已停用」挡下来，别等排队到了才失败
+        # 提交时就把「提交人没填自己的密钥 / 已停用」挡下来，别等排队到了才失败
         from . import resources_service
 
         resolved = model_api_service.resolve(
-            config.model_api_id, model_style=resources_service.model_style_for(config.agent),
-            protocol=model_api_service.agent_protocol(config.agent, config.agent_api_protocol),
+            config.model_api_id, user_id=owner.id, model_style=resources_service.model_style_for(agent),
+            protocol=model_api_service.agent_protocol(agent, config.agent_api_protocol),
         )
         try:
             validate_secret_env({**resolved.env, **config.agent_env})
         except BuildError as exc:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         config.model = resolved.model  # 列表/详情页展示用
-    elif config.agent not in {"oracle", "nop"} and not config.model:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"agent {config.agent} 需要指定模型")
+    elif agent not in {"oracle", "nop"} and not config.model:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"agent {agent} 需要指定模型")
 
 
 # --------------------------------------------------------------------------- #

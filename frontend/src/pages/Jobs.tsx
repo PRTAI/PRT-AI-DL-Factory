@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ListChecks, RefreshCw, Search, Users } from 'lucide-react'
+import { Download, ListChecks, RefreshCw, Search, Trash2, Users } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth, useProject } from '@/lib/store'
@@ -13,6 +13,7 @@ import {
   Card,
   Dialog,
   EmptyState,
+  HelpTip,
   Input,
   Progress,
   Select,
@@ -20,6 +21,7 @@ import {
   Td,
   Textarea,
   Th,
+  Tooltip,
   Tr,
 } from '@/components/ui'
 import { JOB_STATUS_OPTIONS, JobTypeBadge, PageHeader, StatusBadge } from '@/components/common'
@@ -312,13 +314,15 @@ export default function Jobs() {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 border-b border-border p-3 text-xs text-fg-muted">
-          <span>已选 {selectedVisible.length} 项 · 其中 {selectedResubmittable.length} 项可重跑</span>
-          <Button size="sm" variant="primary" loading={batchDownload.isPending} disabled={!selectedVisible.length || selectionBusy} onClick={() => batchDownload.mutate([...selectedVisible])}>批量导出</Button>
-          <Button size="sm" variant="outline" loading={batch.isPending} disabled={!selectedResubmittable.length || selectionBusy} onClick={() => { setBatchResults(null); batch.mutate([...selectedResubmittable]) }}>批量重跑（{selectedResubmittable.length}）</Button>
-          <Button size="sm" variant="ghost" disabled={selectionBusy || !selectedVisible.length} onClick={() => setSelected([])}>清空选择</Button>
-          <span>导出配置、日志、指标与当前产物为一个 ZIP；重跑仅限已结束且有操作权限的任务。全选仅限当前列表。</span>
-        </div>
+        {selectedVisible.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-border bg-bg-elevated px-3 py-2 text-xs text-fg-muted">
+          <span className="flex items-center gap-1">
+            已选 {selectedVisible.length} 项 · {selectedResubmittable.length} 项可重跑
+            <HelpTip>导出：配置、日志、指标与当前产物打包为一个 ZIP。重跑：仅限已结束且有操作权限的任务。全选仅作用于当前列表。</HelpTip>
+          </span>
+          <Button size="sm" variant="primary" loading={batchDownload.isPending} disabled={selectionBusy} onClick={() => batchDownload.mutate([...selectedVisible])}>批量导出</Button>
+          <Button size="sm" variant="outline" loading={batch.isPending} disabled={!selectedResubmittable.length || selectionBusy} onClick={() => { setBatchResults(null); batch.mutate([...selectedResubmittable]) }}>批量重跑</Button>
+          <Button size="sm" variant="ghost" disabled={selectionBusy} onClick={() => setSelected([])}>清空</Button>
+        </div>}
         {batchResults && <div className="max-h-64 space-y-1 overflow-auto border-b border-border p-3 text-xs" role="status">
           <p>已创建 {batchResults.succeeded} 个任务，失败 {batchResults.failed} 个</p>
           {batchResults.results.map((row) => <div key={row.source_id} className="break-all">
@@ -328,7 +332,7 @@ export default function Jobs() {
         </div>}
 
         {items.length ? (
-          <Table className="min-w-[1290px] table-fixed">
+          <Table className="min-w-[1180px] table-fixed">
             <thead>
               {/* 为操作预留宽度；窄屏在表格内横向滚动，避免按钮文字竖排。 */}
               <tr>
@@ -343,7 +347,7 @@ export default function Jobs() {
                 <Th className="w-[64px]">GPU</Th>
                 <Th className="w-[80px]">耗时</Th>
                 <Th className="w-[100px]">提交</Th>
-                <Th className="w-[216px] whitespace-nowrap">操作</Th>
+                <Th className="w-[120px] whitespace-nowrap">操作</Th>
               </tr>
             </thead>
             <tbody>
@@ -394,22 +398,19 @@ export default function Jobs() {
                       <div className="text-[11px] text-fg-subtle">{formatRelative(job.created_at)}</div>
                     </Td>
                     <Td>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <Link to={`/jobs/${job.id}`}>
-                          <Button variant="outline" size="sm" className="px-2">
-                            详情
+                      <div className="flex items-center gap-1">
+                        <Tooltip label="导出下载（配置、日志、指标与当前产物 ZIP）">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="w-8 justify-center px-0"
+                            aria-label="导出下载"
+                            loading={downloading.includes(job.id)}
+                            onClick={() => downloadJob(job.id)}
+                          >
+                            {!downloading.includes(job.id) && <Download className="h-3.5 w-3.5" aria-hidden />}
                           </Button>
-                        </Link>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="px-2"
-                          disabled={downloading.includes(job.id)}
-                          onClick={() => downloadJob(job.id)}
-                          title="下载 ZIP：任务配置、日志、指标与当前产物"
-                        >
-                          {downloading.includes(job.id) ? '打包中…' : '导出下载'}
-                        </Button>
+                        </Tooltip>
                         {user?.role === 'admin' && job.status === 'pending_review' && (
                           <>
                             <Button
@@ -446,17 +447,20 @@ export default function Jobs() {
                           </Button>
                         )}
                         {canControl && !isActive && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="border-danger/30 px-2 text-danger hover:border-danger hover:bg-danger-soft hover:text-danger"
-                            disabled={remove.isPending && remove.variables === job.id}
-                            onClick={() => {
-                              if (confirm(`确认删除任务「${job.name}」的记录？训练产物会保留。`)) remove.mutate(job.id)
-                            }}
-                          >
-                            删除
-                          </Button>
+                          <Tooltip label="删除记录（训练产物保留）">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="w-8 justify-center px-0 text-danger hover:bg-danger-soft hover:text-danger"
+                              aria-label="删除"
+                              disabled={remove.isPending && remove.variables === job.id}
+                              onClick={() => {
+                                if (confirm(`确认删除任务「${job.name}」的记录？训练产物会保留。`)) remove.mutate(job.id)
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                            </Button>
+                          </Tooltip>
                         )}
                       </div>
                     </Td>

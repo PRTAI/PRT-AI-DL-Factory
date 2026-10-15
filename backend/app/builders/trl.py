@@ -19,7 +19,7 @@ import os
 from pathlib import Path
 
 from ..config import settings
-from ..models import DatasetKind, Job, RLConfig, TrainStage
+from ..models import DatasetKind, Framework, Job, RLConfig, TrainStage
 from ..services import dataset_service
 from ..store import store
 from .base import BuildError, BuildResult, resolve_attn_implementation
@@ -143,10 +143,54 @@ def outcome_reward(completions, **kwargs):
 '''
 
 
+def validate_options(config: RLConfig, n_gpus: int) -> None:
+    if config.framework == Framework.VERL and config.finetuning_type == "lora":
+        raise BuildError("当前平台尚未接入 verl LoRA，请选择 TRL LoRA 或显式选择全参数训练")
+    if config.framework == Framework.TRL:
+        if config.rollout.backend == "sglang":
+            raise BuildError("TRL 尚不支持 SGLang rollout，请选择 vLLM 或 HF")
+        if config.rollout.backend == "vllm" and config.algorithm in _GROUP_ALGOS:
+            tp = config.rollout.tensor_model_parallel_size
+            if tp < 1 or tp > max(1, n_gpus) or max(1, n_gpus) % tp:
+                raise BuildError("TRL vLLM 张量并行度必须是 GPU 数的约数且不能超过 GPU 数")
+        if config.harbor.enabled and (config.eval_dataset_id or config.val_before_train):
+            raise BuildError("Harbor agentic RL 暂不支持验证集及训练前验证")
+        if config.algorithm in _GROUP_ALGOS and (config.test_freq > 0 or config.val_before_train):
+            per_device = config.extra_args.get("per_device_eval_batch_size")
+            group = _eval_group_size(config)
+            if isinstance(per_device, int) and (per_device * max(1, n_gpus)) % group:
+                raise BuildError(
+                    f"验证批次 per_device_eval_batch_size（{per_device}）× GPU 数（{max(1, n_gpus)}）"
+                    f"必须能被验证组大小（{group}）整除"
+                )
+
+
+def _eval_group_size(config: RLConfig) -> int:
+    value = config.extra_args.get("num_generations_eval")
+    return value if isinstance(value, int) and value > 0 else max(1, config.rollout.n)
+
+
+def _evaluation_settings(config: RLConfig, has_eval: bool) -> dict:
+    if not has_eval:
+        if config.val_before_train:
+            raise BuildError("训练前验证需要可用的验证集")
+        return {}
+    values = {"eval_strategy": "steps" if config.test_freq > 0 else "no",
+              "eval_on_start": config.val_before_train}
+    if config.test_freq > 0:
+        values["eval_steps"] = config.test_freq
+    if config.algorithm in _GROUP_ALGOS and "per_device_eval_batch_size" not in config.extra_args:
+        # TRL 要求「每卡验证 batch × 卡数」能被验证组大小整除，默认的 8 遇到 n=5 之类会在
+        # GRPOConfig 初始化时报 ValueError；和训练一样让每卡每步正好一个完整的组
+        values["per_device_eval_batch_size"] = _eval_group_size(config)
+    return values
+
+
 def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     config: RLConfig = job.rl  # type: ignore[assignment]
     if config is None:
         raise BuildError("缺少 RL 配置")
+    validate_options(config, job.resources.n_gpus)
     if config.algorithm not in _SUPPORTED:
         raise BuildError(f"TRL 不支持算法 {config.algorithm.value}")
 
@@ -171,6 +215,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     )
 
     if use_harbor:
+        if config.eval_dataset_id or config.val_before_train:
+            raise BuildError("Harbor agentic RL 暂不支持验证集及训练前验证")
         if dataset.kind != DatasetKind.HARBOR_TASKS:
             raise BuildError("Harbor 环境模式需要 harbor_tasks 类型的数据集")
         if not (root / "trl" / "experimental" / "harbor").is_dir():
@@ -205,13 +251,13 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     else:
         trainer_name, config_name = _trainer_for(config.algorithm)
         data_files, eval_files = _tabular_files(dataset, config)
-        trainer_config = _drop_unknown_keys(
+        trainer_config = (
             _grpo_config(job, config, output_dir, agentic=False, attn=attn)
             if trainer_name in {"GRPOTrainer", "RLOOTrainer"}
-            else _preference_config(job, config, output_dir, attn=attn),
-            config_name,
-            notes,
+            else _preference_config(job, config, output_dir, attn=attn)
         )
+        trainer_config.update(_evaluation_settings(config, bool(eval_files)))
+        trainer_config = _drop_unknown_keys(trainer_config, config_name, notes)
         if trainer_name in {"GRPOTrainer", "RLOOTrainer"}:
             if config.custom_reward_function_path:
                 reward_block = (
@@ -432,8 +478,8 @@ def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool,
         "temperature": config.rollout.temperature,
         "top_p": config.rollout.top_p,
         "beta": config.kl_loss_coef if config.use_kl_loss else 0.0,
-        "epsilon": config.clip_ratio_low,
-        "epsilon_high": config.clip_ratio_high,
+        "epsilon": config.clip_ratio if config.algorithm == TrainStage.RLOO else config.clip_ratio_low,
+        "epsilon_high": config.clip_ratio if config.algorithm == TrainStage.RLOO else config.clip_ratio_high,
         "logging_steps": 1,
         "save_steps": config.save_freq,
         "bf16": True,
@@ -451,6 +497,7 @@ def _grpo_config(job: Job, config: RLConfig, output_dir: Path, *, agentic: bool,
     if config.rollout.backend == "vllm":
         cfg["use_vllm"] = True
         cfg["vllm_mode"] = "colocate"
+        cfg["vllm_tensor_parallel_size"] = config.rollout.tensor_model_parallel_size
         cfg["vllm_gpu_memory_utilization"] = config.rollout.gpu_memory_utilization
     if agentic:
         cfg["max_tool_calling_iterations"] = config.harbor.max_tool_calling_iterations
@@ -476,6 +523,8 @@ def _preference_config(job: Job, config: RLConfig, output_dir: Path, *, attn: st
         "gradient_checkpointing": config.gradient_checkpointing,
         "report_to": "none",
     }
+    if config.total_training_steps is not None:
+        cfg["max_steps"] = config.total_training_steps
     _apply_attn(cfg, attn)
     cfg.update(config.extra_args)
     return cfg
@@ -551,6 +600,10 @@ def _drop_unknown_keys(cfg: dict, config_name: str, notes: list[str]) -> dict:
     if not known:
         return cfg
     unknown = [key for key in cfg if key not in known]
+    required = {"vllm_tensor_parallel_size", "eval_strategy", "eval_steps", "eval_on_start", "max_steps"}
+    unsupported = required.intersection(unknown)
+    if unsupported:
+        raise BuildError(f"当前 {config_name} 不支持或无法验证配置字段：{', '.join(sorted(unsupported))}")
     if unknown:
         notes.append(
             f"以下参数在本机这版 TRL 的 {config_name} 里不存在，已跳过：{', '.join(sorted(unknown))}"

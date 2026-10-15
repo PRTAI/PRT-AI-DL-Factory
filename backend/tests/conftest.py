@@ -113,6 +113,20 @@ def project_id() -> str:
     return _PROJECT["id"]
 
 
+def grant_key(user_id: str, target_id: str, key: str) -> None:
+    """模拟某个账号在「个人设置 → 我的 API Key」里为平台 / 模型配置填了密钥。"""
+    from backend.app.models import UserApiKey
+    from backend.app.store import store
+
+    store.user_api_keys.put(UserApiKey(id=UserApiKey.key_id(user_id, target_id), user_id=user_id, target_id=target_id, api_key=key))
+
+
+def user_id_of(email: str) -> str:
+    from backend.app.store import store
+
+    return store.users.first(lambda u: u.email == email).id
+
+
 # --------------------------------------------------------------------------- #
 # Archive helpers
 # --------------------------------------------------------------------------- #

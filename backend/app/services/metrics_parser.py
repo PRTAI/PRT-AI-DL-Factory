@@ -343,20 +343,32 @@ def parse_harbor(output_dir: Path, job_id: str, *, job_status: str = "", finishe
 
     pass_at_k: dict[str, float] = {}
     rewards: list[float] = []
+    error_trials: set[str] = set()
     for eval_stats in (stats.get("evals") or {}).values():
         if not isinstance(eval_stats, dict):
             continue
         for k, value in (eval_stats.get("pass_at_k") or {}).items():
             pass_at_k[f"pass@{k}"] = float(value)
-        # reward_stats only holds trials that produced a reward; trials that blew
-        # up (timeout, container failure) never land here.
-        for _metric, buckets in (eval_stats.get("reward_stats") or {}).items():
-            for reward_value, trial_ids in (buckets or {}).items():
+        # Reconstruct each trial before selecting its primary score. Diagnostic
+        # flags and auxiliary criteria must never become extra scored samples.
+        per_trial: dict[str, dict[str, float]] = {}
+        for metric, buckets in (eval_stats.get("reward_stats") or {}).items():
+            for raw_value, trial_ids in (buckets or {}).items():
                 try:
-                    rewards.extend([float(reward_value)] * len(trial_ids or []))
+                    value = float(raw_value)
                 except (TypeError, ValueError):
                     continue
+                for trial_id in trial_ids or []:
+                    per_trial.setdefault(trial_id, {})[metric] = value
+        error_trials.update(name for name, row in per_trial.items() if row.get("verifier_error"))
+        for names in (eval_stats.get("exception_stats") or {}).values():
+            error_trials.update(names)
+        for row in per_trial.values():
+            score = harbor_trials._primary_reward(row)
+            if score is not None:
+                rewards.append(score)
 
+    errored = max(errored, len(error_trials))
     resolved = None
     if rewards or completed:
         # A trial that errored is a failure, not a missing sample: divide by the

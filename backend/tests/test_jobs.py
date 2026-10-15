@@ -72,6 +72,16 @@ def test_submitted_job_waits_for_review(client, member_headers, dataset_id):
     assert job["sft"]["model_path"].endswith(FAKE_MODEL_ID)
 
 
+def test_admin_submitted_job_skips_review(client, admin_headers, dataset_id):
+    response = client.post("/api/jobs", headers=admin_headers, json=_sft_payload(dataset_id))
+    assert response.status_code == 201, response.text
+    job = response.json()
+    assert job["status"] != "pending_review"
+    assert job["review"]["required"] is False
+    assert job["review"]["reviewer_email"] == "admin@prt.local"
+    client.post(f"/api/jobs/{job['id']}/cancel", headers=admin_headers, json={"reason": "test"})
+
+
 def test_member_cannot_review_own_job(client, member_headers, dataset_id):
     job = client.post("/api/jobs", headers=member_headers, json=_sft_payload(dataset_id)).json()
     response = client.post(

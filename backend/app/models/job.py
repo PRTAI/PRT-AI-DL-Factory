@@ -262,7 +262,7 @@ class VerifyConfig(Base):
     # Emitted as --override-cpus / --override-memory-mb / --override-gpus
     environment_cpus: int | None = None
     environment_memory_mb: int | None = None
-    environment_gpus: int | None = None
+    environment_gpus: int | None = Field(default=None, ge=0)
 
     timeout_multiplier: float = Field(default=1.0, gt=0)
     agent_timeout_multiplier: float | None = Field(default=None, gt=0)

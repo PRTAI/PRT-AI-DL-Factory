@@ -434,6 +434,15 @@ def _harbor_run_flags(command: str = "start") -> set[str]:
             pytest.skip("Harbor 源码不可用")
         jobs_cli = Path(spec.origin).parent / "cli" / "jobs.py"
     tree = ast.parse(jobs_cli.read_text(encoding="utf-8"))
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    selected = functions.get(command)
+    if selected is not None:
+        for decorator in selected.decorator_list:
+            if isinstance(decorator, ast.Call) and decorator.args:
+                name = getattr(decorator.func, "id", getattr(decorator.func, "attr", ""))
+                target = decorator.args[0]
+                if name == "wraps" and isinstance(target, ast.Name):
+                    command = target.id
     flags: set[str] = set()
     for node in tree.body:
         if not (isinstance(node, ast.FunctionDef) and node.name == command):
@@ -450,7 +459,7 @@ def _harbor_run_flags(command: str = "start") -> set[str]:
                                     explicit.extend(value.value.split("/"))
             flags.update(explicit or [f"--{arg.arg.replace('_', '-')}"])
     if not flags:
-        pytest.skip("无法从 Harbor CLI 中解析出参数")
+        pytest.fail(f"已安装 Harbor，但无法从 {jobs_cli}:{command} 解析参数")
     return flags
 
 

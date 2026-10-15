@@ -64,6 +64,8 @@ def _codex_config(source: str, base_url: str) -> str:
 def validate_secret_env(env: dict[str, str]) -> None:
     """Harbor 会盲替换密钥值；短值或 JSON 标量会破坏数字/布尔字段。"""
     for key, value in env.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise BuildError("环境变量名称只能包含字母、数字和下划线，且不能以数字开头")
         if not value or not _looks_secret(key):
             continue
         try:
@@ -137,7 +139,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     config: VerifyConfig = job.verify  # type: ignore[assignment]
     if config is None:
         raise BuildError("缺少评测配置")
-    wire_protocol = model_api_service.agent_protocol(config.agent, config.agent_api_protocol)
+    agent = config.agent_import_path.strip() or config.agent
+    wire_protocol = model_api_service.agent_protocol(agent, config.agent_api_protocol)
 
     binary = resolve_harbor_bin()
     notes: list[str] = []
@@ -205,13 +208,13 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
             notes.append(f"已适配 {adapted} 个 reward-kit 评分入口：无挂载权限时保留独立副本隔离")
 
     # ---- agent / model ---------------------------------------------------
-    command += ["--agent", config.agent]
+    command += ["--agent", agent]
     injected_env: dict[str, str] = {}
     injected_secrets: list[str] = []
     if config.model_api_id:
-        # 平台维护的模型配置：--model 与密钥/base_url 都由后端按 Harbor 的标准环境变量注入
+        # 平台维护的模型配置 + 提交人自己的密钥：--model 与密钥/base_url 按 Harbor 的标准环境变量注入
         resolved = model_api_service.resolve(
-            config.model_api_id, model_style=resources_service.model_style_for(config.agent),
+            config.model_api_id, user_id=job.owner_id, model_style=resources_service.model_style_for(agent),
             protocol=wire_protocol,
         )
         command += ["--model", resolved.model]
@@ -220,16 +223,14 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         notes.extend(resolved.notes)
     elif config.model:
         command += ["--model", config.model]
-    elif config.agent not in _NO_MODEL_AGENTS:
-        raise BuildError(f"agent {config.agent} 需要指定模型（--model）")
-    if config.agent_import_path:
-        command += ["--agent-import-path", config.agent_import_path]
+    elif agent not in _NO_MODEL_AGENTS:
+        raise BuildError(f"agent {agent} 需要指定模型（--model）")
 
     # 思考模式：各 agent 接受的集合不一样，收敛到它支持的最近一档
     agent_kwargs = dict(config.agent_kwargs)
-    if config.reasoning_effort and config.agent not in _NO_MODEL_AGENTS:
+    if config.reasoning_effort and agent not in _NO_MODEL_AGENTS:
         effort, note = model_api_service.clamp_effort(
-            config.reasoning_effort, resources_service.effort_levels_for(config.agent)
+            config.reasoning_effort, resources_service.effort_levels_for(agent)
         )
         if effort:
             agent_kwargs.setdefault("reasoning_effort", effort)
@@ -261,7 +262,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if dataset is not None and dataset.rewardkit and not config.disable_verification and not config.judge_model_api_id:
         raise BuildError("该任务集是 reward-kit 格式，请选择 judge 模型（用于注入 JUDGE_* 环境变量）")
     if config.judge_model_api_id and not config.disable_verification:
-        judge = model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol)
+        judge = model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol, user_id=job.owner_id)
         judge_env = {
             "JUDGE_API_KEY": judge.api_key.strip(),
             "JUDGE_BASE_URL": judge.base_url.strip(),
@@ -277,7 +278,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     # verifier_env 同理，手填优先于 judge 模型注入的 JUDGE_*。
     agent_env = {**injected_env, **config.agent_env}
     verifier_env = {**judge_env, **config.verifier_env}
-    if config.agent == "codex":
+    if agent == "codex":
         # Harbor 接受内联 JSON config，并写入每个 trial 的 CODEX_HOME/config.toml。
         # 自定义 provider 明确走 Responses，不能仅依赖 OPENAI_BASE_URL。
         agent_kwargs["config"] = _codex_config(
@@ -286,9 +287,10 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         )
     for env_source in (agent_env, verifier_env, job.resources.env):
         validate_secret_env(env_source)
-    command += kv_flags("--agent-env", agent_env)
+    agent_refs, verifier_refs, stage_env = stage_environment(agent_env, verifier_env)
+    command += kv_flags("--agent-env", agent_refs)
     command += kv_flags("--agent-kwarg", agent_kwargs)
-    command += kv_flags("--verifier-env", verifier_env)
+    command += kv_flags("--verifier-env", verifier_refs)
     command += kv_flags("--environment-kwarg", config.environment_kwargs)
     command += kv_flags("--verifier-kwarg", config.verifier_kwargs)
 
@@ -296,7 +298,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         command += ["--override-cpus", str(config.environment_cpus)]
     if config.environment_memory_mb:
         command += ["--override-memory-mb", str(config.environment_memory_mb)]
-    if config.environment_gpus:
+    if config.environment_gpus is not None:
         command += ["--override-gpus", str(config.environment_gpus)]
 
     # ---- timeouts / behaviour -------------------------------------------
@@ -322,9 +324,9 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
             command.append("--export-sharegpt")
         notes.append("运行结束后会导出 ATIF 轨迹，可用于后续 SFT / 蒸馏。")
 
-    # A .env file lets task.toml's ${VAR} interpolation resolve (that is how
-    # reward-kit judge tasks pick up their API keys). Written 0600.
-    secrets_map = {**agent_env, **verifier_env}
+    # Bare dotenv declarations acknowledge optional inputs without reparsing values.
+    # Actual values travel only through the process environment.
+    secrets_map = stage_env
     optional_references: set[str] = set()
     if local_root is not None:
         for field in harbor_env_service.inspect_root(local_root)["variables"]:
@@ -343,7 +345,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         env_path = work_dir / ".env"
         work_dir.mkdir(parents=True, exist_ok=True)
         env_path.write_text(
-            "".join(f"{key}={value}\n" for key, value in secrets_map.items() if key)
+            "".join(f"{key}\n" for key in sorted(secrets_map))
             # dotenv 的无值键只声明来源，不覆盖各题默认值；Harbor 视其为已显式确认。
             + "".join(f"{key}\n" for key in sorted(optional_references)), encoding="utf-8"
         )
@@ -354,19 +356,20 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         flag = key if key.startswith("-") else f"--{key.replace('_', '-')}"
         if value is True:
             command.append(flag)
-        elif value not in (False, None, ""):
+        elif value is not False and value is not None and value != "":
             command += [flag, str(value)]
 
     # Secrets also go through the child's environment so agents that re-exec
     # still see them; they are masked everywhere the platform renders them.
     env = {"PYTHONUNBUFFERED": "1", **secrets_map}
 
-    if config.agent in _NO_MODEL_AGENTS:
+    if agent in _NO_MODEL_AGENTS:
         notes.append(
             "oracle / nop 属于自检 agent：oracle 应当接近 1.0，nop 应当为 0，用来验证任务集本身是否可靠。"
         )
 
-    secrets = [value for key, value in secrets_map.items() if value and _looks_secret(key)]
+    secrets = collect_secrets(injected_env, config.agent_env, judge_env, config.verifier_env,
+                              secrets_map, job.resources.env)
     secrets += [value for value in injected_secrets if value not in secrets]
 
     runtime_file = "harbor_runtime.py"
@@ -386,3 +389,25 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
 def _looks_secret(key: str) -> bool:
     upper = key.upper()
     return bool(re.search(r"KEY|SECRET|TOKEN(?!S)|PASSWORD|CREDENTIAL|AUTH", upper))
+
+
+def collect_secrets(*sources: dict[str, str]) -> list[str]:
+    return list(dict.fromkeys(value for source in sources for key, value in source.items()
+                              if value and _looks_secret(key)))
+
+
+def stage_environment(
+    agent: dict[str, str], verifier: dict[str, str], *, prefix: str = "PRT",
+) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    # Host-side agent SDKs need the agent aliases. Verifier values never overwrite them.
+    env = {**verifier, **agent}
+    refs = []
+    for stage, values in (("AGENT", agent), ("VERIFIER", verifier)):
+        validate_secret_env(values)
+        mapping = {}
+        for key, value in values.items():
+            name = f"{prefix}_{stage}_{key}"
+            env[name] = value
+            mapping[key] = "${" + name + "}"
+        refs.append(mapping)
+    return refs[0], refs[1], env

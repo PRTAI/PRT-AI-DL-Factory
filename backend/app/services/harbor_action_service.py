@@ -244,7 +244,7 @@ def snapshot_dir(job: Job, work_dir: Path, output_dir: Path) -> Path:
     return output_dir / job.id if job.harbor_action.mode in {"resume", "rerun"} else work_dir / "regrade-source"
 
 
-def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path, *, selected_native: dict | None = None) -> None:
+def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path, *, selected_native: dict | None = None, environment_refs: dict | None = None) -> None:
     """Only called for execution, never from command preview. Atomic publication."""
     action = job.harbor_action
     source = store.jobs.get(action.source_job_id)
@@ -276,7 +276,15 @@ def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path, *, selected_nat
             config_path = staging / "config.json"
             config = json.loads(config_path.read_text())
             config.update(job_name=job.id, jobs_dir=str(output_dir))
+            if environment_refs:
+                for agent in config.get("agents", []):
+                    agent.setdefault("env", {}).update(environment_refs["agent"])
+                config.setdefault("verifier", {}).setdefault("env", {}).update(environment_refs["verifier"])
             config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+            # Harbor compares the recorded lock.json (agent/verifier env included)
+            # with the resolved one before running; it must carry the same refs.
+            if environment_refs:
+                _rebase_lock(staging / "lock.json", environment_refs)
             # Existing TrialConfig equality includes trials_dir. Rebase every
             # recorded trial, so completed work is recognized in the new job.
             for trial in staging.iterdir():
@@ -287,6 +295,9 @@ def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path, *, selected_nat
                     record = json.loads(result_path.read_text())
                     block = record["config"]
                     block["trials_dir"] = str(destination)
+                    if environment_refs:
+                        for stage in ("agent", "verifier"):
+                            block.setdefault(stage, {}).setdefault("env", {}).update(environment_refs[stage])
                 except (OSError, ValueError, KeyError, TypeError):
                     # Abrupt termination may leave a partial JSON file. Retry
                     # that trial from scratch; all evidence remains in source.
@@ -306,3 +317,18 @@ def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path, *, selected_nat
     finally:
         if staging.exists():
             shutil.rmtree(staging)
+
+
+def _rebase_lock(path: Path, environment_refs: dict) -> None:
+    if not path.is_file():
+        return
+    try:
+        lock = json.loads(path.read_text())
+        for trial in lock["trials"]:
+            for stage in ("agent", "verifier"):
+                trial.setdefault(stage, {}).setdefault("env", {}).update(environment_refs[stage])
+    except (ValueError, KeyError, TypeError, AttributeError):
+        # Harbor refuses to overwrite an unparsable lock; let it rebuild one.
+        path.unlink()
+        return
+    path.write_text(json.dumps(lock, ensure_ascii=False), encoding="utf-8")

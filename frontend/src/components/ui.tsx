@@ -10,7 +10,8 @@ import * as TooltipPrimitive from '@radix-ui/react-tooltip'
 import * as SwitchPrimitive from '@radix-ui/react-switch'
 import * as CheckboxPrimitive from '@radix-ui/react-checkbox'
 import * as SeparatorPrimitive from '@radix-ui/react-separator'
-import { Check, ChevronDown, Loader2, X } from 'lucide-react'
+import * as MenuPrimitive from '@radix-ui/react-dropdown-menu'
+import { Check, ChevronDown, CircleHelp, Loader2, MoreHorizontal, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 /* -------------------------------------------------------------------------- */
@@ -249,16 +250,16 @@ export function Field({
 }) {
   return (
     <div className={cn('space-y-1.5', className)}>
-      <label htmlFor={htmlFor} className="flex items-center gap-1 text-xs font-medium text-fg-muted">
-        {label}
-        {required && <span className="text-danger">*</span>}
-      </label>
+      <div className="flex items-center gap-1">
+        <label htmlFor={htmlFor} className="flex items-center gap-1 text-xs font-medium text-fg-muted">
+          {label}
+          {required && <span className="text-danger">*</span>}
+        </label>
+        {/* 说明收进问号气泡，表单只留输入框本身 */}
+        {hint && <HelpTip>{hint}</HelpTip>}
+      </div>
       {children}
-      {error ? (
-        <p className="text-xs text-danger">{error}</p>
-      ) : (
-        hint && <p className="text-xs leading-relaxed text-fg-subtle">{hint}</p>
-      )}
+      {error && <p className="text-xs text-danger">{error}</p>}
     </div>
   )
 }
@@ -374,21 +375,23 @@ export function ToggleRow({
   checked,
   onCheckedChange,
   disabled,
+  className,
 }: {
   label: string
   hint?: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   disabled?: boolean
+  className?: string
 }) {
   const id = React.useId()
   return (
-    <div className="flex items-start justify-between gap-4 rounded-lg border border-border bg-bg-elevated px-3 py-2.5">
-      <div className="min-w-0">
-        <label htmlFor={id} className="text-sm font-medium text-fg">
+    <div className={cn('flex items-center justify-between gap-3 rounded-lg border border-border bg-bg-elevated px-3 py-2', className)}>
+      <div className="flex min-w-0 items-center gap-1">
+        <label htmlFor={id} className="truncate text-sm font-medium text-fg">
           {label}
         </label>
-        {hint && <p className="mt-0.5 text-xs leading-relaxed text-fg-subtle">{hint}</p>}
+        {hint && <HelpTip>{hint}</HelpTip>}
       </div>
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
     </div>
@@ -516,6 +519,85 @@ export function Tooltip({ label, children }: { label: React.ReactNode; children:
         </TooltipPrimitive.Content>
       </TooltipPrimitive.Portal>
     </TooltipPrimitive.Root>
+  )
+}
+
+/** 标签旁的问号：把说明性文字收进气泡，避免表单里铺满小字。 */
+export function HelpTip({ children, className }: { children: React.ReactNode; className?: string }) {
+  // 自带 Provider：登录页等不在 AppShell 里的页面也会通过 Field 用到它
+  return (
+    <TooltipProvider>
+    <Tooltip label={children}>
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="说明"
+        className={cn('inline-flex shrink-0 text-fg-subtle hover:text-primary', className)}
+      >
+        <CircleHelp className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Menu（「更多」下拉）                                                         */
+/* -------------------------------------------------------------------------- */
+export interface MenuItem {
+  label: React.ReactNode
+  icon?: React.ReactNode
+  onSelect: () => void
+  disabled?: boolean
+  danger?: boolean
+  hidden?: boolean
+}
+
+export function Menu({
+  items,
+  label = '更多',
+  size = 'md',
+  align = 'end',
+}: {
+  items: MenuItem[]
+  label?: React.ReactNode
+  size?: ButtonSize
+  align?: 'start' | 'end'
+}) {
+  const visible = items.filter((item) => !item.hidden)
+  if (!visible.length) return null
+  return (
+    <MenuPrimitive.Root modal={false}>
+      <MenuPrimitive.Trigger asChild>
+        <Button variant="secondary" size={size} aria-label={typeof label === 'string' ? label : '更多'}>
+          <MoreHorizontal className="h-4 w-4" aria-hidden />
+          {label}
+        </Button>
+      </MenuPrimitive.Trigger>
+      <MenuPrimitive.Portal>
+        <MenuPrimitive.Content
+          align={align}
+          sideOffset={4}
+          className="z-50 min-w-36 rounded-lg border border-border bg-card p-1 shadow-xl"
+        >
+          {visible.map((item, index) => (
+            <MenuPrimitive.Item
+              key={index}
+              disabled={item.disabled}
+              onSelect={item.onSelect}
+              className={cn(
+                'flex cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none',
+                'data-[highlighted]:bg-muted data-[disabled]:pointer-events-none data-[disabled]:opacity-50',
+                item.danger ? 'text-danger' : 'text-fg',
+              )}
+            >
+              {item.icon}
+              {item.label}
+            </MenuPrimitive.Item>
+          ))}
+        </MenuPrimitive.Content>
+      </MenuPrimitive.Portal>
+    </MenuPrimitive.Root>
   )
 }
 

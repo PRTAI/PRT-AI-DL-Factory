@@ -59,6 +59,9 @@ from .model_api import (
     ModelPlatformCreate,
     ModelPlatformUpdate,
     ReasoningEffort,
+    UserApiKey,
+    UserApiKeyPublic,
+    UserApiKeySet,
 )
 from .model_registry import ModelDownload, ModelDownloadRequest, ModelEntry
 from .project import (
@@ -145,6 +148,9 @@ __all__ = [
     "ModelPlatformPublic",
     "ModelPlatformCreate",
     "ModelPlatformUpdate",
+    "UserApiKey",
+    "UserApiKeyPublic",
+    "UserApiKeySet",
     "ReasoningEffort",
     "ModelDownload",
     "ModelDownloadRequest",

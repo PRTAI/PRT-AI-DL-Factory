@@ -22,6 +22,7 @@ from ..models import (
     ReviewTask,
     SystemSettings,
     User,
+    UserApiKey,
 )
 from .json_store import JsonCollection, JsonDocument, JsonlLog
 
@@ -48,6 +49,10 @@ class Store:
         )
         self.model_platforms: JsonCollection[ModelPlatformConfig] = JsonCollection(
             db / "model_platforms.json", ModelPlatformConfig, mode=0o600
+        )
+        # 每个账号自己的模型 API Key，同样是明文 + 0600
+        self.user_api_keys: JsonCollection[UserApiKey] = JsonCollection(
+            db / "user_api_keys.json", UserApiKey, mode=0o600
         )
         self.settings_doc: JsonDocument[SystemSettings] = JsonDocument(
             db / "settings.json", SystemSettings

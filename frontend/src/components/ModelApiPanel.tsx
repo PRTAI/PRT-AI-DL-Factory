@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/store'
@@ -39,7 +40,7 @@ export function ModelApiPanel() {
     }, onSuccess: () => { invalidate(); toast.success('已添加常见模型') }, onError: (e: ApiError) => { invalidate(); toast.error(e.message) },
   })
   return <Card>
-    <CardHeader title="模型 API 平台" icon={<KeyRound className="h-4 w-4" />} description="先配置平台密钥，再选择或添加模型。同一平台配置下的模型共用 API Key；默认使用普通 API。" />
+    <CardHeader title="模型 API 平台" icon={<KeyRound className="h-4 w-4" />} description="管理员维护平台、接口地址与模型；API Key 由每个账号在「个人设置 → 我的 API Key」中自行配置，同一平台下的模型共用一份。" />
     <CardBody className="space-y-5">
       {(platforms.error || catalog.error || models.error) && <ErrorBox message={(platforms.error || catalog.error || models.error)!.message} />}
       {catalog.isLoading ? <Skeleton className="h-24" /> : <div className="grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -47,18 +48,18 @@ export function ModelApiPanel() {
           const configured = (platforms.data ?? []).some((a) => a.vendor === p.id && a.enabled && a.has_api_key)
           return <button key={p.id} type="button" aria-pressed={vendor === p.id} onClick={() => { setVendor(p.id); setAccountId('') }} className={cn('rounded-lg border p-3 text-left transition-colors', vendor === p.id ? 'border-primary bg-primary-soft' : 'border-border hover:bg-card-hover')}>
             <div className="text-sm font-medium text-fg">{p.label}</div>
-            <div className="mt-2 text-xs text-fg-muted">{configured ? '已配置密钥' : '待配置'}</div>
+            <div className="mt-2 text-xs text-fg-muted">{configured ? '已配置我的密钥' : '我未配置密钥'}</div>
           </button>
         })}
       </div>}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 p-4">
         <div className="min-w-0 space-y-1">
           <div className="font-medium">{account?.name ?? spec?.label}</div>
-          <p className="text-xs text-fg-muted">{spec?.description} · {account?.has_api_key ? `共享密钥 ${account.api_key_masked}` : '配置 API Key 后，平台下的模型即可使用'}{account && !account.enabled && ' · 已停用'}</p>
+          <p className="text-xs text-fg-muted">{spec?.description} · {account ? (account.has_api_key ? `我的密钥 ${account.api_key_masked}` : <>未配置我的密钥，<Link to="/settings" className="text-primary">去个人设置填写</Link></>) : '管理员连接平台后即可使用'}{account && !account.enabled && ' · 已停用'}</p>
           {spec?.sources[0] && <a href={spec.sources[0]} target="_blank" rel="noreferrer" className="text-xs text-primary">官方接入文档</a>}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {accounts.length > 1 && <Select className="w-60" value={account?.id ?? ''} onValueChange={setAccountId} options={accounts.map((p) => ({ value: p.id, label: p.name, description: `${p.api_key_masked || '未填密钥'} · ${Object.values(p.endpoints)[0] ?? ''}` }))} />}
+          {accounts.length > 1 && <Select className="w-60" value={account?.id ?? ''} onValueChange={setAccountId} options={accounts.map((p) => ({ value: p.id, label: p.name, description: `${p.api_key_masked || '我未填密钥'} · ${Object.values(p.endpoints)[0] ?? ''}` }))} />}
           {isAdmin && <>
             <Button size="sm" variant="primary" onClick={() => setPlatformTarget(account ?? 'new')}><KeyRound className="h-3.5 w-3.5" />{account ? '配置平台' : '连接平台'}</Button>
             <Button size="sm" onClick={() => setPlatformTarget('new')}><Plus className="h-3.5 w-3.5" />新增配置</Button>
@@ -77,7 +78,7 @@ export function ModelApiPanel() {
         <tbody>{rows.map((m) => <Tr key={m.id}>
           <Td><div className="font-medium">{m.name}</div>{m.model_id !== m.name && <div className="num text-xs text-fg-muted">{m.model_id}</div>}{m.note && <div className="text-xs text-fg-subtle">{m.note}</div>}</Td>
           <Td><Badge tone="primary">{protocolLabels(m.supported_protocols ?? [])}</Badge></Td>
-          <Td className="text-xs text-fg-muted">{!m.enabled ? '已停用' : m.ready ? '可用' : '平台未配置或已停用'}</Td>
+          <Td className="text-xs text-fg-muted">{!m.enabled ? '已停用' : m.ready ? '可用' : '我未配置密钥或平台已停用'}</Td>
           {isAdmin && <Td><div className="flex gap-2"><Button size="sm" onClick={() => setModelTarget(m)}><Pencil className="h-3 w-3" />编辑</Button><Button size="sm" variant="outline" onClick={() => { if (window.confirm(`删除模型「${m.name}」？`)) remove.mutate(m.id) }}><Trash2 className="h-3 w-3" />删除</Button></div></Td>}
         </Tr>)}</tbody>
       </Table>}
@@ -91,25 +92,21 @@ export function ModelApiPanel() {
 function PlatformDialog({ target, spec, onClose, onSaved }: { target: ModelPlatform | 'new'; spec: PlatformCatalog; onClose: () => void; onSaved: (p: ModelPlatform) => void }) {
   const editing = target === 'new' ? null : target
   const [name, setName] = React.useState(editing?.name ?? spec.label)
-  const [key, setKey] = React.useState('')
   const [endpoints, setEndpoints] = React.useState<Partial<Record<ApiProtocol, string>>>(editing?.endpoints ?? spec.endpoints)
   const [enabled, setEnabled] = React.useState(editing?.enabled ?? true)
   const save = useMutation({
     mutationFn: () => {
-      const payload = { name, endpoints, enabled, ...(key || !editing ? { api_key: key } : {}) }
+      const payload = { name, endpoints, enabled }
       return editing ? api.updateModelPlatform(editing.id, payload) : api.createModelPlatform({ ...payload, vendor: spec.id })
     }, onSuccess: onSaved, onError: (e: ApiError) => toast.error(e.message),
   })
-  const clear = useMutation({ mutationFn: () => api.updateModelPlatform(editing!.id, { api_key: '' }), onSuccess: onSaved, onError: (e: ApiError) => toast.error(e.message) })
   const remove = useMutation({ mutationFn: () => api.deleteModelPlatform(editing!.id), onSuccess: () => { onSaved(editing!); onClose() }, onError: (e: ApiError) => toast.error(e.message) })
-  return <Dialog open onOpenChange={(open) => !open && onClose()} title={`${editing ? '配置' : '连接'}平台 · ${spec.label}`} description="该配置下的所有模型共用一个 API Key。编辑时留空保留原密钥。" footer={<>
+  return <Dialog open onOpenChange={(open) => !open && onClose()} title={`${editing ? '配置' : '连接'}平台 · ${spec.label}`} description="这里只配置平台与接口地址；API Key 由每个账号在个人设置中自行填写。" footer={<>
     {editing && <Button variant="ghost" size="sm" loading={remove.isPending} onClick={() => { if (window.confirm('删除此平台配置？请先删除其下的模型。')) remove.mutate() }}>删除配置</Button>}
-    {editing?.has_api_key && <Button variant="ghost" onClick={() => clear.mutate()} loading={clear.isPending}>清空密钥</Button>}
     <Button onClick={onClose}>取消</Button><Button variant="primary" onClick={() => save.mutate()} loading={save.isPending} disabled={!name.trim() || !Object.values(endpoints).some((v) => v?.trim())}>保存平台</Button>
   </>}>
     <div className="space-y-4">
       <Field label="配置名称"><Input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-      <Field label="平台 API Key" hint={editing?.has_api_key ? `当前 ${editing.api_key_masked} · 留空保留` : '使用普通 API 的密钥；保存后预置模型和自定义模型共用'}><Input type="password" autoComplete="new-password" value={key} onChange={(e) => setKey(e.target.value)} placeholder="输入 API Key" /></Field>
       <details open={spec.id === 'custom'} className="rounded-md border border-border p-3">
         <summary className="cursor-pointer text-sm text-fg-muted">高级设置：接口地址</summary>
         <div className="mt-3 space-y-3">
@@ -133,7 +130,7 @@ function ModelDialog({ target, platform, onClose, onSaved }: { target: ModelApi 
     mutationFn: () => editing ? api.updateModelApi(editing.id, { name: name.trim(), model: model.trim(), enabled, supported_protocols: protocols }) : api.createModelApi({ name: name.trim(), platform_id: platform.id }),
     onSuccess: onSaved, onError: (e: ApiError) => toast.error(e.message),
   })
-  return <Dialog open onOpenChange={(open) => !open && onClose()} title={editing ? '编辑模型' : '添加自定义模型'} description={`复用「${platform.name}」的密钥和接口地址，无需重复填写。`} footer={<><Button onClick={onClose}>取消</Button><Button variant="primary" disabled={!name.trim()} loading={save.isPending} onClick={() => save.mutate()}>保存模型</Button></>}>
+  return <Dialog open onOpenChange={(open) => !open && onClose()} title={editing ? '编辑模型' : '添加自定义模型'} description={`复用「${platform.name}」的接口地址；调用时使用各账号自己在该平台的密钥。`} footer={<><Button onClick={onClose}>取消</Button><Button variant="primary" disabled={!name.trim()} loading={save.isPending} onClick={() => save.mutate()}>保存模型</Button></>}>
     <div className="space-y-4">
       <Field label={editing ? '显示名称' : 'Model name'} required hint="填写平台实际支持的模型标识；添加后可编辑该模型支持的接口"><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="例如 qwen3.8-max" /></Field>
       {editing && <>
@@ -156,7 +153,6 @@ function EditDialog({ target, onClose }: { target: ModelApi | null | 'new'; onCl
   const [provider, setProvider] = React.useState<ModelProvider>('openai')
   const [model, setModel] = React.useState('')
   const [baseUrl, setBaseUrl] = React.useState('')
-  const [apiKey, setApiKey] = React.useState('')
   const [extraEnv, setExtraEnv] = React.useState<Record<string, string>>({})
   const [note, setNote] = React.useState('')
   const [enabled, setEnabled] = React.useState(true)
@@ -168,7 +164,6 @@ function EditDialog({ target, onClose }: { target: ModelApi | null | 'new'; onCl
     setProvider(editing?.provider ?? 'openai')
     setModel(editing?.model ?? '')
     setBaseUrl(editing?.base_url ?? '')
-    setApiKey('')
     setExtraEnv({})
     setNote(editing?.note ?? '')
     setEnabled(editing?.enabled ?? true)
@@ -189,22 +184,10 @@ function EditDialog({ target, onClose }: { target: ModelApi | null | 'new'; onCl
         supports_reasoning_effort: supportsEffort,
       }
       if (Object.keys(extraEnv).length) payload.extra_env = extraEnv
-      // 编辑时留空 = 保留原密钥；新增时留空 = 先不填
-      if (!editing || apiKey) payload.api_key = apiKey
       return editing ? api.updateModelApi(editing.id, payload) : api.createModelApi(payload)
     },
     onSuccess: () => {
       toast.success(editing ? '模型配置已更新' : '模型配置已添加')
-      queryClient.invalidateQueries({ queryKey: ['model-apis'] })
-      onClose()
-    },
-    onError: (error: ApiError) => toast.error(error.message),
-  })
-
-  const clearKey = useMutation({
-    mutationFn: () => api.updateModelApi(editing!.id, { api_key: '' }),
-    onSuccess: () => {
-      toast.success('已清空密钥')
       queryClient.invalidateQueries({ queryKey: ['model-apis'] })
       onClose()
     },
@@ -220,11 +203,6 @@ function EditDialog({ target, onClose }: { target: ModelApi | null | 'new'; onCl
       width="max-w-2xl"
       footer={
         <>
-          {editing?.has_api_key && (
-            <Button variant="ghost" onClick={() => clearKey.mutate()} loading={clearKey.isPending}>
-              清空密钥
-            </Button>
-          )}
           <Button variant="ghost" onClick={onClose}>
             取消
           </Button>
@@ -257,16 +235,7 @@ function EditDialog({ target, onClose }: { target: ModelApi | null | 'new'; onCl
             <Input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={spec?.default_base_url ?? 'https://…/v1'} className="num" />
           </Field>
         </div>
-        <Field
-          label="API Key"
-          hint={
-            editing?.has_api_key
-              ? `当前 ${editing.api_key_masked}；留空表示不改。注入 ${spec?.api_key_envs.join(' / ')}`
-              : `注入 ${spec?.api_key_envs.join(' / ') ?? ''}；不填的话这条配置先不可选`
-          }
-        >
-          <Input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder={editing?.has_api_key ? '（保留原密钥）' : 'sk-…'} className="num" autoComplete="new-password" />
-        </Field>
+        {spec && <p className="text-xs text-fg-muted">调用时注入 {spec.api_key_envs.join(' / ')}，值为提交人在「个人设置 → 我的 API Key」中为本配置填写的密钥。</p>}
         <Field label="额外环境变量" hint="少数 agent 需要的其他变量，例如 AZURE_API_VERSION">
           <KeyValueEditor value={extraEnv} onChange={setExtraEnv} addLabel="添加变量" />
         </Field>

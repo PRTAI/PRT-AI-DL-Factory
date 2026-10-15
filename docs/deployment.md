@@ -81,7 +81,7 @@ WebSocket 需要 upgrade 头透传：
 server {
     listen 80;
     server_name prt.internal;
-    client_max_body_size 8g;         # 与 PRT_MAX_UPLOAD_MB 保持一致
+    client_max_body_size 0;          # 0 = 不限制，与 PRT_MAX_UPLOAD_MB 保持一致
 
     location / {
         proxy_pass         http://127.0.0.1:8000;

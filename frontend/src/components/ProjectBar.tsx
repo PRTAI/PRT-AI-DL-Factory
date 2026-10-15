@@ -25,17 +25,12 @@ export function ProjectBar({ hint }: { hint?: React.ReactNode }) {
   const stats = project.data?.stats
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-primary/30 bg-primary-soft px-3.5 py-2.5">
-      <span
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-fg"
-        aria-hidden
-      >
-        <FolderKanban className="h-4 w-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <p className="text-[10px] uppercase tracking-wider text-primary/70">提交到项目</p>
-        <p className="truncate text-[14px] font-semibold text-fg">{name ?? projectId ?? '未选择'}</p>
-      </div>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-primary/30 bg-primary-soft px-3 py-1.5">
+      <FolderKanban className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+      <p className="min-w-0 truncate text-sm">
+        <span className="text-xs text-primary/80">提交到项目</span>
+        <span className="ml-2 font-semibold text-fg">{name ?? projectId ?? '未选择'}</span>
+      </p>
       {stats && (
         <p className="hidden text-[11px] text-fg-muted sm:block">
           已有 {stats.total_jobs} 个任务
@@ -44,12 +39,12 @@ export function ProjectBar({ hint }: { hint?: React.ReactNode }) {
           {stats.running > 0 && ` · ${stats.running} 运行中`}
         </p>
       )}
-      {hint && <p className="w-full text-[11px] leading-relaxed text-fg-muted sm:w-auto">{hint}</p>}
-      <div className="flex shrink-0 items-center gap-1.5">
-        <Button variant="ghost" size="sm" onClick={() => navigate('/projects')}>
+      {hint && <p className="text-[11px] text-fg-muted">{hint}</p>}
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        <Button variant="ghost" size="sm" className="h-7" onClick={() => navigate('/projects')}>
           项目详情
         </Button>
-        <Button variant="secondary" size="sm" onClick={clearProject}>
+        <Button variant="secondary" size="sm" className="h-7" onClick={clearProject}>
           <Repeat2 className="h-3.5 w-3.5" aria-hidden />
           换项目
         </Button>

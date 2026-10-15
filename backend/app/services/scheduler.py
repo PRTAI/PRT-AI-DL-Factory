@@ -4,7 +4,8 @@ A single background loop (started from the FastAPI lifespan) does three things
 every tick:
 
 1. **Reconcile** — running jobs whose process disappeared (platform restart,
-   OOM-killer) are marked failed instead of hanging at "running" forever.
+   OOM-killer) are settled by the exit code the wrapper left on disk, or marked
+   failed when there is none, instead of hanging at "running" forever.
 2. **Refresh** — parse each active job's logs into progress + metric curves.
 3. **Dispatch** — start queued jobs while concurrency and GPU budgets allow.
 """
@@ -27,6 +28,7 @@ from .resource_lock import RESOURCE_LOCK
 logger = logging.getLogger("prt.scheduler")
 
 _DISPATCH_LOCK = threading.RLock()
+_PREPARING: set[str] = set()
 
 
 class Scheduler:
@@ -68,10 +70,17 @@ class Scheduler:
         self.dispatch()
 
     def _reconcile(self) -> None:
-        for job in store.jobs.find(lambda j: j.status == JobStatus.RUNNING):
+        for job in store.jobs.find(lambda j: j.status in {JobStatus.RUNNING, JobStatus.PREPARING}):
             def mutate(item: Job) -> None:
+                exit_code = runner.read_exit_code(item) if item.status == JobStatus.RUNNING else None
+                if exit_code is not None:
+                    # 平台重启期间跑完的任务：按包装脚本落盘的退出码如实结算
+                    runner.apply_exit(item, exit_code)
+                    item.resources.gpu_ids = []
+                    return
                 item.status = JobStatus.CANCELLED if item.runtime.cancel_requested else JobStatus.FAILED
                 item.runtime.finished_at = utcnow()
+                item.resources.gpu_ids = []
                 if not item.runtime.cancel_requested:
                     item.runtime.error = (
                         item.runtime.error
@@ -82,13 +91,16 @@ class Scheduler:
 
             with runner.LIFECYCLE_LOCK:
                 current = store.jobs.get(job.id)
-                if current is None or current.status != JobStatus.RUNNING:
+                if current is None or current.status not in {JobStatus.RUNNING, JobStatus.PREPARING}:
                     continue
-                if runner.has_supervisor(job.id) or runner.is_running(current):
+                if job.id in _PREPARING or runner.has_supervisor(job.id) or runner.is_running(current):
                     continue
                 updated = store.jobs.update(job.id, mutate)
             if updated:
                 logger.warning("job %s marked %s after process disappeared", job.id, updated.status.value)
+                if updated.runtime.exit_code is not None:
+                    runner.announce_exit(updated, updated.runtime.exit_code)
+                    continue
                 audit_service.notify(
                     updated.owner_id,
                     f"任务 {updated.name} 异常结束",
@@ -176,7 +188,10 @@ class Scheduler:
                 item.progress.message = "准备运行环境…"
                 item.updated_at = utcnow()
 
-            return store.jobs.update(job.id, claim)
+            claimed = store.jobs.update(job.id, claim)
+            if claimed is not None:
+                _PREPARING.add(job.id)
+            return claimed
 
     def _launch(self, claimed: Job) -> None:
         try:
@@ -187,6 +202,9 @@ class Scheduler:
         except Exception as exc:  # pragma: no cover
             logger.exception("job %s failed to launch", claimed.id)
             self._fail(claimed, f"{type(exc).__name__}: {exc}")
+        finally:
+            with runner.LIFECYCLE_LOCK:
+                _PREPARING.discard(claimed.id)
 
     def _fail(self, job: Job, message: str) -> None:
         def mutate(item: Job) -> None:

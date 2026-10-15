@@ -85,9 +85,10 @@ def test_duplicate_suffixes_and_oracle_ignore_model(client, member_headers, defa
 def test_platform_model_uses_actual_model_id(client, admin_headers, member_headers, default_project):
     model = client.post("/api/model-apis", headers=admin_headers, json={
         "name": "batch-friendly-display-name", "provider": "anthropic",
-        "model": "claude/claude-opus-5", "api_key": "sk-batch-test-only",
+        "model": "claude/claude-opus-5",
     })
     assert model.status_code == 201, model.text
+    client.put(f"/api/model-apis/my-keys/{model.json()['id']}", headers=member_headers, json={"api_key": "sk-batch-test-only"})
     body = payload(default_project)
     body["agents"] = [{"agent": "claude-code", "model_api_id": model.json()["id"]}]
     response = client.post("/api/jobs/verify-batch", headers=member_headers, json=body)

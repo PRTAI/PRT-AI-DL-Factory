@@ -8,7 +8,7 @@ from ..config import settings
 from ..models import Role, User, UserCreate, UserUpdate, utcnow
 from ..security import hash_password, verify_password
 from ..store import store
-from . import audit_service
+from . import api_key_service, audit_service
 
 
 def normalise_email(email: str) -> str:
@@ -143,6 +143,7 @@ def delete_user(user_id: str, *, actor: User) -> None:
             status.HTTP_409_CONFLICT, detail=f"该用户还有 {active_jobs} 个进行中的任务，无法删除"
         )
     store.users.delete(user_id)
+    api_key_service.purge_user(user_id)
     audit_service.record(
         "user.delete",
         actor=actor,

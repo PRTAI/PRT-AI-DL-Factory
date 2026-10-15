@@ -1,9 +1,10 @@
 import * as React from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, Moon, Sun, UserCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth, useUi } from '@/lib/store'
+import type { UserApiKey } from '@/lib/types'
 import { formatDateTime, formatRelative } from '@/lib/utils'
 import {
   Badge,
@@ -55,7 +56,7 @@ export default function ProfileSettings() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="个人设置" description="账号信息、密码与界面偏好" />
+      <PageHeader title="个人设置" description="账号信息、密码、模型 API Key 与界面偏好" />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -130,6 +131,8 @@ export default function ProfileSettings() {
         </Card>
       </div>
 
+      <MyApiKeys />
+
       <Card>
         <CardHeader
           title="界面偏好"
@@ -176,5 +179,109 @@ export default function ProfileSettings() {
         </Table>
       </Card>
     </div>
+  )
+}
+
+function MyApiKeys() {
+  const keys = useQuery({ queryKey: ['my-api-keys'], queryFn: api.myApiKeys })
+  return (
+    <Card>
+      <CardHeader
+        title="我的 API Key"
+        icon={<KeyRound className="h-4 w-4" aria-hidden />}
+        description="平台不提供统一密钥：评测、样例审核调用模型时使用你自己在这里填写的密钥（同一平台下的模型共用一份）"
+      />
+      {keys.error && <ErrorBox message={keys.error instanceof ApiError ? keys.error.message : '加载失败'} />}
+      <Table>
+        <thead>
+          <tr>
+            <Th className="w-56">平台</Th>
+            <Th>模型</Th>
+            <Th className="w-[26rem]">密钥</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {(keys.data ?? []).map((row) => (
+            <ApiKeyRow key={row.target_id} row={row} />
+          ))}
+          {!keys.isLoading && !keys.data?.length && (
+            <tr>
+              <Td colSpan={3}>
+                <div className="py-8 text-center text-xs text-fg-subtle">管理员还没有添加模型平台</div>
+              </Td>
+            </tr>
+          )}
+        </tbody>
+      </Table>
+    </Card>
+  )
+}
+
+function ApiKeyRow({ row }: { row: UserApiKey }) {
+  const qc = useQueryClient()
+  const [value, setValue] = React.useState('')
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['my-api-keys'] })
+    qc.invalidateQueries({ queryKey: ['model-apis'] })
+    qc.invalidateQueries({ queryKey: ['model-platforms'] })
+  }
+  const onError = (exception: unknown) => toast.error(exception instanceof ApiError ? exception.message : '操作失败')
+  const save = useMutation({
+    mutationFn: () => api.setMyApiKey(row.target_id, value.trim()),
+    onSuccess: () => {
+      toast.success(`已保存「${row.name}」的密钥`)
+      setValue('')
+      refresh()
+    },
+    onError,
+  })
+  const clear = useMutation({
+    mutationFn: () => api.deleteMyApiKey(row.target_id),
+    onSuccess: () => {
+      toast.success(`已清除「${row.name}」的密钥`)
+      refresh()
+    },
+    onError,
+  })
+  return (
+    <Tr>
+      <Td>
+        <div className="flex items-center gap-1.5 text-xs font-medium">
+          {row.name}
+          {!row.enabled && <Badge>已停用</Badge>}
+        </div>
+        <div className="text-[11px] text-fg-subtle">{row.vendor_label}</div>
+      </Td>
+      <Td className="text-[11px] text-fg-muted">
+        {row.models.length ? row.models.slice(0, 6).join('、') + (row.models.length > 6 ? ` 等 ${row.models.length} 个` : '') : '—'}
+      </Td>
+      <Td>
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (value.trim()) save.mutate()
+          }}
+        >
+          {row.has_api_key ? <Badge tone="success">{row.api_key_masked}</Badge> : <Badge tone="warning">未配置</Badge>}
+          <Input
+            type="password"
+            autoComplete="off"
+            className="h-7 flex-1 text-xs"
+            placeholder={row.has_api_key ? '输入新密钥以替换' : '粘贴你的 API Key'}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+          />
+          <Button type="submit" size="sm" variant="primary" disabled={!value.trim()} loading={save.isPending}>
+            保存
+          </Button>
+          {row.has_api_key && (
+            <Button type="button" size="sm" variant="ghost" loading={clear.isPending} onClick={() => clear.mutate()}>
+              清除
+            </Button>
+          )}
+        </form>
+      </Td>
+    </Tr>
   )
 }

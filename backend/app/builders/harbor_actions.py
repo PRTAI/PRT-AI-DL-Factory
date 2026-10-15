@@ -5,10 +5,10 @@ from pathlib import Path
 
 from ..config import settings
 from ..models import Job
-from ..services import model_api_service, resources_service
+from ..services import harbor_compat, model_api_service, resources_service
 from ..services.harbor_action_service import selected_config, snapshot_dir, verifier_path
 from .base import BuildError, BuildResult, kv_flags
-from .harbor import _looks_secret, resolve_harbor_bin, resolve_harbor_python, validate_secret_env
+from .harbor import collect_secrets, stage_environment, resolve_harbor_bin, resolve_harbor_python, validate_secret_env
 
 
 def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
@@ -16,19 +16,22 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     action = job.harbor_action
     binary = resolve_harbor_bin()
     source = snapshot_dir(job, work_dir, output_dir)
+    agent = config.agent_import_path.strip() or config.agent
+    injected_secrets: list[str] = []
     agent_env: dict[str, str] = {}
     verifier_env: dict[str, str] = {}
     notes = ["派生任务使用原始记录副本，保留原任务的产物和评分记录"]
     if action.mode in {"resume", "rerun"} and config.model_api_id:
         resolved = model_api_service.resolve(
-            config.model_api_id, model_style=resources_service.model_style_for(config.agent),
-            protocol=model_api_service.agent_protocol(config.agent, config.agent_api_protocol),
+            config.model_api_id, user_id=job.owner_id, model_style=resources_service.model_style_for(agent),
+            protocol=model_api_service.agent_protocol(agent, config.agent_api_protocol),
         )
         agent_env.update(resolved.env)
+        injected_secrets.extend(resolved.secrets)
     if action.mode in {"resume", "rerun"}:
         agent_env.update(config.agent_env)
     if config.judge_model_api_id and not config.disable_verification:
-        judge = model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol)
+        judge = model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol, user_id=job.owner_id)
         verifier_env.update({
             "JUDGE_API_KEY": judge.api_key.strip(), "JUDGE_BASE_URL": judge.base_url.strip(),
             "JUDGE_MODEL": judge.model_id, "JUDGE_PROVIDER": judge.provider,
@@ -36,6 +39,7 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         })
     verifier_env.update(config.verifier_env)
     verifier_env = {key: value for key, value in verifier_env.items() if value}
+    agent_refs, verifier_refs, env = stage_environment(agent_env, verifier_env, prefix="PRT_SELECTED")
     if action.mode == "rerun":
         argv = ["run", "--config", str(work_dir / "selected-config.json")]
         notes.append("仅重新执行选中的一次 trial，沿用其 Agent、环境和超时配置")
@@ -53,25 +57,34 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
             except (OSError, ValueError) as exc:
                 raise BuildError(f"无法启用 Batch Judge: {exc}") from exc
             notes.append(f"Batch Judge：{count} 份 Judge 配置已设置 mode=batched")
+        # Same reward-kit entry adaptation as a normal run; a newly selected
+        # grading set has never been through it.
+        try:
+            adapted = harbor_compat.prepare_rewardkit_tasks(task_path)
+        except (OSError, ValueError) as exc:
+            raise BuildError(f"无法更新 reward-kit 兼容入口: {exc}") from exc
+        if adapted:
+            notes.append(f"已适配 {adapted} 个 reward-kit 评分入口")
         argv = ["job", "regrade", str(source), "--task-path", str(task_path),
                 "--job-name", job.id, "--jobs-dir", str(output_dir),
                 "--n-concurrent", str(config.n_concurrent), "--env", config.environment_type]
-        argv += kv_flags("--verifier-env", verifier_env)
+        argv += kv_flags("--verifier-env", verifier_refs)
+        custom_verifier = config.extra_args.get("verifier") or config.extra_args.get("--verifier")
+        if custom_verifier:
+            argv += ["--verifier", str(custom_verifier)]
+        argv += kv_flags("--verifier-kwarg", config.verifier_kwargs)
         notes.append("仅运行独立 verifier；资源与超时取评分题包配置，不执行 Agent")
-    env = {**agent_env, **verifier_env}
     extra_files = {}
+    if action.mode == "resume" and not action.trial_name:
+        extra_files["harbor-env-refs.json"] = json.dumps({"agent": agent_refs, "verifier": verifier_refs})
     if action.trial_name and action.mode in {"resume", "rerun"}:
         native = selected_config(job, output_dir)
-        for stage, target, values in (("AGENT", native["agents"][0], agent_env),
-                                      ("VERIFIER", native["verifier"], verifier_env)):
-            for key, value in values.items():
-                variable = f"PRT_SELECTED_{stage}_{key}"
-                env[variable] = value
-                target.setdefault("env", {})[key] = "${" + variable + "}"
+        native["agents"][0].setdefault("env", {}).update(agent_refs)
+        native["verifier"].setdefault("env", {}).update(verifier_refs)
         extra_files["selected-config.json"] = json.dumps(native, ensure_ascii=False)
         notes.append(f"源 trial：{action.trial_name}；本次仅执行 1 条数据")
     validate_secret_env(env)
-    secrets = [value for key, value in {**env, **job.resources.env}.items() if value and _looks_secret(key)]
+    secrets = list(dict.fromkeys([*collect_secrets(agent_env, verifier_env, env, job.resources.env), *injected_secrets]))
     runtime = "harbor_runtime.py"
     return BuildResult(
         command=[resolve_harbor_python(binary), "-u", str(work_dir / runtime), *argv],

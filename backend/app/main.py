@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
         )
     seeded = model_api_service.seed_defaults()
     if seeded:
-        logger.info("seeded %d default model API config(s); admins fill in the keys", seeded)
+        logger.info("seeded %d default model API config(s); each account fills in its own key", seeded)
     adopted = project_service.adopt_orphan_jobs()
     if adopted:
         logger.info("moved %d pre-existing job(s) into the default project", adopted)
@@ -123,10 +123,16 @@ if FRONTEND_DIST.is_dir():
     async def spa(full_path: str) -> FileResponse:
         if full_path.startswith(("api/", "ws/")):
             raise HTTPException(status_code=404, detail="Not Found")
-        candidate = FRONTEND_DIST / full_path
+        static_root = FRONTEND_DIST.resolve()
+        candidate = (static_root / full_path).resolve()
+        if not candidate.is_relative_to(static_root):
+            raise HTTPException(status_code=404, detail="Not Found")
         if full_path and candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(FRONTEND_DIST / "index.html")
+        index = (static_root / "index.html").resolve()
+        if not index.is_relative_to(static_root):
+            raise HTTPException(status_code=404, detail="Not Found")
+        return FileResponse(index)
 
 else:  # pragma: no cover - developer convenience
 

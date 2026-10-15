@@ -31,7 +31,7 @@ from backend.app.models import (
 )
 from backend.app.store import store
 
-from .conftest import FAKE_MODEL_ID, MODELS_ROOT
+from .conftest import FAKE_MODEL_ID, MODELS_ROOT, grant_key
 
 
 @pytest.mark.parametrize("mode", ["resume", "regrade"])
@@ -365,14 +365,14 @@ def test_harbor_verify_flags(tmp_path, harbor_dataset, monkeypatch):
     assert "--agent" in command and command[command.index("--agent") + 1] == "claude-code"
     assert "--env" in command and command[command.index("--env") + 1] == "docker"
     assert "--agent-env" in command
-    assert "ANTHROPIC_API_KEY=sk-super-secret" in command
+    assert "ANTHROPIC_API_KEY=${PRT_AGENT_ANTHROPIC_API_KEY}" in command
     assert "--include-task-name" in command and "bash-*" in command
     assert "--n-tasks" in command and command[command.index("--n-tasks") + 1] == "25"
     assert "--export-traces" in command
     assert "--job-name" in command and job.id in command
     # secrets never make it into the rendered command line
     assert "sk-super-secret" not in result.masked_command_line()
-    assert "***" in result.masked_command_line()
+    assert result.masked_env()["ANTHROPIC_API_KEY"] == "***"
     assert result.masked_env()["ANTHROPIC_API_KEY"] == "***"
     # non-secret env is left readable
     assert result.masked_env()["HTTP_PROXY"] == "http://proxy:8080"
@@ -409,7 +409,7 @@ def test_harbor_allows_local_auth_sentinel_and_non_secret_numbers(tmp_path, harb
         verifier_env={"EVAL_API_KEY": "sk-real-secret", "BATCH_SIZE": "1"},
     ))
     result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
-    assert "OPENAI_API_KEY=EMPTY" in result.command and "BATCH_SIZE=1" in result.command
+    assert "OPENAI_API_KEY=${PRT_AGENT_OPENAI_API_KEY}" in result.command and "BATCH_SIZE=${PRT_VERIFIER_BATCH_SIZE}" in result.command
     assert "sk-real-secret" not in result.masked_command_line()
 
 
@@ -465,9 +465,10 @@ def test_harbor_judge_env_injection(tmp_path, harbor_dataset, monkeypatch):
     _fake_harbor_bin(monkeypatch, tmp_path)
     dataset = _rewardkit_dataset(harbor_dataset)
     judge = ModelApiConfig(
-        name="judge-openai", provider="openai", model="gpt-5", api_key="sk-judge-secret", base_url=""
+        name="judge-openai", provider="openai", model="gpt-5", base_url=""
     )
     store.model_apis.put(judge)
+    grant_key("usr_test", judge.id, "sk-judge-secret")
     job = _job(
         JobType.VERIFY,
         Framework.HARBOR,
@@ -482,10 +483,10 @@ def test_harbor_judge_env_injection(tmp_path, harbor_dataset, monkeypatch):
     command = result.command
 
     # 只注入这 5 个 JUDGE_*
-    assert "JUDGE_MODEL=gpt-5" in command
-    assert "JUDGE_PROVIDER=openai" in command
-    assert "JUDGE_API_PROTOCOL=openai" in command
-    assert "JUDGE_API_KEY=sk-judge-secret" in command
+    assert "JUDGE_MODEL=${PRT_VERIFIER_JUDGE_MODEL}" in command
+    assert "JUDGE_PROVIDER=${PRT_VERIFIER_JUDGE_PROVIDER}" in command
+    assert "JUDGE_API_PROTOCOL=${PRT_VERIFIER_JUDGE_API_PROTOCOL}" in command
+    assert "JUDGE_API_KEY=${PRT_VERIFIER_JUDGE_API_KEY}" in command
     # base_url 为空 => 不发（不回退默认值）
     assert not any(part.startswith("JUDGE_BASE_URL=") for part in command)
     # 不注入 provider 的标准变量（任务侧 test.sh 自己映射）
@@ -497,14 +498,16 @@ def test_harbor_judge_env_injection(tmp_path, harbor_dataset, monkeypatch):
     # .env 0600 供 task.toml 的 ${VAR} 插值
     env_file = tmp_path / "w" / ".env"
     assert env_file.is_file()
-    assert "JUDGE_API_KEY=sk-judge-secret" in env_file.read_text(encoding="utf-8")
+    assert "JUDGE_API_KEY\n" in env_file.read_text(encoding="utf-8")
+    assert "sk-judge-secret" not in env_file.read_text(encoding="utf-8")
 
 
 def test_harbor_judge_env_user_override_wins(tmp_path, harbor_dataset, monkeypatch):
     _fake_harbor_bin(monkeypatch, tmp_path)
     dataset = _rewardkit_dataset(harbor_dataset)
-    judge = ModelApiConfig(name="judge-a", provider="anthropic", model="claude-x", api_key="sk-a")
+    judge = ModelApiConfig(name="judge-a", provider="anthropic", model="claude-x")
     store.model_apis.put(judge)
+    grant_key("usr_test", judge.id, "sk-a")
     config = VerifyConfig(
         dataset_id=dataset.id,
         agent="oracle",
@@ -512,7 +515,7 @@ def test_harbor_judge_env_user_override_wins(tmp_path, harbor_dataset, monkeypat
         verifier_env={"JUDGE_MODEL": "override-model"},
     )
     result = harbor_builder.build(_job(JobType.VERIFY, Framework.HARBOR, verify=config), tmp_path / "w", tmp_path / "o")
-    assert "JUDGE_MODEL=override-model" in result.command
+    assert "JUDGE_MODEL=${PRT_VERIFIER_JUDGE_MODEL}" in result.command
     assert "JUDGE_MODEL=claude-x" not in result.command
 
 
