@@ -1,4 +1,4 @@
-"""模型部署：把本地模型用 vLLM 拉起成 OpenAI 兼容服务。
+"""模型部署：把本地模型用 vLLM 拉起成 OpenAI / Responses / Anthropic 接口服务。
 
 评测本地训练产物时需要一个可访问的推理端点，所以部署是平台的一等公民：
 它像任务一样有进程、日志和 GPU 占用，但**没有终止态**——它是常驻服务，
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -33,6 +33,12 @@ class DeploymentSource(str, Enum):
     PATH = "path"          # 直接给绝对路径
 
 
+# 对外接口形式。vLLM ≥0.18 在同一端口原生提供 /v1/chat/completions、/v1/responses
+# 和 Anthropic /v1/messages；这里选的是评测时 agent 走哪一套（codex 只认 Responses，
+# claude-code 只认 Anthropic），平台在就绪后会确认对应路由真的存在。
+DeploymentApiProtocol = Literal["openai", "responses", "anthropic"]
+
+
 class VLLMConfig(Base):
     """vLLM OpenAI 兼容服务的启动参数（只放常用的，其余走 extra_args）。"""
 
@@ -48,6 +54,8 @@ class VLLMConfig(Base):
     enforce_eager: bool = False
     api_key: str = ""  # 留空表示不校验
     chat_template: str = ""
+    # agent 评测要靠工具调用：填了就加 --enable-auto-tool-choice --tool-call-parser
+    tool_call_parser: str = ""
     extra_args: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -65,6 +73,7 @@ class Deployment(Base):
     port: int = Field(default=8100, ge=1024, le=65535)
     host: str = "0.0.0.0"
     engine: str = "vllm"
+    api_protocol: DeploymentApiProtocol = "openai"
     config: VLLMConfig = Field(default_factory=VLLMConfig)
 
     owner_id: str
@@ -104,6 +113,7 @@ class DeploymentCreate(Base):
     # 0 表示不参与 GPU 记账（CPU 推理，或本机没有可见显卡）
     n_gpus: int = Field(default=1, ge=0, le=16)
     project_id: str = ""
+    api_protocol: DeploymentApiProtocol = "openai"
     config: VLLMConfig = Field(default_factory=VLLMConfig)
 
 

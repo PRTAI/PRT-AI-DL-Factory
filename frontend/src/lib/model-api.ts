@@ -1,7 +1,13 @@
-import type { ApiProtocol, ModelApi } from './types'
+import type { ApiProtocol, DeploymentApiProtocol, ModelApi } from './types'
 
 export function supportsProtocol(model: ModelApi, protocol: ApiProtocol) {
   return model.supported_protocols?.includes(protocol) && Boolean(model.endpoints?.[protocol])
+}
+
+export const DEPLOYMENT_PROTOCOL_LABELS: Record<DeploymentApiProtocol, string> = {
+  openai: 'OpenAI Chat',
+  responses: 'OpenAI Responses',
+  anthropic: 'Anthropic Messages',
 }
 
 export function protocolLabels(protocols: ApiProtocol[]) {

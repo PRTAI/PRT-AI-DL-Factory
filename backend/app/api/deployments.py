@@ -28,7 +28,7 @@ def list_deployments(
 
 
 @router.get("/endpoints", summary="可用推理端点（评测表单用）")
-def endpoints(user: CurrentUser) -> list[dict[str, str]]:
+def endpoints(user: CurrentUser) -> list[dict[str, Any]]:
     del user
     return deployment_service.endpoints()
 

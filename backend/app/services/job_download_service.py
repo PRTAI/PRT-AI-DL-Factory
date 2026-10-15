@@ -35,6 +35,9 @@ def _secrets_for(job: Job, payload: dict[str, Any], work: Path) -> list[str]:
                 platform = store.model_platforms.get(model.platform_id) if model.platform_id else None
                 if platform and platform.api_key:
                     secrets.add(platform.api_key)
+        deployment = store.deployments.get(job.verify.deployment_id) if job.verify.deployment_id else None
+        if deployment and deployment.config.api_key:
+            secrets.add(deployment.config.api_key)
     env_file = work / ".env"
     if not work.is_symlink() and env_file.is_file() and not env_file.is_symlink():
         # 保留运行时旧密钥的脱敏能力，即使模型配置里的密钥已经轮换。

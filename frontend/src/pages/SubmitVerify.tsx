@@ -2,7 +2,7 @@ import { TaskTimeoutPanel } from '@/components/TaskTimeoutPanel'
 import * as React from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Globe, KeyRound, Rocket, Plus, Settings2, Trash2 } from 'lucide-react'
+import { Bot, Brain, ChevronDown, Container, Database, Eraser, FlaskConical, Globe, KeyRound, Plus, Settings2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import type { Prebuild } from '@/lib/api'
@@ -11,7 +11,7 @@ import { useAuth, useProject } from '@/lib/store'
 import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
 import { agentConfig, appendVerifyAgent, batchJobNames } from '@/lib/verify-batch'
-import { supportsProtocol } from '@/lib/model-api'
+import { DEPLOYMENT_PROTOCOL_LABELS, supportsProtocol } from '@/lib/model-api'
 import {
   Badge,
   Button,
@@ -39,6 +39,7 @@ const DEFAULT_VERIFY: VerifyConfig = {
   registry_dataset: '',
   agent: 'oracle',
   model_api_id: '',
+  deployment_id: '',
   agent_api_protocol: '',
   model: '',
   reasoning_effort: '',
@@ -190,41 +191,55 @@ function RegistryPicker({ value, onChange }: { value: string; onChange: (ref: st
   )
 }
 
-/** 让评测直接指向平台里跑着的 vLLM 服务，省得手抄 base_url 和模型名。 */
-function LocalEndpointPicker({ onPick }: { onPick: (endpoint: DeploymentEndpoint) => void }) {
+/** 平台里正在服务的 vLLM 部署；后端按 agent 需要的接口注入宿主机地址与部署密钥。 */
+function LocalDeploymentPicker({ value, required, onChange }: {
+  value: string
+  /** codex / claude-code 只能接对应接口的部署 */
+  required?: ApiProtocol
+  onChange: (endpoint: DeploymentEndpoint | null) => void
+}) {
   const endpoints = useQuery({
     queryKey: ['deployment-endpoints'],
     queryFn: () => api.deploymentEndpoints(),
     refetchInterval: 15000,
   })
-  const serving = (endpoints.data ?? []).filter((item) => item.status === 'serving')
-
-  if (!serving.length) {
-    return (
-      <p className="text-[11px] leading-relaxed text-fg-subtle">
-        想评测本地训练出来的模型？先到「模型部署」用 vLLM 起一个服务，这里就会出现一键填充的入口。
-      </p>
-    )
-  }
-
+  const rows = endpoints.data ?? []
+  const current = rows.find((item) => item.id === value)
+  const usable = (item: DeploymentEndpoint) => item.status === 'serving' && (!required || item.supported_protocols.includes(required))
+  const wire = (item: DeploymentEndpoint): ApiProtocol => required ?? (item.api_protocol === 'anthropic' ? 'anthropic' : 'openai')
+  const requiredLabel = required === 'responses' ? 'OpenAI Responses' : required === 'anthropic' ? 'Anthropic Messages' : ''
   return (
-    <div className="rounded-md border border-border bg-bg-elevated px-3 py-2.5">
-      <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-fg-muted">
-        <Rocket className="h-3.5 w-3.5" aria-hidden />
-        使用本地部署的模型
+    <div className="space-y-2">
+      <Field label="本地部署" required hint={requiredLabel ? `该 agent 需要 ${requiredLabel} 接口的部署` : '任意接口的部署都可以'}>
+        <Select
+          value={current?.id ?? ''}
+          disabled={!rows.length}
+          placeholder={rows.length ? '选择正在服务的部署' : '暂无运行中的部署'}
+          onValueChange={(next) => onChange(rows.find((item) => item.id === next) ?? null)}
+          options={rows.map((item) => ({
+            value: item.id,
+            label: `${item.name} · ${item.model}`,
+            description: item.status !== 'serving' ? '加载中，就绪后可选'
+              : usable(item) ? DEPLOYMENT_PROTOCOL_LABELS[item.api_protocol]
+              : `提供 ${DEPLOYMENT_PROTOCOL_LABELS[item.api_protocol]}，不适用于该 agent`,
+            disabled: !usable(item),
+          }))}
+        />
+      </Field>
+      {current && (
+        <div className="flex items-center justify-between gap-2">
+          <p className="min-w-0 break-all text-[11px] text-fg-subtle">
+            {wire(current) === 'anthropic' ? 'Anthropic' : 'OpenAI'} · {current.sandbox_endpoints[wire(current)]}
+            {current.api_key ? ' · 部署密钥由后台注入' : ''}
+          </p>
+          <Button size="sm" variant="ghost" onClick={() => onChange(null)}>清除选择</Button>
+        </div>
+      )}
+      <p className="text-[11px] leading-relaxed text-fg-subtle">
+        {!rows.length && !endpoints.isLoading && <>还没有运行中的部署，先到 <Link to="/deployments" className="text-primary">模型部署</Link> 用 vLLM 起服务。</>}
+        地址用宿主机 IP 而不是 <Mono>127.0.0.1</Mono>：agent 跑在容器里，回环地址连不上。
       </p>
-      <div className="flex flex-wrap gap-1.5">
-        {serving.map((endpoint) => (
-          <Button key={endpoint.id} variant="outline" size="sm" onClick={() => onPick(endpoint)}>
-            {endpoint.name}
-            <span className="text-fg-subtle">· {endpoint.model}</span>
-          </Button>
-        ))}
-      </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-fg-subtle">
-        点击会把模型填成 <Mono>hosted_vllm/&lt;模型名&gt;</Mono>，并把 <Mono>OPENAI_BASE_URL</Mono> 写进 agent
-        环境变量。地址用的是**宿主机 IP** 而不是 <Mono>127.0.0.1</Mono>——agent 跑在容器里，回环地址连不上。
-      </p>
+      {endpoints.error && <p className="text-xs text-danger">{endpoints.error.message}</p>}
     </div>
   )
 }
@@ -262,19 +277,23 @@ function AgentEditor({ config, patch, title, onRemove }: {
   const agentProtocol = config.agent === 'claude-code' ? 'anthropic' : config.agent === 'codex' ? 'openai' : config.agent_api_protocol || 'openai'
   const agentWireProtocol: ApiProtocol = config.agent === 'codex' ? 'responses' : agentProtocol
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
+  const [modelSource, setModelSource] = React.useState<'api' | 'local'>(config.deployment_id ? 'local' : 'api')
+  React.useEffect(() => {
+    if (config.deployment_id) setModelSource('local')
+  }, [config.deployment_id])
   React.useEffect(() => {
     const selected = modelApis.data?.find(item => item.id === config.model_api_id)
     if (selected && !supportsProtocol(selected, agentWireProtocol)) patch({ model_api_id: '', model: '' })
   }, [agentWireProtocol, config.model_api_id, modelApis.data])
   React.useEffect(() => {
-    if (!agentInfo || config.model_api_id) return
+    if (!agentInfo || config.model_api_id || config.deployment_id) return
     const next = { ...config.agent_env }
     let changed = false
     for (const key of agentInfo.env_keys) {
       if (!(key in next)) { next[key] = ''; changed = true }
     }
     if (changed) patch({ agent_env: next })
-  }, [agentInfo, config.model_api_id])
+  }, [agentInfo, config.model_api_id, config.deployment_id])
   return (
     <Card>
       <CardHeader title={title} icon={<Bot className="h-4 w-4" aria-hidden />}
@@ -294,10 +313,34 @@ function AgentEditor({ config, patch, title, onRemove }: {
 
         {agentInfo?.needs_model && (
           <>
-            <Field label="模型接口" required hint={config.agent === 'claude-code' || config.agent === 'codex' ? `${config.agent} 已自动选择对应接口` : '先选择接口，再选择平台与模型'}>
-              <Select value={agentProtocol} disabled={config.agent === 'claude-code' || config.agent === 'codex'} onValueChange={(value) => patch({ agent_api_protocol: value as VerifyConfig['agent_api_protocol'] })} options={[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }]} />
+            <Field label="模型来源" required hint="本地部署：平台「模型部署」里用 vLLM 起的服务">
+              <Select
+                value={modelSource}
+                onValueChange={(value) => {
+                  setModelSource(value as 'api' | 'local')
+                  patch(value === 'local' ? { model_api_id: '', model: '' } : { deployment_id: '' })
+                }}
+                options={[{ value: 'api', label: '平台模型 API' }, { value: 'local', label: '本地部署（vLLM）' }]}
+              />
             </Field>
-            <ModelApiPicker value={config.model_api_id} protocol={agentWireProtocol} onChange={(item) => patch({ model_api_id: item?.id ?? '', model: item ? '' : config.model })} />
+            {modelSource === 'local' ? (
+              <LocalDeploymentPicker
+                value={config.deployment_id ?? ''}
+                required={config.agent === 'codex' ? 'responses' : config.agent === 'claude-code' ? 'anthropic' : undefined}
+                onChange={(endpoint) => patch({
+                  deployment_id: endpoint?.id ?? '', model_api_id: '', model: '',
+                  ...(endpoint && config.agent !== 'codex' && config.agent !== 'claude-code'
+                    ? { agent_api_protocol: endpoint.api_protocol === 'anthropic' ? 'anthropic' : 'openai' } : {}),
+                })}
+              />
+            ) : (
+              <>
+                <Field label="模型接口" required hint={config.agent === 'claude-code' || config.agent === 'codex' ? `${config.agent} 已自动选择对应接口` : '先选择接口，再选择平台与模型'}>
+                  <Select value={agentProtocol} disabled={config.agent === 'claude-code' || config.agent === 'codex'} onValueChange={(value) => patch({ agent_api_protocol: value as VerifyConfig['agent_api_protocol'] })} options={[{ value: 'openai', label: 'OpenAI' }, { value: 'anthropic', label: 'Anthropic' }]} />
+                </Field>
+                <ModelApiPicker value={config.model_api_id} protocol={agentWireProtocol} onChange={(item) => patch({ model_api_id: item?.id ?? '', model: item ? '' : config.model })} />
+              </>
+            )}
 
             <Field
               label={
@@ -320,7 +363,7 @@ function AgentEditor({ config, patch, title, onRemove }: {
               />
             </Field>
 
-            {!config.model_api_id && (
+            {modelSource === 'api' && !config.model_api_id && (
               <Field
                 label="手动指定模型"
                 required
@@ -334,26 +377,6 @@ function AgentEditor({ config, patch, title, onRemove }: {
               </Field>
             )}
 
-            <LocalEndpointPicker
-              onPick={(endpoint) => {
-                // litellm 用 hosted_vllm/ 前缀走 OpenAI 兼容协议。
-                // 地址必须用 sandbox_base_url（宿主机 IP）：agent 跑在容器里，
-                // 容器内的 127.0.0.1 是容器自己，回环地址一定连不上。
-                // OPENAI_BASE_URL 是 Harbor 的首选键，OPENAI_API_BASE 是它的回退键，
-                // 两个都给以兼容不同 agent。
-                patch({
-                  model_api_id: '',
-                  model: `hosted_vllm/${endpoint.model}`,
-                  agent_env: {
-                    ...config.agent_env,
-                    OPENAI_BASE_URL: endpoint.sandbox_base_url,
-                    OPENAI_API_BASE: endpoint.sandbox_base_url,
-                    OPENAI_API_KEY: config.agent_env.OPENAI_API_KEY || 'EMPTY',
-                  },
-                })
-                toast.success(`已指向本地部署「${endpoint.name}」`)
-              }}
-            />
           </>
         )}
 
@@ -579,7 +602,8 @@ export default function SubmitVerify() {
   }, [suggestedProject, projectId, setProject, suggestion.data?.project_name])
 
   const batchAgents = [agentConfig(config), ...extraAgents.map(row => row.config)]
-  const batchNames = batchJobNames(name, batchAgents, modelApis.data ?? [])
+  const endpoints = useQuery({ queryKey: ['deployment-endpoints'], queryFn: () => api.deploymentEndpoints() })
+  const batchNames = batchJobNames(name, batchAgents, modelApis.data ?? [], endpoints.data ?? [])
   const submit = useMutation({
     mutationFn: async () => {
       const common = {
@@ -637,8 +661,8 @@ export default function SubmitVerify() {
         if (missing.length) out.push(`第 ${index + 1} 项请填写任务要求的 Verifier 环境变量：${missing.join(' / ')}`)
       }
       const info = agents.data?.find(agent => agent.name === row.agent)
-      if (!['oracle', 'nop'].includes(row.agent) && !row.model.trim() && !row.model_api_id) out.push(`第 ${index + 1} 项 ${row.agent} 需要选择或填写模型`)
-      if (!row.model_api_id) {
+      if (!['oracle', 'nop'].includes(row.agent) && !row.model.trim() && !row.model_api_id && !row.deployment_id) out.push(`第 ${index + 1} 项 ${row.agent} 需要选择或填写模型`)
+      if (!row.model_api_id && !row.deployment_id) {
         const missing = (info?.env_keys ?? []).filter(key => !row.agent_env[key]?.trim())
         if (missing.length) out.push(`第 ${index + 1} 项请填写 ${missing.join(' / ')}（或选择平台模型）`)
       }
@@ -1018,7 +1042,7 @@ export default function SubmitVerify() {
                 <div className="flex justify-between gap-3">
                   <dt className="text-fg-muted">模型</dt>
                   <dd className="truncate text-right text-fg">
-                    {extraAgents.length ? `${batchAgents.length} 项（见下方列表）` : config.model_api_id ? modelApiName ?? '模型配置' : config.model || '（无需模型）'}
+                    {extraAgents.length ? `${batchAgents.length} 项（见下方列表）` : config.deployment_id ? `本地部署 · ${endpoints.data?.find((item) => item.id === config.deployment_id)?.name ?? config.deployment_id}` : config.model_api_id ? modelApiName ?? '模型配置' : config.model || '（无需模型）'}
                     {!extraAgents.length && config.reasoning_effort && ` · ${config.reasoning_effort}`}
                   </dd>
                 </div>

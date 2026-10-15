@@ -5,10 +5,10 @@ from pathlib import Path
 
 from ..config import settings
 from ..models import Job
-from ..services import harbor_compat, model_api_service, resources_service
+from ..services import harbor_compat, model_api_service
 from ..services.harbor_action_service import selected_config, snapshot_dir, verifier_path
 from .base import BuildError, BuildResult, kv_flags
-from .harbor import collect_secrets, stage_environment, resolve_harbor_bin, resolve_harbor_python, validate_secret_env
+from .harbor import collect_secrets, resolve_agent_model, stage_environment, resolve_harbor_bin, resolve_harbor_python, validate_secret_env
 
 
 def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
@@ -16,16 +16,12 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     action = job.harbor_action
     binary = resolve_harbor_bin()
     source = snapshot_dir(job, work_dir, output_dir)
-    agent = config.agent_import_path.strip() or config.agent
     injected_secrets: list[str] = []
     agent_env: dict[str, str] = {}
     verifier_env: dict[str, str] = {}
     notes = ["派生任务使用原始记录副本，保留原任务的产物和评分记录"]
-    if action.mode in {"resume", "rerun"} and config.model_api_id:
-        resolved = model_api_service.resolve(
-            config.model_api_id, user_id=job.owner_id, model_style=resources_service.model_style_for(agent),
-            protocol=model_api_service.agent_protocol(agent, config.agent_api_protocol),
-        )
+    resolved = resolve_agent_model(job) if action.mode in {"resume", "rerun"} else None
+    if resolved is not None:
         agent_env.update(resolved.env)
         injected_secrets.extend(resolved.secrets)
     if action.mode in {"resume", "rerun"}:

@@ -49,7 +49,8 @@ import {
   Th,
   Tr,
 } from '@/components/ui'
-import type { Deployment, DeploymentStatus, ExportStatus, ModelEntry, VLLMConfig } from '@/lib/types'
+import type { Deployment, DeploymentApiProtocol, DeploymentStatus, ExportStatus, ModelEntry, VLLMConfig } from '@/lib/types'
+import { DEPLOYMENT_PROTOCOL_LABELS } from '@/lib/model-api'
 
 const DEPLOY_STATUS: Record<DeploymentStatus, { label: string; tone: 'success' | 'info' | 'danger' | 'neutral' }> = {
   starting: { label: '启动中', tone: 'info' },
@@ -173,7 +174,7 @@ function DeploymentList({ onShowLog }: { onShowLog: (id: string, name: string) =
         <EmptyState
           icon={<Rocket className="h-8 w-8" aria-hidden />}
           title="还没有部署任何模型"
-          description="部署会在本机起一个 vLLM 的 OpenAI 兼容服务；评测 codex / claude-code 这类 agent 时可以直接指向它。"
+          description="部署会在本机起一个 vLLM 服务（OpenAI Chat / Responses / Anthropic 接口可选）；提交评测时在「模型来源 → 本地部署」里直接选它。"
         />
       </Card>
     )
@@ -249,8 +250,9 @@ function DeploymentList({ onShowLog }: { onShowLog: (id: string, name: string) =
                       </button>
                     )}
                   </div>
-                  <div className="mt-0.5 truncate text-[11px] text-fg-subtle">
-                    model: {item.served_model_name}
+                  <div className="mt-0.5 flex items-center gap-1.5 truncate text-[11px] text-fg-subtle">
+                    <Badge tone={item.api_protocol === 'openai' ? undefined : 'info'}>{DEPLOYMENT_PROTOCOL_LABELS[item.api_protocol ?? 'openai']}</Badge>
+                    <span className="truncate">model: {item.served_model_name}</span>
                   </div>
                 </Td>
                 <Td className="text-xs text-fg-muted">
@@ -462,8 +464,32 @@ const DEFAULT_VLLM: VLLMConfig = {
   enforce_eager: false,
   api_key: '',
   chat_template: '',
+  tool_call_parser: '',
   extra_args: {},
 }
+
+// vLLM 0.18 tool_parsers 注册表里的常用项；完整列表见 vllm serve --help
+const TOOL_CALL_PARSERS = [
+  { value: 'hermes', label: 'hermes', description: 'Qwen2.5 / Qwen3 / Hermes 系' },
+  { value: 'qwen3_coder', label: 'qwen3_coder', description: 'Qwen3-Coder 系' },
+  { value: 'qwen3_xml', label: 'qwen3_xml', description: 'Qwen3.5 / Qwen3-Next 等 XML 工具格式' },
+  { value: 'llama3_json', label: 'llama3_json', description: 'Llama 3.x' },
+  { value: 'llama4_pythonic', label: 'llama4_pythonic', description: 'Llama 4' },
+  { value: 'mistral', label: 'mistral' },
+  { value: 'deepseek_v3', label: 'deepseek_v3' },
+  { value: 'deepseek_v31', label: 'deepseek_v31' },
+  { value: 'glm45', label: 'glm45', description: 'GLM-4.5 / 4.6' },
+  { value: 'glm47', label: 'glm47', description: 'GLM-4.7' },
+  { value: 'kimi_k2', label: 'kimi_k2' },
+  { value: 'minimax_m2', label: 'minimax_m2' },
+  { value: 'openai', label: 'openai', description: 'gpt-oss' },
+]
+
+const API_PROTOCOL_OPTIONS: { value: DeploymentApiProtocol; label: string; description: string }[] = [
+  { value: 'openai', label: DEPLOYMENT_PROTOCOL_LABELS.openai, description: '/v1/chat/completions，terminus 等 litellm 系 agent' },
+  { value: 'responses', label: DEPLOYMENT_PROTOCOL_LABELS.responses, description: '/v1/responses，codex 需要；同端口仍保留 Chat 接口' },
+  { value: 'anthropic', label: DEPLOYMENT_PROTOCOL_LABELS.anthropic, description: '/v1/messages，claude-code 需要' },
+]
 
 function CreateDeploymentDialog({
   open,
@@ -483,6 +509,7 @@ function CreateDeploymentDialog({
   const [port, setPort] = React.useState<number | null>(null)
   const [nGpus, setNGpus] = React.useState<number | null>(1)
   const [config, setConfig] = React.useState<VLLMConfig>(DEFAULT_VLLM)
+  const [apiProtocol, setApiProtocol] = React.useState<DeploymentApiProtocol>('openai')
 
   const finished = useQuery({
     queryKey: ['exports', 'succeeded'],
@@ -504,6 +531,7 @@ function CreateDeploymentDialog({
         port,
         n_gpus: nGpus ?? 1,
         project_id: projectId,
+        api_protocol: apiProtocol,
         config: { ...config, max_model_len: config.max_model_len || null },
       })
     },
@@ -515,12 +543,14 @@ function CreateDeploymentDialog({
       setExportId('')
       setServed('')
       setConfig(DEFAULT_VLLM)
+      setApiProtocol('openai')
       queryClient.invalidateQueries({ queryKey: ['deployments'] })
     },
     onError: (error: ApiError) => toast.error(error.message),
   })
 
-  const ready = name.trim() && (source === 'model' ? Boolean(model) : Boolean(exportId))
+  const needsTools = apiProtocol !== 'openai'
+  const ready = name.trim() && (source === 'model' ? Boolean(model) : Boolean(exportId)) && (!needsTools || Boolean(config.tool_call_parser))
   const patch = (partial: Partial<VLLMConfig>) => setConfig((current) => ({ ...current, ...partial }))
 
   return (
@@ -528,7 +558,7 @@ function CreateDeploymentDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="部署模型"
-      description="默认使用 vLLM 启动 OpenAI 兼容服务。占用的 GPU 会计入平台的 GPU 账本，训练任务不会再拿到同一张卡。"
+      description="使用 vLLM 启动服务，可选 OpenAI Chat / Responses / Anthropic 接口（需 vLLM ≥ 0.18）。占用的 GPU 会计入平台的 GPU 账本，训练任务不会再拿到同一张卡。"
       width="max-w-3xl"
       footer={
         <>
@@ -593,6 +623,19 @@ function CreateDeploymentDialog({
             还没有已完成的合并导出。LoRA 训练产物需要先「合并导出」成完整权重，vLLM 才能加载。
           </InlineHint>
         )}
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="接口形式" required hint="评测时 codex 需选 Responses，claude-code 需选 Anthropic">
+            <Select value={apiProtocol} onValueChange={(value) => setApiProtocol(value as DeploymentApiProtocol)} options={API_PROTOCOL_OPTIONS} />
+          </Field>
+          <Field label="工具调用解析器" required={needsTools} hint="agent 评测依赖工具调用；按模型系列选择">
+            <Select
+              value={config.tool_call_parser || 'none'}
+              onValueChange={(value) => patch({ tool_call_parser: value === 'none' ? '' : value })}
+              options={[{ value: 'none', label: '不启用', description: needsTools ? '该接口必须启用' : undefined, disabled: needsTools }, ...TOOL_CALL_PARSERS]}
+            />
+          </Field>
+        </div>
 
         <div className="grid gap-3 sm:grid-cols-3">
           <Field label="GPU 数量" hint="0 = 不参与 GPU 记账">

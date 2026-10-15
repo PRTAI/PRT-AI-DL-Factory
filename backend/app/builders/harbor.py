@@ -25,6 +25,8 @@ import shutil
 import tomllib
 from pathlib import Path
 
+from fastapi import HTTPException
+
 from ..config import settings
 from ..models import DatasetKind, Job, VerifyConfig
 from ..services import harbor_compat, harbor_env_service, model_api_service, resources_service
@@ -32,6 +34,14 @@ from ..store import store
 from .base import BuildError, BuildResult, kv_flags
 
 _NO_MODEL_AGENTS = {"oracle", "nop"}
+
+
+def resolve_agent_model(job: Job) -> model_api_service.ResolvedModel | None:
+    """排队期间部署被停 / 密钥被删时，启动阶段给出可读的失败原因。"""
+    try:
+        return model_api_service.resolve_agent(job.verify, user_id=job.owner_id)
+    except HTTPException as exc:
+        raise BuildError(str(exc.detail)) from exc
 
 
 def _codex_config(source: str, base_url: str) -> str:
@@ -140,7 +150,6 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     if config is None:
         raise BuildError("缺少评测配置")
     agent = config.agent_import_path.strip() or config.agent
-    wire_protocol = model_api_service.agent_protocol(agent, config.agent_api_protocol)
 
     binary = resolve_harbor_bin()
     notes: list[str] = []
@@ -211,12 +220,9 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     command += ["--agent", agent]
     injected_env: dict[str, str] = {}
     injected_secrets: list[str] = []
-    if config.model_api_id:
-        # 平台维护的模型配置 + 提交人自己的密钥：--model 与密钥/base_url 按 Harbor 的标准环境变量注入
-        resolved = model_api_service.resolve(
-            config.model_api_id, user_id=job.owner_id, model_style=resources_service.model_style_for(agent),
-            protocol=wire_protocol,
-        )
+    # 平台模型配置（提交人自己的密钥）或本地部署：--model 与密钥/base_url 按 Harbor 的标准环境变量注入
+    resolved = resolve_agent_model(job)
+    if resolved is not None:
         command += ["--model", resolved.model]
         injected_env = resolved.env
         injected_secrets = resolved.secrets

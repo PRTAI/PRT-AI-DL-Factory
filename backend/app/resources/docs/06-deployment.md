@@ -68,10 +68,29 @@ LoRA 训练产出的是 **adapter**（`adapter_config.json` + `adapter_model.saf
 | 显存占用比例 | 0.9 | vLLM 预分配的 KV cache 比例 |
 | 最大上下文 | 模型自带 | 显存不够时调小这个最有效 |
 | 精度 / 量化 | auto / 不量化 | 模型本身没量化就别选 |
+| 接口形式 | OpenAI Chat | 见下方「接口形式」，决定哪些 agent 能用这个部署 |
+| 工具调用解析器 | 不启用 | Responses / Anthropic 必填，按模型系列选（Qwen3 选 `hermes`，Qwen3-Coder 选 `qwen3_coder`…） |
 | API Key | 空 | 留空不校验；填了会在日志和命令记录里打成 `***` |
 
 启动后状态从 **启动中** 走到 **服务中**：平台每 3 秒探测一次 `/v1/models`，
 能返回才算真的可用。大模型首次加载几分钟很正常，可以点「日志」看 vLLM 的加载进度。
+
+### 接口形式
+
+vLLM 同一个端口上同时提供三种接口，部署时选的是**评测要用哪一种**：
+
+| 接口形式 | 路由 | 适用 agent |
+|---|---|---|
+| OpenAI Chat | `/v1/chat/completions` | terminus、mini-swe-agent 等走 litellm 的 agent |
+| OpenAI Responses | `/v1/responses`（同时保留 Chat） | codex，以及上面所有 Chat 类 agent |
+| Anthropic Messages | `/v1/messages` | claude-code |
+
+- Responses / Anthropic 是给 agent 调工具用的，**必须选工具调用解析器**，否则模型的工具调用
+  会被当成普通文本，agent 一步也走不动
+- 这两种接口需要 **vLLM ≥ 0.18**。启动后平台会检查 `/openapi.json` 里有没有对应路由，
+  没有就直接判「已失败」并释放 GPU，错误信息里会提示升级
+- Anthropic 形式填了 API Key 时，平台会自动给 vLLM 挂一个中间件，把 claude-code 发来的
+  `x-api-key` 转成 vLLM 认的 `Authorization: Bearer`，不用自己处理
 
 ### GPU 记账
 
@@ -96,13 +115,19 @@ LoRA 训练产出的是 **adapter**（`adapter_config.json` + `adapter_model.saf
 
 ## 三、评测时用上它
 
-提交评测页选一个 needs-model 的 agent（codex / claude-code / terminus…）之后，
-「模型」输入框下面会列出所有**服务中**的本地部署，点一下就自动填好：
+提交评测页给 agent 选模型时，「模型来源」切到 **本地部署（vLLM）**，再从下拉里挑一个
+**服务中**的部署即可，模型名、地址、密钥都由平台注入：
 
-- 模型填成 `hosted_vllm/<对外模型名>` —— litellm 用这个前缀走 OpenAI 兼容协议
-- `OPENAI_BASE_URL` 和 `OPENAI_API_BASE` 写进 agent 环境变量（前者是 Harbor 的首选键，
-  后者是它的回退键，两个都给以兼容不同 agent）
-- `OPENAI_API_KEY` 没填的话给一个占位 `EMPTY`（vLLM 默认不校验）
+- 下拉里接口形式和当前 agent 不匹配的部署是灰的：codex 需要 Responses，claude-code 需要
+  Anthropic，其他 agent 用任意部署都行
+- 模型名就是部署的「对外模型名」（litellm 系 agent 会自动加 `openai/` / `anthropic/` 前缀）
+- OpenAI 系注入 `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_API_BASE`（地址带 `/v1`）；
+  Anthropic 注入 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`（地址不带 `/v1`），并把 claude-code
+  的 opus / sonnet / haiku、后台小任务和子 agent 的模型都指到这个部署
+- 部署没设 API Key 时密钥给一个占位值（vLLM 不校验）；设了的话按密钥处理，日志里打码
+- codex 会把模型名按 `/` 切开只取最后一段，所以给 codex 用的部署，对外模型名不要带 `/`
+
+提交时平台会再确认一次部署仍在服务中；评测排队期间部署被停掉的话，任务启动时会直接报错。
 
 > ⚠️ **地址用的是宿主机 IP，不是 `127.0.0.1`**。Harbor 的 agent 跑在 Docker 容器里，
 > 容器内的 `127.0.0.1` 指的是容器自己，用回环地址一定连不上宿主机的 vLLM。
@@ -123,10 +148,14 @@ LoRA 训练产出的是 **adapter**（`adapter_config.json` + `adapter_model.saf
 | `No module named vllm` | 部署用的解释器没装 vLLM，改 `PRT_VLLM_PYTHON` |
 | `CUDA out of memory` | 显存不够：调低「显存占用比例」或「最大上下文」 |
 | `does not appear to have a file named config.json` | 指到了 adapter 目录或非模型目录 |
+| 错误信息「当前 vLLM 没有提供 /v1/…」 | vLLM 版本低于 0.18，不支持所选接口形式 |
 
 **评测里 agent 报连不上模型 / Connection refused**
-八成是地址用了 `127.0.0.1`。用提交评测页的一键填充，或者手填宿主机 IP。
+八成是地址用了 `127.0.0.1`。在提交评测页用「本地部署」来源，或者手填宿主机 IP。
 也确认一下 vLLM 是监听 `0.0.0.0`（平台默认就是）而不是只听回环。
+
+**codex / claude-code 连上了但一直不调用工具**
+部署时选的工具调用解析器和模型系列不匹配。停掉后换一个解析器重新部署。
 
 **「这是 LoRA adapter 目录，请先合并导出」**
 说明选的任务产物是 adapter。按上面第一节先导出，然后在「模型来源」里选

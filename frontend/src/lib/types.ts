@@ -281,6 +281,8 @@ export interface VerifyConfig {
   agent: string
   /** 平台维护的模型配置；选了它就不用手填 model / 密钥 */
   model_api_id: string
+  /** 平台里正在服务的本地部署；与 model_api_id 二选一，后端注入地址与密钥 */
+  deployment_id?: string
   agent_api_protocol?: '' | 'openai' | 'anthropic'
   model: string
   /** 思考模式；空 = 不下发，交给 agent 默认 */
@@ -642,8 +644,13 @@ export interface VLLMConfig {
   enforce_eager: boolean
   api_key: string
   chat_template: string
+  /** 填了就加 --enable-auto-tool-choice --tool-call-parser */
+  tool_call_parser: string
   extra_args: Record<string, unknown>
 }
+
+/** 部署对外的接口形式；vLLM ≥0.18 原生提供 */
+export type DeploymentApiProtocol = 'openai' | 'responses' | 'anthropic'
 
 export interface Deployment {
   id: string
@@ -657,6 +664,7 @@ export interface Deployment {
   port: number
   host: string
   engine: string
+  api_protocol: DeploymentApiProtocol
   config: VLLMConfig
   owner_id: string
   owner_email: string
@@ -684,6 +692,10 @@ export interface DeploymentEndpoint {
   base_url: string
   /** 宿主机实际 IP —— Harbor 的 agent 在容器里跑，必须用这个 */
   sandbox_base_url: string
+  api_protocol: DeploymentApiProtocol
+  /** 评测时 agent 可走的接口（Responses 部署同端口仍有 Chat） */
+  supported_protocols: ApiProtocol[]
+  sandbox_endpoints: Partial<Record<ApiProtocol, string>>
   status: DeploymentStatus
   api_key: string
 }
@@ -968,5 +980,5 @@ export interface ReviewTask {
 }
 
 export type VerifyAgentConfig = Pick<VerifyConfig,
-  'agent' | 'model_api_id' | 'agent_api_protocol' | 'model' | 'reasoning_effort' |
+  'agent' | 'model_api_id' | 'deployment_id' | 'agent_api_protocol' | 'model' | 'reasoning_effort' |
   'agent_import_path' | 'agent_env' | 'agent_kwargs'>

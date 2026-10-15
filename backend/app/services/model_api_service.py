@@ -340,6 +340,25 @@ def resolve(config_id: str, *, user_id: str, model_style: str, protocol: str | N
     return ResolvedModel(model=model, env=env, secrets=[item.api_key.strip()], notes=notes)
 
 
+def resolve_agent(config: Any, *, user_id: str) -> ResolvedModel | None:
+    """评测 agent 的模型来源：本地部署 / 平台模型配置；手填模型返回 None。
+
+    ``config`` 是 ``VerifyConfig``（提交、构建、续跑共用这一处，口径不会分叉）。
+    """
+    from . import deployment_service, resources_service
+
+    agent = config.agent_import_path.strip() or config.agent
+    protocol = agent_protocol(agent, config.agent_api_protocol)
+    style = resources_service.model_style_for(agent)
+    if config.deployment_id and config.model_api_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="本地部署和平台模型只能选一个")
+    if config.deployment_id:
+        return deployment_service.resolve_for_agent(config.deployment_id, model_style=style, protocol=protocol)
+    if config.model_api_id:
+        return resolve(config.model_api_id, user_id=user_id, model_style=style, protocol=protocol)
+    return None
+
+
 def clamp_effort(requested: str, allowed: list[str]) -> tuple[str, str]:
     """把用户选的思考模式收敛到 agent 接受的集合里。返回 (值, 说明)。"""
     if not requested:

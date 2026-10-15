@@ -1,18 +1,19 @@
-import type { ModelApi, VerifyAgentConfig } from './types'
+import type { DeploymentEndpoint, ModelApi, VerifyAgentConfig } from './types'
 
 export function agentConfig(config: VerifyAgentConfig): VerifyAgentConfig {
   return {
-    agent: config.agent, model_api_id: config.model_api_id,
+    agent: config.agent, model_api_id: config.model_api_id, deployment_id: config.deployment_id ?? '',
     agent_api_protocol: config.agent_api_protocol, model: config.model,
     reasoning_effort: config.reasoning_effort, agent_import_path: config.agent_import_path,
     agent_env: config.agent_env, agent_kwargs: config.agent_kwargs,
   }
 }
 
-export function batchJobNames(name: string, agents: VerifyAgentConfig[], models: ModelApi[]): string[] {
+export function batchJobNames(name: string, agents: VerifyAgentConfig[], models: ModelApi[], endpoints: DeploymentEndpoint[] = []): string[] {
   const used = new Set<string>()
   return agents.map(agent => {
-    const model = agent.model_api_id ? models.find(item => item.id === agent.model_api_id)?.model_id ?? '' : agent.model
+    const model = agent.deployment_id ? endpoints.find(item => item.id === agent.deployment_id)?.model ?? ''
+      : agent.model_api_id ? models.find(item => item.id === agent.model_api_id)?.model_id ?? '' : agent.model
     const suffix = ['oracle', 'nop'].includes(agent.agent) ? agent.agent : model.trim().replace(/\/+$/, '').split('/').pop() || agent.agent
     const base = `${name.trim()}-${suffix}`
     let result = base

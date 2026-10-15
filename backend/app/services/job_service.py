@@ -70,6 +70,7 @@ def create_verify_batch(payload: VerifyBatchCreate, *, owner: User) -> list[Job]
         if agent.agent in {"oracle", "nop"}:
             item.verify.model = ""
             item.verify.model_api_id = ""
+            item.verify.deployment_id = ""
         try:
             job, project_name = _prepare_job(item, owner=owner)
         except HTTPException as exc:
@@ -341,14 +342,9 @@ def _validate_verify(payload: JobCreate, *, owner: User, harbor_action: HarborAc
     if harbor_action is not None and harbor_action.mode != "rerun":
         # Recorded configuration supplies the agent for resume; regrade never runs it.
         return
-    if config.model_api_id:
-        # 提交时就把「提交人没填自己的密钥 / 已停用」挡下来，别等排队到了才失败
-        from . import resources_service
-
-        resolved = model_api_service.resolve(
-            config.model_api_id, user_id=owner.id, model_style=resources_service.model_style_for(agent),
-            protocol=model_api_service.agent_protocol(agent, config.agent_api_protocol),
-        )
+    # 提交时就把「没填自己的密钥 / 模型已停用 / 本地部署没在服务」挡下来，别等排队到了才失败
+    resolved = model_api_service.resolve_agent(config, user_id=owner.id)
+    if resolved is not None:
         try:
             validate_secret_env({**resolved.env, **config.agent_env})
         except BuildError as exc:
