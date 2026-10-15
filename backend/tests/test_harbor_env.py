@@ -155,3 +155,27 @@ EVAL_API_KEY = "${EVAL_API_KEY}"
     assert fields["EVAL_API_KEY"]["default"] is None
     assert len(fields["EVAL_API_KEY"]["tasks"]) == 2
     assert "secret-never-return" not in str(result)
+
+
+def test_environment_and_verifier_container_env_are_detected(tmp_path):
+    (tmp_path / "task.toml").write_text('''
+[verifier.env]
+GRADING_MODEL = "gpt-4o"
+[verifier.environment.env]
+OPENAI_API_KEY = "${OPENAI_API_KEY}"
+[environment.env]
+WORLD_TASK_ID = "world132"
+FIREWORKS_AI_API_KEY = "${FIREWORKS_AI_API_KEY}"
+ANTHROPIC_BASE_URL = "${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
+[solution.env]
+SOLUTION_TOKEN = "${SOLUTION_TOKEN:-}"
+''')
+    result = harbor_env_service.inspect_root(tmp_path)
+    verifier = {field["key"]: field for field in result["variables"]}
+    environment = {field["key"]: field for field in result["environment_variables"]}
+    assert verifier["OPENAI_API_KEY"]["required"] and verifier["GRADING_MODEL"]["default"] == "gpt-4o"
+    assert environment["FIREWORKS_AI_API_KEY"]["required"] and environment["FIREWORKS_AI_API_KEY"]["secret"]
+    assert environment["FIREWORKS_AI_API_KEY"]["source_variables"] == ["FIREWORKS_AI_API_KEY"]
+    assert environment["ANTHROPIC_BASE_URL"]["default"] == "https://api.anthropic.com"
+    assert environment["WORLD_TASK_ID"]["source_variables"] == []
+    assert environment["SOLUTION_TOKEN"]["tasks"] == ["./solution"]

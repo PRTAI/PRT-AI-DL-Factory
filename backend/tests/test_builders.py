@@ -437,6 +437,32 @@ def test_harbor_acknowledges_optional_task_variables_without_overriding_defaults
     assert not any(part.startswith("EVAL_API_KEY=") for part in result.command)
 
 
+def test_harbor_declares_task_environment_references(tmp_path, harbor_dataset, monkeypatch):
+    from io import StringIO
+    from dotenv import dotenv_values
+
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    for name in ("FIREWORKS_AI_API_KEY", "OPENAI_API_KEY", "MCP_URL", "ABSENT_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-host-openai-key")
+    (Path(harbor_dataset.root_path) / "demo" / "task.toml").write_text(
+        '[verifier.environment.env]\nOPENAI_API_KEY = "${OPENAI_API_KEY}"\n'
+        '[environment.env]\nWORLD_TASK_ID = "world132"\n'
+        'FIREWORKS_AI_API_KEY = "${FIREWORKS_AI_API_KEY}"\n'
+        'MCP_URL = "${MCP_URL:-http://mcp}"\nABSENT_TOKEN = "${ABSENT_TOKEN}"\n',
+    )
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(dataset_id=harbor_dataset.id, agent="nop"))
+    job.resources.env = {"FIREWORKS_AI_API_KEY": "fw-form-secret"}
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    env_path = Path(result.command[result.command.index("--env-file") + 1])
+    declared = dotenv_values(stream=StringIO(env_path.read_text()))
+    # 全部是无值声明：真实值只走进程环境
+    assert declared == {"FIREWORKS_AI_API_KEY": None, "OPENAI_API_KEY": None, "MCP_URL": None}
+    assert result.env["FIREWORKS_AI_API_KEY"] == "fw-form-secret"
+    assert result.env["OPENAI_API_KEY"] == "sk-host-openai-key"
+    assert "fw-form-secret" in result.secrets and "fw-form-secret" not in env_path.read_text()
+
+
 def test_harbor_agent_without_model_rejected(tmp_path, harbor_dataset, monkeypatch):
     _fake_harbor_bin(monkeypatch, tmp_path)
     job = _job(

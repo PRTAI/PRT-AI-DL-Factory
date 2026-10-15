@@ -866,6 +866,8 @@ export interface VerifierEnvVariable {
   default: string | null
   conflicting_defaults: boolean
   source_variable: string | null
+  /** 该变量在各 task.toml 中引用的宿主机变量（${VAR}） */
+  source_variables: string[]
 }
 
 export interface TaskTimeoutValue {
@@ -883,7 +885,10 @@ export interface TaskTimeout {
 export interface VerifierEnvInfo {
   task_timeouts?: TaskTimeout[]
   timeout_defaults?: { available: boolean; version?: string; agent?: number | null; verifier?: number | null }
+  /** [verifier.env] 与 [verifier.environment.env] */
   variables: VerifierEnvVariable[]
+  /** [environment.env] 与 [solution.env]，按任务容器从宿主机读取 */
+  environment_variables?: VerifierEnvVariable[]
   n_tasks: number
   warnings: string[]
 }

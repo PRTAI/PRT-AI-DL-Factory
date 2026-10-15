@@ -105,10 +105,76 @@ def _task_timeouts(
             for index, step in enumerate(steps)]
 
 
+def _env_table(section: Any, label: str, task: str, warnings: list[str]) -> dict[str, Any]:
+    if section is None:
+        return {}
+    if not isinstance(section, dict):
+        warnings.append(f"{task}: [{label}] 必须是表")
+        return {}
+    env = section.get("env") or {}
+    if not isinstance(env, dict):
+        warnings.append(f"{task}: [{label}.env] 必须是键值表")
+        return {}
+    return env
+
+
+def _verifier_tables(verifier: Any, label: str, task: str, warnings: list[str]) -> dict[str, Any]:
+    """[verifier.env] 进 verifier 执行环境，[verifier.environment.env] 进独立 verifier 容器；
+    两者的 ${VAR} 都从宿主机解析，表单上统一按 --verifier-env 填。"""
+    if verifier is None:
+        return {}
+    if not isinstance(verifier, dict):
+        warnings.append(f"{task}: [{label}] 必须是表")
+        return {}
+    return {**_env_table(verifier.get("environment"), f"{label}.environment", task, warnings),
+            **_env_table(verifier, label, task, warnings)}
+
+
+class _Collector:
+    def __init__(self) -> None:
+        self.fields: dict[str, dict[str, Any]] = {}
+        self.defaults: dict[str, set[str | None]] = {}
+        self.references: dict[str, set[str | None]] = {}
+
+    def add(self, scope: str, env: dict[str, Any], task: str, warnings: list[str]) -> None:
+        for key, value in env.items():
+            if not _KEY.fullmatch(key) or not isinstance(value, str):
+                warnings.append(f"{task}/task.toml 含不支持的环境变量声明")
+                continue
+            template = _TEMPLATE.fullmatch(value)
+            reference = template[1] if template else None
+            if reference and not _KEY.fullmatch(reference):
+                warnings.append(f"{task}/task.toml 含不支持的环境变量引用")
+                continue
+            default = template[2] if template else value
+            secret = bool(_SECRET.search(key) or (reference and _SECRET.search(reference)))
+            field = self.fields.setdefault(key, {
+                "key": key, "required": False, "secret": False, "tasks": [], "has_task_value": False,
+            })
+            field["required"] |= template is not None and default is None
+            field["secret"] |= secret
+            field["has_task_value"] |= bool(default)
+            if scope not in field["tasks"]:
+                field["tasks"].append(scope)
+            self.defaults.setdefault(key, set()).add(default)
+            self.references.setdefault(key, set()).add(reference)
+
+    def result(self) -> list[dict[str, Any]]:
+        for key, field in self.fields.items():
+            choices = self.defaults[key]
+            default = next(iter(choices)) if len(choices) == 1 else None
+            # 返回空默认值，但绝不把 task.toml 中的真实密钥或密钥默认值送到浏览器。
+            field["default"] = None if field["secret"] and default else default
+            field["conflicting_defaults"] = len(choices) > 1
+            field["source_variable"] = next(iter(self.references[key])) if len(self.references[key]) == 1 else None
+            field["source_variables"] = sorted(reference for reference in self.references[key] if reference)
+        return [self.fields[key] for key in sorted(self.fields)]
+
+
 def inspect_root(root: Path, *, defaults: dict[str, Any] | None = None) -> dict[str, Any]:
-    fields: dict[str, dict[str, Any]] = {}
-    env_defaults: dict[str, set[str | None]] = {}
-    references: dict[str, set[str | None]] = {}
+    """``variables``：verifier 用的变量；``environment_variables``：任务容器
+    （[environment.env]，oracle 时还有 [solution.env]）从宿主机读取的变量。"""
+    verifier_vars, environment_vars = _Collector(), _Collector()
     warnings: list[str] = []
     n_tasks = 0
     task_timeouts: list[dict[str, Any]] = []
@@ -128,47 +194,22 @@ def inspect_root(root: Path, *, defaults: dict[str, Any] | None = None) -> dict[
             continue
         n_tasks += 1
         task_timeouts.extend(_task_timeouts(data, task, warnings, defaults))
-        scopes = []
+        verifier_env = _verifier_tables(data.get("verifier"), "verifier", task, warnings)
         steps = data.get("steps")
         if isinstance(steps, list) and steps:
             for step in steps:
                 if not isinstance(step, dict):
                     continue
-                verifier = step.get("verifier") or {}
-                step_env = verifier.get("env", {}) if isinstance(verifier, dict) else None
-                if not isinstance(step_env, dict):
-                    warnings.append(f"{task}: 步骤 verifier.env 必须是键值表")
-                    continue
-                scopes.append((f"{task}/steps/{step.get('name', '?')}", {**env, **step_env}))
+                step_env = _verifier_tables(step.get("verifier"), "steps.verifier", task, warnings)
+                verifier_vars.add(f"{task}/steps/{step.get('name', '?')}", {**verifier_env, **step_env}, task, warnings)
         else:
-            scopes.append((task, env))
-        for scope, scoped_env in scopes:
-            for key, value in scoped_env.items():
-                if not _KEY.fullmatch(key) or not isinstance(value, str):
-                    warnings.append(f"{task}/task.toml 含不支持的环境变量声明")
-                    continue
-                template = _TEMPLATE.fullmatch(value)
-                reference = template[1] if template else None
-                if reference and not _KEY.fullmatch(reference):
-                    warnings.append(f"{task}/task.toml 含不支持的环境变量引用")
-                    continue
-                default = template[2] if template else value
-                secret = bool(_SECRET.search(key) or (reference and _SECRET.search(reference)))
-                field = fields.setdefault(key, {
-                    "key": key, "required": False, "secret": False, "tasks": [], "has_task_value": False,
-                })
-                field["required"] |= template is not None and default is None
-                field["secret"] |= secret
-                field["has_task_value"] |= bool(default)
-                field["tasks"].append(scope)
-                env_defaults.setdefault(key, set()).add(default)
-                references.setdefault(key, set()).add(reference)
-    for key, field in fields.items():
-        choices = env_defaults[key]
-        default = next(iter(choices)) if len(choices) == 1 else None
-        # 返回空默认值，但绝不把 task.toml 中的真实密钥或密钥默认值送到浏览器。
-        field["default"] = None if field["secret"] and default else default
-        field["conflicting_defaults"] = len(choices) > 1
-        field["source_variable"] = next(iter(references[key])) if len(references[key]) == 1 else None
-        field["source_variables"] = sorted(reference for reference in references[key] if reference)
-    return {"variables": [fields[key] for key in sorted(fields)], "n_tasks": n_tasks, "warnings": warnings, "task_timeouts": task_timeouts}
+            verifier_vars.add(task, verifier_env, task, warnings)
+        environment_vars.add(task, _env_table(data.get("environment"), "environment", task, warnings), task, warnings)
+        environment_vars.add(f"{task}/solution", _env_table(data.get("solution"), "solution", task, warnings), task, warnings)
+    return {
+        "variables": verifier_vars.result(),
+        "environment_variables": environment_vars.result(),
+        "n_tasks": n_tasks,
+        "warnings": warnings,
+        "task_timeouts": task_timeouts,
+    }

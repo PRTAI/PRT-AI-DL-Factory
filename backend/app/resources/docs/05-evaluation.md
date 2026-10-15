@@ -21,6 +21,7 @@ summary: Harbor pass@k、并发、agent 与密钥怎么配
 | Agent 环境变量 | `--agent-env` | 手填模型时自己给 API Key |
 | 详细日志 | `--debug` | 默认开：每个 trial 装了什么、跑了什么命令、为什么失败都进日志 |
 | Verifier 环境变量 | `--verifier-env` | judge 打分用的 Key，同时写入 `.env` |
+| 任务环境变量 | 宿主机环境 + `.env` 声明 | 自动读取 `[environment.env]` 引用的 `${VAR}`（如 MCP 所需 Key）；留空沿用 Agent 模型配置或服务器上的同名变量 |
 | 沙箱后端 | `--env` | `docker` / `e2b` / `daytona` / `modal` … |
 | 只跑匹配的任务 | `--include-task-name` | glob，多个用逗号分隔 |
 | 排除任务 | `--exclude-task-name` | glob |

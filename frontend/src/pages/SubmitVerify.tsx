@@ -457,6 +457,8 @@ export default function SubmitVerify() {
   const [note, setNote] = useDraftState(DRAFT, 'note', '')
   const [tags, setTags] = useDraftState(DRAFT, 'tags', '')
   const [nGpus, setNGpus] = useDraftState(DRAFT, 'nGpus', 0)
+  // 任务容器 [environment.env] 的 ${VAR}：作为宿主机环境变量（resources.env）传给 Harbor
+  const [taskEnv, setTaskEnv] = useDraftState<Record<string, string>>(DRAFT, 'taskEnv', {})
   const [config, setConfig] = useDraftState<VerifyConfig>(DRAFT, 'config', DEFAULT_VERIFY)
   const [source, setSource] = useDraftState<'uploaded' | 'registry' | 'path'>(DRAFT, 'source', 'uploaded')
   const [taskFilter, setTaskFilter] = useDraftState(DRAFT, 'taskFilter', '')
@@ -470,6 +472,7 @@ export default function SubmitVerify() {
     setNote('')
     setTags('')
     setNGpus(0)
+    setTaskEnv({})
     setConfig(DEFAULT_VERIFY)
     setExtraAgents([])
     setSource('uploaded')
@@ -490,6 +493,7 @@ export default function SubmitVerify() {
     setNote(job.note ?? '')
     setTags(job.tags.join(','))
     setNGpus(job.resources.n_gpus)
+    setTaskEnv(job.resources.env ?? {})
     setConfig({ ...DEFAULT_VERIFY, ...verify })
     setSource(verify.registry_dataset ? 'registry' : verify.tasks_path && !verify.dataset_id ? 'path' : 'uploaded')
     setTaskFilter((verify.task_names ?? []).join(','))
@@ -536,28 +540,43 @@ export default function SubmitVerify() {
     const fields = canDetectEnv ? verifierEnv.data?.variables : []
     if (!fields) return
     const keys = new Set(fields.map((field) => field.key))
-    const previousAutoKeys = autoEnvKeys.current
-    const nextAutoKeys = new Set<string>()
     setConfig((previous) => {
-      const next = { ...previous.verifier_env }
-      let changed = false
-      for (const key of previousAutoKeys) {
-        if (!keys.has(key) && next[key] === '') {
-          delete next[key]
-          changed = true
-        } else if (keys.has(key)) nextAutoKeys.add(key)
-      }
-      for (const key of keys) {
-        if (!(key in next)) {
-          next[key] = ''
-          nextAutoKeys.add(key)
-          changed = true
-        }
-      }
-      autoEnvKeys.current = nextAutoKeys
-      return changed ? { ...previous, verifier_env: next } : previous
+      const next = syncDetectedKeys(previous.verifier_env, keys, autoEnvKeys)
+      return next === previous.verifier_env ? previous : { ...previous, verifier_env: next }
     })
   }, [verifierEnv.data, verifierEnv.dataUpdatedAt, canDetectEnv, setConfig])
+  // 任务容器变量按引用的宿主机变量名（${VAR} 里的 VAR）填写；字面值不需要填
+  const taskEnvFields = React.useMemo(() => {
+    const rows = new Map<string, { required: boolean; secret: boolean; defaults: Set<string | null>; tasks: Set<string> }>()
+    for (const field of (canDetectEnv ? verifierEnv.data?.environment_variables : undefined) ?? []) {
+      for (const reference of field.source_variables ?? []) {
+        const row = rows.get(reference) ?? { required: false, secret: false, defaults: new Set(), tasks: new Set() }
+        row.required ||= field.required
+        row.secret ||= field.secret
+        row.defaults.add(field.source_variable === reference && !field.conflicting_defaults ? field.default : null)
+        field.tasks.forEach((task) => row.tasks.add(task.replace(/\/solution$/, '')))
+        rows.set(reference, row)
+      }
+    }
+    return rows
+  }, [canDetectEnv, verifierEnv.data])
+  const autoTaskEnvKeys = React.useRef(new Set<string>())
+  React.useEffect(() => {
+    if (canDetectEnv && !verifierEnv.data) return
+    setTaskEnv((previous) => syncDetectedKeys(previous, new Set(taskEnvFields.keys()), autoTaskEnvKeys))
+  }, [taskEnvFields, canDetectEnv, verifierEnv.data, setTaskEnv])
+  const taskEnvHints: Record<string, string> = {}
+  const taskEnvPlaceholders: Record<string, string> = {}
+  for (const [key, field] of taskEnvFields) {
+    const defaults = [...field.defaults]
+    const fallback = defaults.length === 1 ? defaults[0] : null
+    const hint = field.required ? '必填：留空则沿用 Agent 模型配置或服务器上的同名变量'
+      : fallback ? `可选：默认 ${fallback}，填写后覆盖`
+      : '可选：留空沿用各任务默认值'
+    taskEnvHints[key] = `${hint} · 来源 ${field.tasks.size} 个 task.toml`
+    taskEnvPlaceholders[key] = field.required ? '实际值（可留空沿用同名变量）'
+      : fallback ? `默认：${fallback}` : '可留空'
+  }
   const selectedJudge = modelApis.data?.find((model) => model.id === config.judge_model_api_id)
   const managedVerifierKeys = new Set(
     config.judge_model_api_id && !config.disable_verification
@@ -612,7 +631,7 @@ export default function SubmitVerify() {
         type: 'verify',
         project_id: projectId,
         tags: tags.split(',').map((tag) => tag.trim()).filter(Boolean),
-        resources: { n_gpus: nGpus, priority: 0, env: {} },
+        resources: { n_gpus: nGpus, priority: 0, env: cleanKv(taskEnv) },
         verify: {
           ...config,
           agent_api_protocol: agentProtocol,
@@ -970,7 +989,7 @@ export default function SubmitVerify() {
 
               <Field
                 label="Verifier 环境变量 (--verifier-env)"
-                hint="选择任务集后自动读取 task.toml 的 [verifier.env]；填写实际值，密钥不要用 1 等短值占位"
+                hint="选择任务集后自动读取 task.toml 的 [verifier.env] 与 [verifier.environment.env]；填写实际值，密钥不要用 1 等短值占位"
               >
                 <div className="mb-2 flex items-center justify-between gap-2 text-xs text-fg-muted">
                   <span>
@@ -995,6 +1014,23 @@ export default function SubmitVerify() {
                   secretNames={verifierEnv.data?.variables.filter((field) => field.secret).map((field) => field.key)}
                 />
               </Field>
+
+              {(taskEnvFields.size > 0 || Object.keys(taskEnv).length > 0) && (
+                <Field
+                  label="任务环境变量（[environment.env]）"
+                  hint="自动读取 task.toml 中任务容器引用的宿主机变量（如 MCP 服务所需的 API Key），按变量名填写实际值"
+                >
+                  <KeyValueEditor
+                    value={taskEnv}
+                    onChange={setTaskEnv}
+                    keyPlaceholder="FIREWORKS_AI_API_KEY"
+                    valuePlaceholder="实际值"
+                    rowHints={taskEnvHints}
+                    valuePlaceholders={taskEnvPlaceholders}
+                    secretNames={[...taskEnvFields].filter(([, field]) => field.secret).map(([key]) => key)}
+                  />
+                </Field>
+              )}
 
               <Advanced title="进阶：kwargs 与容器环境变量">
                 <Field label="环境 kwargs (--environment-kwarg)">
@@ -1108,6 +1144,30 @@ function splitList(value: string): string[] {
     .split(',')
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+/** 检测到的变量补成空行；不再检测到且仍为空的自动行移除，用户填过的保留。 */
+function syncDetectedKeys(
+  values: Record<string, string>, keys: Set<string>, auto: React.MutableRefObject<Set<string>>,
+): Record<string, string> {
+  const next = { ...values }
+  const nextAuto = new Set<string>()
+  let changed = false
+  for (const key of auto.current) {
+    if (!keys.has(key) && next[key] === '') {
+      delete next[key]
+      changed = true
+    } else if (keys.has(key)) nextAuto.add(key)
+  }
+  for (const key of keys) {
+    if (!(key in next)) {
+      next[key] = ''
+      nextAuto.add(key)
+      changed = true
+    }
+  }
+  auto.current = nextAuto
+  return changed ? next : values
 }
 
 function cleanKv(values: Record<string, string>): Record<string, string> {

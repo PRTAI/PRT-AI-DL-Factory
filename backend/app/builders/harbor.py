@@ -335,17 +335,19 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     secrets_map = stage_env
     optional_references: set[str] = set()
     if local_root is not None:
-        for field in harbor_env_service.inspect_root(local_root)["variables"]:
-            if field["required"]:
-                continue
+        # [environment.env] / [verifier.environment.env] 的 ${VAR} 也从宿主机解析；没在 .env
+        # 里声明的变量 Harbor 会停下来要确认，而子进程 stdin 是 /dev/null，会直接崩。
+        detected = harbor_env_service.inspect_root(local_root)
+        for field in [*detected["variables"], *detected["environment_variables"]]:
             for reference in field["source_variables"]:
                 if reference in secrets_map:
                     continue
                 inherited = job.resources.env.get(reference, os.environ.get(reference))
                 if inherited is not None:
                     secrets_map[reference] = inherited
-                else:
+                elif not field["required"]:
                     optional_references.add(reference)
+                # 必填又没有值：交给 Harbor 报「Missing Environment Variables」
         validate_secret_env(secrets_map)
     if secrets_map or optional_references:
         env_path = work_dir / ".env"
