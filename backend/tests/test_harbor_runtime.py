@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 import logging
 import os
 import subprocess
@@ -201,6 +202,7 @@ def test_runtime_preserves_native_phase_timeouts(monkeypatch):
     names = ('_compute_agent_timeout_sec', '_compute_verifier_timeout_sec',
              '_step_agent_timeout_sec', '_step_verifier_timeout_sec')
     originals = {name: getattr(Trial, name) for name in names}
+    monkeypatch.setitem(sys.modules, 'harbor.agents.installed.codex', SimpleNamespace(Codex=type('Codex', (), {})))
     monkeypatch.setitem(sys.modules, 'harbor.trial.trial', SimpleNamespace(Trial=Trial))
     monkeypatch.setitem(sys.modules, 'harbor.environments.docker.docker', SimpleNamespace(DockerEnvironment=DockerEnvironment))
     runtime.install_guards()
@@ -209,6 +211,56 @@ def test_runtime_preserves_native_phase_timeouts(monkeypatch):
     assert Trial()._compute_verifier_timeout_sec() == 10800
     assert Trial()._step_agent_timeout_sec(None) == 7200
     assert Trial()._step_verifier_timeout_sec(None) == 9600
+
+
+@pytest.mark.parametrize('grace', [None, 0, 2500])
+def test_codex_runtime_waits_for_mcp_after_native_config_merge(monkeypatch, grace):
+    pytest.importorskip('harbor', reason='需要 Harbor 原生 Codex 配置合并')
+    from harbor.agents.installed.codex import Codex
+    from harbor.models.task.config import MCPServerConfig
+
+    base = {
+        'model_provider': 'custom',
+        'model_providers': {'custom': {'base_url': 'http://model:8100/v1', 'wire_api': 'responses'}},
+        'developer_instructions': 'Use the MCP tools.',
+        'mcp_servers': {'existing': {'command': 'server', 'args': ['--readonly']}},
+    }
+    if grace is not None:
+        base['mcp_optional_startup_grace_ms'] = grace
+    before = json.dumps(base, sort_keys=True)
+    # Exercise Harbor's real merge without creating a model client or container.
+    agent = object.__new__(Codex)
+    agent._base_config = base
+    agent.mcp_servers = [MCPServerConfig(name='world', transport='http', url='http://world:8000/mcp/')]
+    monkeypatch.setattr(Codex, '_build_effective_config', runtime.wait_for_codex_mcp(Codex._build_effective_config))
+    effective = agent._build_effective_config(openai_base_url='http://override:8100/v1')
+    assert effective['mcp_optional_startup_grace_ms'] == (0 if grace is None else grace)
+    assert effective['model_provider'] == 'custom'
+    assert effective['model_providers'] == base['model_providers']
+    assert effective['developer_instructions'] == base['developer_instructions']
+    assert effective['openai_base_url'] == 'http://override:8100/v1'
+    assert effective['mcp_servers'] == {**base['mcp_servers'], 'world': {'url': 'http://world:8000/mcp/'}}
+    assert json.dumps(base, sort_keys=True) == before
+
+
+def test_codex_runtime_guard_installation_is_idempotent(monkeypatch):
+    calls = []
+    class Codex:
+        def _build_effective_config(self, openai_base_url=None):
+            calls.append(openai_base_url)
+            return {}
+    class DockerEnvironment:
+        async def exec(self, command, **kwargs):
+            return SimpleNamespace(return_code=0)
+    monkeypatch.setitem(sys.modules, 'harbor.agents.installed.codex', SimpleNamespace(Codex=Codex))
+    monkeypatch.setitem(sys.modules, 'harbor.trial.trial', SimpleNamespace(Trial=type('Trial', (), {})))
+    monkeypatch.setitem(sys.modules, 'harbor.environments.docker.docker', SimpleNamespace(DockerEnvironment=DockerEnvironment))
+    runtime.install_guards()
+    installed = Codex._build_effective_config
+    runtime.install_guards()
+    assert Codex._build_effective_config is installed
+    assert Codex()._build_effective_config('http://model/v1') == {'mcp_optional_startup_grace_ms': 0}
+    assert calls == ['http://model/v1']
 
 
 @pytest.mark.parametrize('timeout', [None, 96000])

@@ -255,9 +255,27 @@ def record_phase(original):
     return emit
 
 
+def wait_for_codex_mcp(original):
+    @functools.wraps(original)
+    def build_config(self, *args, **kwargs):
+        config = original(self, *args, **kwargs)
+        # Codex 0.155.1 otherwise gives optional MCP servers only 1 second.
+        # Zero waits for their startup results (with each server's own timeout).
+        # Apply after Harbor's merge so resumed records benefit without rewriting
+        # their config/lock/results or changing providers and MCP definitions.
+        config.setdefault("mcp_optional_startup_grace_ms", 0)
+        return config
+    build_config._prt_mcp_startup_guard = True
+    return build_config
+
+
 def install_guards() -> None:
+    from harbor.agents.installed.codex import Codex
     from harbor.trial.trial import Trial
     from harbor.environments.docker.docker import DockerEnvironment
+    original = getattr(Codex, "_build_effective_config", None)
+    if original is not None and not getattr(original, "_prt_mcp_startup_guard", False):
+        Codex._build_effective_config = wait_for_codex_mcp(original)
     if hasattr(Trial, "_emit"):
         Trial._emit = record_phase(Trial._emit)
     for name in ("_collect_buffered_output", "_collect_streamed_output"):

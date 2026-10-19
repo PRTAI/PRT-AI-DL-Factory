@@ -65,6 +65,8 @@ def _codex_config(source: str, base_url: str) -> str:
         "requires_openai_auth": False, "supports_websockets": False,
     }
     native.setdefault("web_search", "disabled")
+    # 0 表示按各服务的启动超时等待，避免默认 1 秒宽限遗漏尚未就绪的 MCP 工具。
+    native.setdefault("mcp_optional_startup_grace_ms", 0)
     try:
         return json.dumps(native, ensure_ascii=False)
     except TypeError as exc:

@@ -390,6 +390,45 @@ def test_harbor_oracle_needs_no_model(tmp_path, harbor_dataset, monkeypatch):
     assert any("oracle" in note for note in result.notes)
 
 
+@pytest.mark.parametrize("source_kind,grace_ms", [
+    ("empty", None), ("json", None), ("toml", None),
+    ("json", 1500), ("toml", 1500),
+])
+def test_harbor_codex_waits_for_mcp_startup(tmp_path, harbor_dataset, monkeypatch, source_kind, grace_ms):
+    import toml
+
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    supplied = {
+        "model_reasoning_effort": "low",
+        "developer_instructions": "Use MCP tools to read task data.",
+        "mcp_servers": {"world": {"url": "http://world:8000/mcp/", "startup_timeout_sec": 60}},
+    } if source_kind != "empty" else {}
+    if grace_ms is not None:
+        supplied["mcp_optional_startup_grace_ms"] = grace_ms
+    agent_kwargs = {}
+    if source_kind == "json":
+        agent_kwargs["config"] = json.dumps(supplied)
+    elif source_kind == "toml":
+        source = tmp_path / "codex.toml"
+        source.write_text(toml.dumps(supplied), encoding="utf-8")
+        agent_kwargs["config"] = str(source)
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(
+        dataset_id=harbor_dataset.id, agent="codex", model="Qwen3.5-4B",
+        agent_env={"OPENAI_BASE_URL": "http://llm:8100/v1"}, agent_kwargs=agent_kwargs,
+    ))
+
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    native = json.loads(next(part.removeprefix("config=") for part in result.command if part.startswith("config=")))
+
+    assert native["mcp_optional_startup_grace_ms"] == (grace_ms if grace_ms is not None else 0)
+    assert native["model_providers"]["prt"]["base_url"] == "http://llm:8100/v1"
+    assert native["model_providers"]["prt"]["wire_api"] == "responses"
+    assert all(native[key] == value for key, value in supplied.items())
+    assert job.verify.agent_kwargs == agent_kwargs
+    if source_kind == "empty":
+        assert "mcp_servers" not in native
+
+
 @pytest.mark.parametrize("value", ["1", "12", "abc", "true", "false", "null", "1.0", "123456789"])
 def test_harbor_rejects_dangerous_secret_placeholders(tmp_path, harbor_dataset, monkeypatch, value):
     _fake_harbor_bin(monkeypatch, tmp_path)

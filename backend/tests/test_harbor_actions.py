@@ -617,6 +617,80 @@ def test_whole_resume_accepts_recorded_lock_with_stage_env(client, member_header
     assert [result.trial_name for result in seen[0]._existing_trial_results] == ["demo__done"]
 
 
+def test_codex_resume_waits_for_mcp_without_rewriting_historical_configs(client, member_headers, recorded_job, monkeypatch):
+    from harbor.agents.factory import AgentFactory
+    from harbor.agents.installed.codex import Codex
+    from harbor.cli import jobs as native_cli
+    from harbor.environments.docker.docker import DockerEnvironment
+    from harbor.job import Job as NativeJob
+    from harbor.models.job.config import JobConfig
+    from harbor.models.trial.config import AgentConfig, TrialConfig
+    from harbor.trial.trial import Trial
+    from backend.app.resources import harbor_runtime
+    from unittest.mock import patch
+
+    source, root = recorded_job
+    old_config = {
+        "model_provider": "custom",
+        "model_providers": {"custom": {"base_url": "http://model:8100/v1", "wire_api": "responses"}},
+        "mcp_servers": {"world": {"url": "http://world:8000/mcp/"}},
+    }
+    source.verify.agent, source.verify.model = "codex", "gpt-4o"
+    store.jobs.put(source)
+    native = JobConfig.model_validate_json((root / "config.json").read_text())
+    native.agents = [AgentConfig(name="codex", model_name="gpt-4o", kwargs={"config": old_config})]
+    (root / "config.json").write_text(native.model_dump_json())
+    for name in ("demo__done", "demo__cancelled"):
+        trial = TrialConfig.model_validate_json((root / name / "config.json").read_text())
+        trial.agent = native.agents[0]
+        (root / name / "config.json").write_text(trial.model_dump_json())
+        record = json.loads((root / name / "result.json").read_text())
+        record["config"] = json.loads(trial.model_dump_json())
+        (root / name / "result.json").write_text(json.dumps(record))
+    original = asyncio.run(NativeJob.create(native))
+    original._init_job_lock()
+    original._write_job_lock()
+    original._close_logger_handlers()
+    before = {str(path.relative_to(root)): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+    response = _submit(client, member_headers, source)
+    assert response.status_code == 201, response.text
+    child = store.jobs.get(response.json()["id"])
+    _, _, output = runner.prepare(child)
+    target = output / child.id
+    # Restore every globally patched class method after exercising the real entry guard.
+    for cls, names in ((Codex, ("_build_effective_config",)), (Trial, ("_emit",)),
+                       (DockerEnvironment, ("exec", "_collect_buffered_output", "_collect_streamed_output"))):
+        for name in names:
+            if hasattr(cls, name):
+                monkeypatch.setattr(cls, name, getattr(cls, name))
+    harbor_runtime.install_guards()
+    seen = []
+
+    async def fake_run(job):
+        job._init_job_lock()
+        job._write_job_lock()
+        seen.append(job)
+        for trial in job._remaining_trial_configs:
+            assert trial.agent.kwargs["config"] == old_config
+            agent = AgentFactory.create_agent_from_config(trial.agent, logs_dir=target / "agent-check")
+            effective = agent._build_effective_config()
+            assert effective == {**old_config, "mcp_optional_startup_grace_ms": 0}
+        return None
+
+    with patch.object(NativeJob, "run", fake_run), patch.object(native_cli, "print_job_results_tables"), \
+            patch.object(DockerEnvironment, "preflight"):
+        native_cli.resume(job_path=target, filter_error_types=["CancelledError"])
+    assert len(seen) == 1
+    assert [result.trial_name for result in seen[0]._existing_trial_results] == ["demo__done"]
+    assert len(seen[0]._remaining_trial_configs) == 2
+    assert "mcp_optional_startup_grace_ms" not in (target / "config.json").read_text()
+    assert "mcp_optional_startup_grace_ms" not in (target / "lock.json").read_text()
+    assert "mcp_optional_startup_grace_ms" not in (target / "demo__done" / "result.json").read_text()
+    for name, content in before.items():
+        assert (root / name).read_bytes() == content
+
+
 def test_regrade_adapts_rewardkit_entry_of_selected_grading_set(client, member_headers, recorded_job):
     from backend.app.services.harbor_compat import RUNNER_NAME
     source, _ = recorded_job
