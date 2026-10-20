@@ -1,0 +1,4 @@
+interface:
+  display_name: "PRT 平台操作"
+  short_description: "通过平台地址和账号操作项目、数据、训练评测与模型部署"
+  default_prompt: "使用 $prt-platform 登录我提供的 PRT 平台，按我的要求操作项目、数据集、训练评测任务或模型部署。"

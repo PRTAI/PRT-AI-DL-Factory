@@ -1,0 +1,110 @@
+# 训练、评测与恢复
+
+先查询当前 `/resources/frameworks`、`/resources/algorithms`、`/resources/harbor-agents`、`/system/metrics`、`/system/settings`。用 `schema --model JobCreate` 及目标 `VerifyConfig` / `SFTConfig` / `RLConfig` 获取真实字段。下面是构造请求的示例骨架，不包含真实资源 ID。
+
+## 提交与状态
+
+`POST /jobs` 必须带可用的 `project_id`、`type`（`verify` / `sft` / `rl`）和相应配置块。顶层不填写任意 `framework`：SFT 固定 LLaMA-Factory，RL 在 `rl.framework` 指定，评测固定 Harbor。远程 API 评测通常 `resources.n_gpus=0`；训练和本地部署根据用户指定资源申请，不擅自扩大 GPU 数量。
+
+`pending_review` 等待管理员审核，`queued` 等待资源，`preparing` 准备中，`running` 正在执行。终态包括 `succeeded`、`failed`、`cancelled`、`rejected`。管理员提交会自动审核通过；成员可能需要审核。需要用户已授权审批且账号具备管理员权限时，`POST /jobs/{id}/review`：`{"approve":true,"comment":"..."}`；不要反复提交来跳过审批。
+
+创建返回 ID 后读取 `/jobs/{id}`，并可查询 `/jobs/{id}/command` 验证最终命令（该预览会生成任务工作文件）；路径和参数应对应请求。执行观测见 [client.md](client.md)。
+
+## Harbor
+
+```json
+{
+  "name": "实验-claude",
+  "type": "verify",
+  "project_id": "prj_ID",
+  "resources": {"n_gpus": 0},
+  "verify": {
+    "dataset_id": "ds_ID",
+    "agent": "claude-code",
+    "model_api_id": "mdl_ID",
+    "n_concurrent": 1,
+    "n_attempts": 1,
+    "environment_type": "docker"
+  }
+}
+```
+
+- 任务来源使用 `dataset_id`、`tasks_path`、`registry_dataset` 中对应的一种；不能把本地压缩包路径填入 `tasks_path`。有过滤需求时用 `task_names`、`exclude_task_names`、`n_tasks`，以服务端 Agent/catalog 能力为准。
+- `model_api_id` 复用个人供应商密钥；`deployment_id` 复用本地就绪部署；或 `model` + `agent_env` 手动接入。优先前两种，不混用。`oracle` / `nop` 不要求模型。
+- Claude Code 使用 Anthropic 协议，Codex 使用 Responses（API 字段 `agent_api_protocol` 的可选值以 schema 为准，不自行填写 `responses`）；平台按 harness 解析。不要把供应商的模型前缀擅自删除或补加。
+- RewardKit 数据集有评分时需选 `judge_model_api_id`；`judge_api_protocol` 为 `anthropic` / `openai`，`batch_judge` 控制 batched 评分。`disable_verification=true` 只用于用户要求的无评分运行，不能为绕过缺少 Judge 配置而偷偷启用。
+- `agent_kwargs` 是字符串字典；Codex 原生设置放在 `agent_kwargs.config` 的 JSON **字符串**中。当前平台补充 MCP 启动等待，但资源列表为空仍不表示没有 MCP tools。不要因一次工具选择失败就重配 MCP 或替换 harness。
+- `timeout_multiplier` 默认 1；阶段倍率为 `agent_timeout_multiplier` / `verifier_timeout_multiplier`。大倍率会把数小时任务拉长至数天，不能作为默认排障手段。
+
+多 Agent 同数据集：`POST /jobs/verify-batch`，schema 为 `VerifyBatchCreate`。
+
+```json
+{
+  "common": {
+    "name": "对照实验", "type": "verify", "project_id": "prj_ID",
+    "resources": {"n_gpus": 0},
+    "verify": {"dataset_id": "ds_ID", "n_concurrent": 1, "n_attempts": 1}
+  },
+  "agents": [
+    {"agent": "oracle"},
+    {"agent": "claude-code", "model_api_id": "mdl_CLAUDE"},
+    {"agent": "codex", "deployment_id": "dep_CODEX"}
+  ]
+}
+```
+
+返回多个 Job，名称自动追加模型名最后一段，oracle 用 Agent 名。共用 dataset/Judge/资源配置，Agent 差异放在 `agents` 列表；不要用循环提交来冒充原子批量请求。
+
+## SFT / 偏好训练
+
+```json
+{
+  "name": "SFT实验", "type": "sft", "project_id": "prj_ID",
+  "resources": {"n_gpus": 1},
+  "sft": {
+    "model_id": "实际模型ID", "model_path": "",
+    "dataset_ids": ["ds_ID"], "stage": "sft", "template": "auto",
+    "finetuning_type": "lora", "learning_rate": 0.0001,
+    "num_train_epochs": 1, "per_device_train_batch_size": 1,
+    "gradient_accumulation_steps": 8
+  }
+}
+```
+
+`model_path` 在 schema 中是必需字段；使用 `model_id` 时可提供空字符串，由服务端解析真实路径。使用服务器路径时填真实路径，不把模型 API ID 当成本地模型 ID。`stage` 可选 `sft/dpo/kto/orpo/simpo`，数据格式须匹配；用 `GET /resources/templates` 和模型 `llamafactory_template` 选模板。
+
+## RL
+
+```json
+{
+  "name": "GRPO实验", "type": "rl", "project_id": "prj_ID",
+  "resources": {"n_gpus": 1},
+  "rl": {
+    "framework": "trl", "algorithm": "grpo",
+    "model_id": "实际模型ID", "model_path": "", "dataset_id": "ds_ID",
+    "finetuning_type": "lora", "learning_rate": 0.000001,
+    "train_batch_size": 8, "mini_batch_size": 8,
+    "rollout": {"n": 4, "tensor_model_parallel_size": 1}
+  }
+}
+```
+
+RL 支持哪些算法以当前 resources/catalog 和服务端校验为准。Harbor 题包目前走 TRL，`harbor.enabled` 会由服务端设置；verl 使用 parquet。组相对算法要求 rollout.n 至少 2，张量并行和资源数须兼容。框架、reward 函数、数据字段和内存需求不能仅靠登录信息推断；缺少关键实验参数时向用户确认。
+
+## 重跑、评分、恢复与停止
+
+操作前读取目标状态；源任务须已结束，不能自动取消正在执行的任务来满足条件。
+
+| 目标 | 接口与 JSON | 行为 |
+| --- | --- | --- |
+| 整任务按原配置重跑 | `POST /jobs/{id}/resubmit`，无 body | 创建新任务 |
+| 整任务恢复 / 重新评分 | 先 `GET /jobs/{id}/harbor-actions`，再 `POST` 同路径 `{"mode":"resume"}` 或 `{"mode":"regrade"}` | 使用记录副本创建派生任务 |
+| 选中单条/多条原地重跑 | `POST /jobs/{id}/trial-actions`，`{"mode":"rerun","trial_names":["真实trial名"]}` | 在原任务内执行，保留名字，返回列表中的原 Job |
+| 选中条目恢复 / 评分 | 同上，将 mode 改为 `resume` / `regrade` | 创建对应派生任务 |
+| 批量整任务重跑 | `POST /jobs/batch-resubmit`，`{"job_ids":["job_ID"]}` | 返回成功与失败项，逐项核对 |
+| 改已结束任务名称 | `PATCH /jobs/{id}/name`，`{"name":"新名"}` | 使用 Job ID，不改变产物目录 |
+| 终止 | `POST /jobs/{id}/cancel`，`{"reason":"用户要求"}` | 需要用户指令覆盖终止动作 |
+
+`trial_names` 来自 `/jobs/{id}/trials` 的 `trial_name`；未执行的计划条目可有 `selection_id`，只有服务端确实返回时才使用。评分需要有效记录/产物及评分题包，不能把任意文件夹直接当成完整 Harbor job。`resume` 保留已完成 trial，未完成 trial 从头执行；**不承诺继续同一个 Agent 会话或容器**。不要用 oracle/nop 伪装直接评分。
+
+删除 Job 用 `DELETE /jobs/{id}`，`purge_outputs=true` 会清理产物，应明确覆盖用户的删除范围。批量导出 `POST /jobs/batch-export`，body 为 `job_ids`，使用 `--output` 下载 ZIP。
