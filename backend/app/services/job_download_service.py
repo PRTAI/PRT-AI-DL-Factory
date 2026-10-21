@@ -1,4 +1,4 @@
-"""Export a job's configuration, working files and outputs as a temporary ZIP."""
+"""Export native Harbor records or training configuration and outputs as a ZIP."""
 
 from __future__ import annotations
 
@@ -10,11 +10,13 @@ import zipfile
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from fastapi import HTTPException
+
 from ..config import settings
-from ..models import Job, User, utcnow
+from ..models import Job, JobType, User, utcnow
 from ..redaction import SECRET_KEY as _SECRET_KEY, secret_values as _secret_values, mask_values as _mask
 from ..store import store
-from . import api_key_service, audit_service, job_service, runner
+from . import api_key_service, audit_service, job_service, metrics_parser, runner
 
 _BINARY_SUFFIXES = {".bin", ".pt", ".pth", ".ckpt", ".safetensors", ".zip", ".gz", ".png", ".jpg", ".jpeg", ".pdf", ".docx", ".xlsx", ".parquet", ".npy", ".npz"}
 _PRIVATE_NAMES = {"secrets.json", "credentials.json", "auth.json"}
@@ -80,10 +82,21 @@ def _write_job(archive: zipfile.ZipFile, job: Job, *, prefix: str = "") -> str:
     payload = job.model_dump(mode="json")
     secrets = _secrets_for(job, payload, work)
     project = store.projects.get(job.project_id)
-    payload["project_name"] = project.name if project else ""
-    payload["exported_at"] = utcnow().isoformat()
-    archive.writestr(f"{prefix}job.json", json.dumps(_mask(payload, secrets), ensure_ascii=False, indent=2))
-    for directory, root in (("work", work), ("outputs", output)):
+    if job.type == JobType.VERIFY:
+        native = output / job.id
+        if not native.is_dir():
+            native = output if (output / "config.json").is_file() else metrics_parser.harbor_job_dir(output, job.id)
+        if (output.is_symlink() or native is None or native.is_symlink()
+                or not native.resolve().is_relative_to(output.resolve())
+                or not (native / "config.json").is_file()):
+            raise HTTPException(409, "尚无可导出的 Harbor 原始任务记录")
+        directories = (("", native),)
+    else:
+        payload["project_name"] = project.name if project else ""
+        payload["exported_at"] = utcnow().isoformat()
+        archive.writestr(f"{prefix}job.json", json.dumps(_mask(payload, secrets), ensure_ascii=False, indent=2))
+        directories = (("work/", work), ("outputs/", output))
+    for directory, root in directories:
         if root.is_symlink() or not root.is_dir():
             continue
         for path in sorted(root.rglob("*")):
@@ -96,7 +109,7 @@ def _write_job(archive: zipfile.ZipFile, job: Job, *, prefix: str = "") -> str:
                 or not path.is_file()
             ):
                 continue
-            destination = f"{prefix}{directory}/{relative.as_posix()}"
+            destination = f"{prefix}{directory}{relative.as_posix()}"
             try:
                 if path.suffix.lower() in _BINARY_SUFFIXES:
                     archive.write(path, destination, compress_type=zipfile.ZIP_STORED)

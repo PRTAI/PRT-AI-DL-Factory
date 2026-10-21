@@ -133,8 +133,68 @@ def test_export_redacts_injected_model_key(client, member_headers, tmp_path):
     downloaded = client.get(f"/api/jobs/{job.id}/export", headers=member_headers)
     assert downloaded.status_code == 200
     with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
-        assert key.encode() not in archive.read("outputs/config.json")
-        assert extra_token.encode() not in archive.read("outputs/config.json")
+        assert archive.namelist() == ["config.json"]
+        assert key.encode() not in archive.read("config.json")
+        assert extra_token.encode() not in archive.read("config.json")
+
+
+@pytest.mark.parametrize("layout", ["nested", "flat", "legacy-name"])
+@pytest.mark.parametrize("batch", [False, True])
+def test_verify_export_contains_only_native_harbor_files(client, member_headers, tmp_path, layout, batch):
+    response = client.post("/api/jobs", headers=member_headers, json={
+        "name": "native-harbor", "type": "verify", "project_id": project_id(),
+        "resources": {"n_gpus": 0}, "verify": {"agent": "oracle", "tasks_path": str(tmp_path)},
+    })
+    assert response.status_code == 201, response.text
+    job = store.jobs.get(response.json()["id"])
+    work, output = runner.work_dir_for(job), runner.output_dir_for(job)
+    work.mkdir(parents=True)
+    (work / "stdout.log").write_text("server log")
+    (work / "run.sh").write_text("platform script")
+    (work / ".env").write_text("API_KEY=old-runtime-secret")
+    native = output if layout == "flat" else output / (job.id if layout == "nested" else "original-job")
+    native.mkdir(parents=True)
+    files = {
+        "config.json": b'{"agents": []}', "result.json": b'{"stats": {}}',
+        "job.log": b"native job log", "trial/agent/trajectory.json": b'{"steps": []}',
+        "trial/verifier/reward.json": b'{"reward": 1}',
+        "trial/agent/agent.log": b"key=old-runtime-secret",
+        "trial/artifacts/report.pdf": b"%PDF-test",
+    }
+    for name, content in files.items():
+        path = native / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    (native / "credentials.json").write_text("private")
+    (native / "outside").symlink_to(work, target_is_directory=True)
+    if layout != "flat":
+        (output / "server.log").write_text("not native")
+        (output / "workspace").mkdir()
+        (output / "workspace" / "unrelated.txt").write_text("not native")
+    before = set(settings.downloads_dir.glob("prt-job-export-*.zip"))
+    downloaded = (client.post("/api/jobs/batch-export", headers=member_headers, json={"job_ids": [job.id]})
+                  if batch else client.get(f"/api/jobs/{job.id}/export", headers=member_headers))
+    assert downloaded.status_code == 200, downloaded.text
+    prefix = f"{job.id}/" if batch else ""
+    with zipfile.ZipFile(io.BytesIO(downloaded.content)) as archive:
+        assert set(archive.namelist()) == {prefix + name for name in files}
+        for name, content in files.items():
+            assert archive.read(prefix + name) == content.replace(b"old-runtime-secret", b"***")
+            assert (native / name).read_bytes() == content
+    assert set(settings.downloads_dir.glob("prt-job-export-*.zip")) == before
+
+
+def test_verify_export_without_native_records_cleans_archive(client, member_headers, tmp_path):
+    response = client.post("/api/jobs", headers=member_headers, json={
+        "name": "unstarted-harbor", "type": "verify", "project_id": project_id(),
+        "resources": {"n_gpus": 0}, "verify": {"agent": "oracle", "tasks_path": str(tmp_path)},
+    })
+    assert response.status_code == 201, response.text
+    job_id = response.json()["id"]
+    before = set(settings.downloads_dir.glob("prt-job-export-*.zip"))
+    assert client.get(f"/api/jobs/{job_id}/export", headers=member_headers).status_code == 409
+    assert client.post("/api/jobs/batch-export", headers=member_headers, json={"job_ids": [job_id]}).status_code == 409
+    assert set(settings.downloads_dir.glob("prt-job-export-*.zip")) == before
 
 
 def test_export_preserves_binary_files_and_skips_symlinks(client, member_headers, export_job, tmp_path):

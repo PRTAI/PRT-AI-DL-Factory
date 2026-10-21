@@ -317,7 +317,7 @@ export default function Jobs() {
         {selectedVisible.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-border bg-bg-elevated px-3 py-2 text-xs text-fg-muted">
           <span className="flex items-center gap-1">
             已选 {selectedVisible.length} 项 · {selectedResubmittable.length} 项可重跑
-            <HelpTip>导出：配置、日志、指标与当前产物打包为一个 ZIP。重跑：仅限已结束且有操作权限的任务。全选仅作用于当前列表。</HelpTip>
+            <HelpTip>导出：评测任务仅打包 Harbor 原始记录；训练任务包含配置、日志、指标与产物。重跑：仅限已结束且有操作权限的任务。全选仅作用于当前列表。</HelpTip>
           </span>
           <Button size="sm" variant="primary" loading={batchDownload.isPending} disabled={selectionBusy} onClick={() => batchDownload.mutate([...selectedVisible])}>批量导出</Button>
           <Button size="sm" variant="outline" loading={batch.isPending} disabled={!selectedResubmittable.length || selectionBusy} onClick={() => { setBatchResults(null); batch.mutate([...selectedResubmittable]) }}>批量重跑</Button>
@@ -399,7 +399,7 @@ export default function Jobs() {
                     </Td>
                     <Td>
                       <div className="flex items-center gap-1">
-                        <Tooltip label="导出下载（配置、日志、指标与当前产物 ZIP）">
+                        <Tooltip label={job.type === 'verify' ? '导出 Harbor 原始记录（ZIP）' : '导出下载（配置、日志、指标与当前产物 ZIP）'}>
                           <Button
                             variant="ghost"
                             size="sm"
