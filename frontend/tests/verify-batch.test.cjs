@@ -51,3 +51,13 @@ test('adding agents works without crypto in a LAN HTTP context and preserves exi
   const readded = appendVerifyAgent(removed, config)
   assert.equal(new Set(readded.map(row => row.id)).size, 2)
 })
+
+test('bridge mode is per agent and requires Responses without changing native Claude', () => {
+  const { agentWireProtocol } = context.exports
+  assert.equal(agentWireProtocol({ agent: 'claude-code', use_openai_bridge: true }), 'responses')
+  assert.equal(agentWireProtocol({ agent: 'claude-code' }), 'anthropic')
+  assert.equal(agentWireProtocol({ agent: 'codex' }), 'responses')
+  const rows = context.exports.appendVerifyAgent([], { agent: 'claude-code', use_openai_bridge: true, agent_env: {}, agent_kwargs: {} })
+  assert.equal(rows[0].config.use_openai_bridge, true)
+  assert.equal(agentConfig({ agent: 'oracle', agent_env: {}, agent_kwargs: {} }).use_openai_bridge, false)
+})

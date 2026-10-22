@@ -96,10 +96,10 @@ def _component(job: Job, config: PricingSettings, phase: str) -> PriceSnapshot:
         platform = store.model_platforms.get(item.platform_id)
         if platform:
             vendor = platform.vendor
-            protocol = (v.agent_api_protocol or ("anthropic" if v.agent == "claude-code" else "responses")) if phase == "agent" else v.judge_api_protocol
+            protocol = ("responses" if v.use_openai_bridge else v.agent_api_protocol or ("anthropic" if v.agent == "claude-code" else "responses")) if phase == "agent" else v.judge_api_protocol
             url = platform.endpoints.get(protocol) or platform.endpoints.get("openai") or url
     env = {**(item.extra_env if item and phase == "agent" else {}), **(v.agent_env if phase == "agent" else v.verifier_env)}
-    keys = ("JUDGE_BASE_URL",) if phase == "judge" else ("ANTHROPIC_BASE_URL",) if v.agent == "claude-code" else ("OPENAI_BASE_URL", "OPENAI_API_BASE", "DASHSCOPE_BASE_URL")
+    keys = ("JUDGE_BASE_URL",) if phase == "judge" else ("ANTHROPIC_BASE_URL",) if v.agent == "claude-code" and not v.use_openai_bridge else ("OPENAI_BASE_URL", "OPENAI_API_BASE", "DASHSCOPE_BASE_URL")
     override_url = next((env[key] for key in keys if env.get(key)), "")
     if override_url and override_url.rstrip("/") != url.rstrip("/"):
         url = override_url
@@ -118,7 +118,7 @@ def _component(job: Job, config: PricingSettings, phase: str) -> PriceSnapshot:
         platform = store.model_platforms.get(item.platform_id)
         if platform and platform.access_mode != "standard" and not (price and price.vendor.startswith("platform:")):
             price = None
-    cache_mode = "explicit" if phase == "agent" and v.agent == "claude-code" else "implicit" if phase == "agent" and v.agent == "codex" else "unknown"
+    cache_mode = "explicit" if phase == "agent" and v.agent == "claude-code" and not v.use_openai_bridge else "implicit" if phase == "agent" and (v.agent == "codex" or v.use_openai_bridge) else "unknown"
     return PriceSnapshot(model=model, vendor=vendor, region=region, price=price, cache_mode=cache_mode)
 
 

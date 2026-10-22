@@ -126,8 +126,10 @@ def public(item: ModelApiConfig, user_id: str | None = None) -> ModelApiPublic:
     return result
 
 
-def agent_protocol(agent: str, requested: str = "") -> str | None:
-    forced = "anthropic" if agent == "claude-code" else "responses" if agent == "codex" else None
+def agent_protocol(agent: str, requested: str = "", *, use_openai_bridge: bool = False) -> str | None:
+    if use_openai_bridge and agent != "claude-code":
+        raise HTTPException(400, "OpenAI Bridge 仅支持标准 claude-code Agent")
+    forced = "responses" if use_openai_bridge or agent == "codex" else "anthropic" if agent == "claude-code" else None
     if forced and requested and requested != ("openai" if forced == "responses" else forced):
         raise HTTPException(400, f"{agent} 必须使用 {'OpenAI' if forced == 'responses' else 'Anthropic'} 接口")
     return forced or requested or None
@@ -348,14 +350,21 @@ def resolve_agent(config: Any, *, user_id: str) -> ResolvedModel | None:
     from . import deployment_service, resources_service
 
     agent = config.agent_import_path.strip() or config.agent
-    protocol = agent_protocol(agent, config.agent_api_protocol)
+    bridge = bool(getattr(config, "use_openai_bridge", False))
+    protocol = agent_protocol(agent, config.agent_api_protocol, use_openai_bridge=bridge)
     style = resources_service.model_style_for(agent)
     if config.deployment_id and config.model_api_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="本地部署和平台模型只能选一个")
+    resolved = None
     if config.deployment_id:
-        return deployment_service.resolve_for_agent(config.deployment_id, model_style=style, protocol=protocol)
-    if config.model_api_id:
-        return resolve(config.model_api_id, user_id=user_id, model_style=style, protocol=protocol)
+        resolved = deployment_service.resolve_for_agent(config.deployment_id, model_style=style, protocol=protocol)
+    elif config.model_api_id:
+        resolved = resolve(config.model_api_id, user_id=user_id, model_style=style, protocol=protocol)
+    if bridge:
+        from . import cc_bridge_service
+        return cc_bridge_service.resolve(config, resolved)
+    if resolved:
+        return resolved
     return None
 
 

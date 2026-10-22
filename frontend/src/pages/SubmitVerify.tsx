@@ -10,7 +10,7 @@ import type { ApiProtocol, Dataset, DeploymentEndpoint, ModelApi, RegistryDatase
 import { useAuth, useProject } from '@/lib/store'
 import { clearDraft, useDraftState } from '@/lib/draft'
 import { cn } from '@/lib/utils'
-import { agentConfig, appendVerifyAgent, batchJobNames } from '@/lib/verify-batch'
+import { agentConfig, agentWireProtocol as wireProtocol, appendVerifyAgent, batchJobNames } from '@/lib/verify-batch'
 import { DEPLOYMENT_PROTOCOL_LABELS, supportsProtocol } from '@/lib/model-api'
 import {
   Badge,
@@ -41,6 +41,7 @@ const DEFAULT_VERIFY: VerifyConfig = {
   model_api_id: '',
   deployment_id: '',
   agent_api_protocol: '',
+  use_openai_bridge: false,
   model: '',
   reasoning_effort: '',
   agent_import_path: '',
@@ -274,8 +275,8 @@ function AgentEditor({ config, patch, title, onRemove }: {
 }) {
   const agents = useQuery({ queryKey: ['harbor-agents'], queryFn: () => api.harborAgents() })
   const agentInfo = agents.data?.find(item => item.name === config.agent)
-  const agentProtocol = config.agent === 'claude-code' ? 'anthropic' : config.agent === 'codex' ? 'openai' : config.agent_api_protocol || 'openai'
-  const agentWireProtocol: ApiProtocol = config.agent === 'codex' ? 'responses' : agentProtocol
+  const agentWireProtocol = wireProtocol(config)
+  const agentProtocol = agentWireProtocol === 'responses' ? 'openai' : agentWireProtocol
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
   const [modelSource, setModelSource] = React.useState<'api' | 'local'>(config.deployment_id ? 'local' : 'api')
   React.useEffect(() => {
@@ -289,11 +290,11 @@ function AgentEditor({ config, patch, title, onRemove }: {
     if (!agentInfo || config.model_api_id || config.deployment_id) return
     const next = { ...config.agent_env }
     let changed = false
-    for (const key of agentInfo.env_keys) {
+    for (const key of (config.use_openai_bridge ? ['OPENAI_API_KEY', 'OPENAI_BASE_URL'] : agentInfo.env_keys)) {
       if (!(key in next)) { next[key] = ''; changed = true }
     }
     if (changed) patch({ agent_env: next })
-  }, [agentInfo, config.model_api_id, config.deployment_id])
+  }, [agentInfo, config.model_api_id, config.deployment_id, config.use_openai_bridge])
   return (
     <Card>
       <CardHeader title={title} icon={<Bot className="h-4 w-4" aria-hidden />}
@@ -311,6 +312,13 @@ function AgentEditor({ config, patch, title, onRemove }: {
           />
         </Field>
 
+        {config.agent === 'claude-code' && <ToggleRow
+          label="使用 OpenAI Bridge"
+          hint="让 Claude Code 使用 GPT 等支持 OpenAI Responses 的模型；容器内自动启动 bridge，工具由 Claude Code 执行。首次运行需要联网安装依赖。"
+          checked={config.use_openai_bridge ?? false}
+          onCheckedChange={(checked) => patch({ use_openai_bridge: checked, agent_api_protocol: checked ? 'openai' : 'anthropic', model_api_id: '', deployment_id: '', model: '', agent_env: Object.fromEntries(Object.entries(config.agent_env).filter(([key]) => !['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'OPENAI_API_BASE'].includes(key))) })}
+        />}
+
         {agentInfo?.needs_model && (
           <>
             <Field label="模型来源" required hint="本地部署：平台「模型部署」里用 vLLM 起的服务">
@@ -326,7 +334,7 @@ function AgentEditor({ config, patch, title, onRemove }: {
             {modelSource === 'local' ? (
               <LocalDeploymentPicker
                 value={config.deployment_id ?? ''}
-                required={config.agent === 'codex' ? 'responses' : config.agent === 'claude-code' ? 'anthropic' : undefined}
+                required={config.agent === 'codex' || config.use_openai_bridge ? 'responses' : config.agent === 'claude-code' ? 'anthropic' : undefined}
                 onChange={(endpoint) => patch({
                   deployment_id: endpoint?.id ?? '', model_api_id: '', model: '',
                   ...(endpoint && config.agent !== 'codex' && config.agent !== 'claude-code'
@@ -367,7 +375,7 @@ function AgentEditor({ config, patch, title, onRemove }: {
               <Field
                 label="手动指定模型"
                 required
-                hint="litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model；密钥填在下方环境变量里"
+                hint={config.use_openai_bridge ? '填写上游模型 ID，如 gpt-6-astra 或 openai/gpt-6.1-sol-codex；下方填写 OPENAI_API_KEY、OPENAI_BASE_URL，上游必须支持 Responses。' : 'litellm 格式，例如 anthropic/claude-sonnet-4-5、openai/gpt-5.1、hosted_vllm/local-model；密钥填在下方环境变量里'}
               >
                 <Input
                   value={config.model}
@@ -506,8 +514,8 @@ export default function SubmitVerify() {
 
   const patch = (values: Partial<VerifyConfig>) => setConfig((previous) => ({ ...previous, ...values }))
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
-  const agentProtocol = config.agent === 'claude-code' ? 'anthropic' : config.agent === 'codex' ? 'openai' : config.agent_api_protocol || 'openai'
-  const agentWireProtocol: ApiProtocol = config.agent === 'codex' ? 'responses' : agentProtocol
+  const agentWireProtocol = wireProtocol(config)
+  const agentProtocol = agentWireProtocol === 'responses' ? 'openai' : agentWireProtocol
   React.useEffect(() => {
     if (!modelApis.data) return
     setConfig((prev) => {
@@ -682,7 +690,7 @@ export default function SubmitVerify() {
       const info = agents.data?.find(agent => agent.name === row.agent)
       if (!['oracle', 'nop'].includes(row.agent) && !row.model.trim() && !row.model_api_id && !row.deployment_id) out.push(`第 ${index + 1} 项 ${row.agent} 需要选择或填写模型`)
       if (!row.model_api_id && !row.deployment_id) {
-        const missing = (info?.env_keys ?? []).filter(key => !row.agent_env[key]?.trim())
+        const missing = (row.use_openai_bridge ? ['OPENAI_API_KEY'] : info?.env_keys ?? []).filter(key => !row.agent_env[key]?.trim())
         if (missing.length) out.push(`第 ${index + 1} 项请填写 ${missing.join(' / ')}（或选择平台模型）`)
       }
       if (extraAgents.length && batchNames[index].length > 120) out.push(`第 ${index + 1} 项任务名称超过 120 字符，请缩短名称`)

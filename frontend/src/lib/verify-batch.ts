@@ -4,9 +4,16 @@ export function agentConfig(config: VerifyAgentConfig): VerifyAgentConfig {
   return {
     agent: config.agent, model_api_id: config.model_api_id, deployment_id: config.deployment_id ?? '',
     agent_api_protocol: config.agent_api_protocol, model: config.model,
+    use_openai_bridge: config.use_openai_bridge ?? false,
     reasoning_effort: config.reasoning_effort, agent_import_path: config.agent_import_path,
     agent_env: config.agent_env, agent_kwargs: config.agent_kwargs,
   }
+}
+
+export function agentWireProtocol(config: VerifyAgentConfig): 'openai' | 'anthropic' | 'responses' {
+  if (config.use_openai_bridge || config.agent === 'codex') return 'responses'
+  if (config.agent === 'claude-code') return 'anthropic'
+  return config.agent_api_protocol || 'openai'
 }
 
 export function batchJobNames(name: string, agents: VerifyAgentConfig[], models: ModelApi[], endpoints: DeploymentEndpoint[] = []): string[] {

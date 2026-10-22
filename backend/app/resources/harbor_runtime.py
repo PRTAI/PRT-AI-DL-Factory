@@ -270,6 +270,9 @@ def wait_for_codex_mcp(original):
 
 
 def install_guards() -> None:
+    if Path(__file__).with_name("prt_cc_bridge_runtime.py").is_file():
+        from prt_cc_bridge_runtime import install
+        install()
     from harbor.agents.installed.codex import Codex
     from harbor.trial.trial import Trial
     from harbor.environments.docker.docker import DockerEnvironment

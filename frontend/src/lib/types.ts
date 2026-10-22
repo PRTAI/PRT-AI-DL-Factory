@@ -284,6 +284,7 @@ export interface VerifyConfig {
   /** 平台里正在服务的本地部署；与 model_api_id 二选一，后端注入地址与密钥 */
   deployment_id?: string
   agent_api_protocol?: '' | 'openai' | 'anthropic'
+  use_openai_bridge?: boolean
   model: string
   /** 思考模式；空 = 不下发，交给 agent 默认 */
   reasoning_effort: '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -993,7 +994,7 @@ export interface ReviewTask {
 
 export type VerifyAgentConfig = Pick<VerifyConfig,
   'agent' | 'model_api_id' | 'deployment_id' | 'agent_api_protocol' | 'model' | 'reasoning_effort' |
-  'agent_import_path' | 'agent_env' | 'agent_kwargs'>
+  'agent_import_path' | 'agent_env' | 'agent_kwargs' | 'use_openai_bridge'>
 
 export interface RateTier {
   max_input?: number | null

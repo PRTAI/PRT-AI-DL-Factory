@@ -234,6 +234,7 @@ class VerifyConfig(Base):
     model_api_id: str = ""
     deployment_id: str = ""
     agent_api_protocol: Literal["", "openai", "anthropic"] = ""
+    use_openai_bridge: bool = False
     model: str = ""
     # 思考模式：留空表示不下发，交给 agent 自己的默认值。各 agent 接受的集合不同，
     # builder 会收敛到该 agent 支持的最近一档并在 notes 里说明。
@@ -471,6 +472,7 @@ class VerifyAgentConfig(Base):
     model_api_id: str = ""
     deployment_id: str = ""
     agent_api_protocol: Literal["", "openai", "anthropic"] = ""
+    use_openai_bridge: bool = False
     model: str = ""
     reasoning_effort: Literal["", "low", "medium", "high", "xhigh", "max"] = ""
     agent_import_path: str = ""

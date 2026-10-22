@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ..config import settings
 from ..models import Job
-from ..services import harbor_compat, model_api_service
+from ..services import cc_bridge_service, harbor_compat, model_api_service
 from ..services.harbor_action_service import selected_config, snapshot_dir, verifier_path
 from .base import BuildError, BuildResult, kv_flags
 from .harbor import collect_secrets, resolve_agent_model, stage_environment, resolve_harbor_bin, resolve_harbor_python, validate_secret_env
@@ -85,7 +85,8 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
     return BuildResult(
         command=[resolve_harbor_python(binary), "-u", str(work_dir / runtime), *argv],
         cwd=str(work_dir), output_dir=str(output_dir), env={"PYTHONUNBUFFERED": "1", **env},
-        files={runtime: (settings.resources_dir / runtime).read_text(encoding="utf-8"), **extra_files},
+        files={runtime: (settings.resources_dir / runtime).read_text(encoding="utf-8"), **extra_files,
+               **cc_bridge_service.runtime_files(config)},
         notes=notes, secrets=secrets,
     )
 
@@ -124,7 +125,8 @@ def build_inplace_rerun(job: Job, work_dir: Path, output_dir: Path) -> BuildResu
         cwd=str(work_dir), output_dir=str(output_dir), env=env, secrets=secrets,
         files={script: (settings.resources_dir / script).read_text(encoding="utf-8"),
                "harbor_runtime.py": (settings.resources_dir / "harbor_runtime.py").read_text(encoding="utf-8"),
-               "inplace-rerun.json": json.dumps(plan, ensure_ascii=False)},
+               "inplace-rerun.json": json.dumps(plan, ensure_ascii=False),
+               **cc_bridge_service.runtime_files(job.verify)},
         notes=[f"在原任务内重跑选中的 {len(trials)} 条数据，保留 trial 名称和未选中记录",
                "执行前备份选中记录；完成后重算原任务评分汇总"],
     )

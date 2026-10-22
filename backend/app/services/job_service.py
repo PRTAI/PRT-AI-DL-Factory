@@ -338,7 +338,7 @@ def _validate_verify(payload: JobCreate, *, owner: User, harbor_action: HarborAc
             raise HTTPException(400, f"无法启用 Batch Judge: {exc}") from exc
     from . import model_api_service
     agent = config.agent_import_path.strip() or config.agent
-    model_api_service.agent_protocol(agent, config.agent_api_protocol)
+    model_api_service.agent_protocol(agent, config.agent_api_protocol, use_openai_bridge=config.use_openai_bridge)
     if config.judge_model_api_id and not config.disable_verification:
         model_api_service.require_ready(config.judge_model_api_id, config.judge_api_protocol, user_id=owner.id)
     if harbor_action is not None and harbor_action.mode != "rerun":

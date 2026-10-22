@@ -333,6 +333,7 @@ export default function JobDetail() {
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <StatusBadge status={liveStatus} />
           <JobTypeBadge type={data.type} framework={data.framework} />
+          {data.verify?.use_openai_bridge && <Badge tone="info">OpenAI Bridge</Badge>}
           {data.harbor_action?.trial_name && <Badge>{data.harbor_action.trial_name}</Badge>}
           {data.harbor_action && <Badge tone="info">{{ rerun: '选中数据重跑', resume: '中断恢复', regrade: '重新判分' }[data.harbor_action.mode]}</Badge>}
           {data.tags.map((tag) => (

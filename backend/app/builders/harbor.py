@@ -29,7 +29,7 @@ from fastapi import HTTPException
 
 from ..config import settings
 from ..models import DatasetKind, Job, VerifyConfig
-from ..services import harbor_compat, harbor_env_service, model_api_service, resources_service
+from ..services import cc_bridge_service, harbor_compat, harbor_env_service, model_api_service, resources_service
 from ..store import store
 from .base import BuildError, BuildResult, kv_flags
 
@@ -389,7 +389,8 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         command=command,
         cwd=str(work_dir),
         env=env,
-        files={runtime_file: (settings.resources_dir / runtime_file).read_text(encoding="utf-8")},
+        files={runtime_file: (settings.resources_dir / runtime_file).read_text(encoding="utf-8"),
+               **cc_bridge_service.runtime_files(config)},
         output_dir=str(output_dir),
         notes=notes,
         secrets=secrets,
