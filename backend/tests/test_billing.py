@@ -1,0 +1,415 @@
+"""Money regressions: exact tariffs, cache semantics, copied sessions and visibility."""
+
+import json
+import shutil
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from backend.app.models import Framework, Job, JobStatus, JobType, VerifyConfig
+from backend.app.models.billing import BillingArchive, BillingSnapshot, ModelPrice, PriceSnapshot, PricingSettings, RateTier, UsageCharge
+from backend.app.models.job import HarborAction
+from backend.app.services import billing_service as billing
+from backend.app.store import store
+from backend.app.store.json_store import JsonCollection, JsonDocument
+from .conftest import project_id, user_id_of
+
+
+@pytest.fixture(autouse=True)
+def isolated_billing(tmp_path, monkeypatch):
+    monkeypatch.setattr(store, 'usage_charges', JsonCollection(tmp_path / 'ledger.json', UsageCharge))
+    monkeypatch.setattr(store, 'billing_archives', JsonCollection(tmp_path / 'archived.json', BillingArchive))
+    monkeypatch.setattr(store, 'pricing_doc', JsonDocument(tmp_path / 'pricing.json', PricingSettings))
+    monkeypatch.setattr(store, 'jobs', JsonCollection(tmp_path / 'jobs.json', Job))
+    billing._REFRESHED.clear()
+
+
+def component(vendor, model):
+    price = next(p for p in billing.pricing().prices if p.vendor == vendor and billing._matches(p, model))
+    return PriceSnapshot(vendor=vendor, model=model, price=price)
+
+
+def snapshot(agent=None, judge=None):
+    return BillingSnapshot(usd_cny=6.7195, exchange_date='2026-10-22', exchange_source='test',
+                           agent=agent or component('atlascloud', 'openai/gpt-6.1-sol-codex'),
+                           judge=judge or PriceSnapshot(free=True))
+
+
+def job(tmp_path, name='one', snap=None, **kwargs):
+    result = Job(name=name, type=JobType.VERIFY, framework=Framework.HARBOR, status=JobStatus.FAILED,
+                 owner_id=user_id_of('dev@prt.local'), owner_email='dev@prt.local', project_id=project_id(),
+                 verify=VerifyConfig(agent='codex', disable_verification=True), **kwargs)
+    result.billing.snapshot = snap or snapshot()
+    result.runtime.output_dir = str(tmp_path / name / 'outputs')
+    result.runtime.work_dir = str(tmp_path / name / 'work')
+    root = Path(result.runtime.output_dir) / result.id
+    root.mkdir(parents=True)
+    (root / 'config.json').write_text('{}')
+    store.jobs.put(result)
+    return result, root
+
+
+def trajectory(root, session='s1', phase='agent', model='openai/gpt-6.1-sol-codex', prompt=100000, output=10000, cache=20000, extra=None):
+    path = root / 'task__a' / ('agent' if phase == 'agent' else 'verifier') / 'trajectory.json'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    value = dict(schema_version='ATIF-v1.7', session_id=session, agent=dict(name='codex', model_name=model),
+                 steps=[dict(step_id=1, source='agent', timestamp='2026-10-22T10:00:00Z',
+                             metrics=dict(prompt_tokens=prompt, completion_tokens=output, cached_tokens=cache, extra=extra or {}))])
+    path.write_text(json.dumps(value))
+    return path
+
+
+def test_catalog_discounts_exact_and_gemini_answer():
+    settings = billing.pricing()
+    PricingSettings.model_validate(settings.model_dump())
+    expected = {
+        'anthropic/claude-haiku-5.5-ccmax': .43, 'openai/gpt-6.1-sol-codex': .15,
+        'anthropic/claude-opus-4.8': 1, 'anthropic/claude-opus-4.8-ccmax': .58,
+        'anthropic/claude-opus-4.8-coding': .58, 'openai/gpt-6-sol-codex': .3,
+        'anthropic/claude-opus-5.5-ccmax': .4, 'google/gemini-3.8-flash': .5,
+        'openai/gpt-6-astra-codex': .28, 'anthropic/claude-fable-5': .95,
+        'anthropic/claude-fable-5-ccmax': .58, 'anthropic/claude-fable-5.1-ccmax': .55,
+        'anthropic/claude-opus-5-ccmax': .4, 'openai/gpt-5.6-sol': .96,
+        'openai/gpt-5.6-sol-az': .5, 'openai/gpt-5.6-sol-codex': .5,
+        'openai/gpt-6-astra': .75, 'anthropic/claude-sonnet-5.5-ccmax': .44,
+    }
+    for model, discount in expected.items():
+        rate = component('atlascloud', model).price
+        assert rate.discount == discount
+        assert billing._matches(rate, model.split('/', 1)[1])
+        assert not billing._matches(rate, model + '-unknown')
+    assert all(p.discount == .6 for p in settings.prices if p.vendor == 'alibaba')
+
+
+def test_rmb_cache_and_reasoning_not_double_counted():
+    snap = snapshot()
+    tokens = billing.normalized_usage(dict(prompt_tokens=100000, completion_tokens=10000, cached_tokens=20000,
+                                           extra={'cache_write_input_tokens': 5000, 'reasoning_output_tokens': 3000}))
+    assert tokens == dict(input=75000, output=10000, cache_read=20000, cache_write=5000, cache_write_long=0)
+    value, warnings = billing.estimate(tokens, snap.agent, snap)
+    assert value == pytest.approx((.075*2 + .01*10 + .02*.1 + .005*2.5) * .15 * 6.7195)
+    assert not warnings
+
+
+def test_anthropic_long_cache_write_and_normalized_total():
+    tokens = billing.normalized_usage(dict(prompt_tokens=10000, completion_tokens=1000, cached_tokens=1000,
+                                          extra={'cache_creation_input_tokens': 5000,
+                                                 'cache_creation': {'ephemeral_1h_input_tokens': 2000}}))
+    assert tokens['input'] == 4000
+    assert tokens['cache_write'] == 3000
+    assert tokens['cache_write_long'] == 2000
+    snap = snapshot(agent=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax'))
+    value, _ = billing.estimate(tokens, snap.agent, snap)
+    assert value == pytest.approx((.004*5+.001*25+.001*.5+.003*6.25+.002*10)*.58*6.7195)
+
+
+def test_tiers_are_per_request_not_total():
+    snap = snapshot(agent=component('alibaba', 'qwen3.7-flash'))
+    tokens = dict(input=20000, output=1000)
+    value, _ = billing.estimate(tokens, snap.agent, snap)
+    assert value * 100 == pytest.approx((.02*.2+.001*.8)*.6*100)
+    high, notes = billing.estimate(dict(input=2000000, output=100000), snap.agent, snap, aggregate=True)
+    assert high == pytest.approx((2*1.2+.1*4.8)*.6)
+    assert any('最高输入阶梯' in note for note in notes)
+
+
+def test_haiku_threshold_includes_cache():
+    snap = snapshot(agent=component('atlascloud', 'anthropic/claude-haiku-5.5-ccmax'))
+    value, _ = billing.estimate(dict(input=1, cache_read=100000, output=1000), snap.agent, snap)
+    assert value == pytest.approx((.000001*.5+.1*.05+.001*2.5)*.43*6.7195)
+
+
+def test_unknown_cache_is_partial_amount_not_free():
+    snap = snapshot(agent=component('alibaba', 'qwen3.8-max'))
+    value, notes = billing.estimate(dict(input=1000, cache_read=1000, output=100), snap.agent, snap)
+    assert value == pytest.approx((.001*12+.0001*36)*.6)
+    assert any('cache_read' in note for note in notes)
+    value, notes = billing.estimate(dict(cache_read=1000), snap.agent, snap)
+    assert value is None
+
+
+def test_missing_and_expired_prices():
+    snap = snapshot()
+    assert billing.estimate(dict(input=100), PriceSnapshot(model='unknown'), snap)[0] is None
+    assert billing.estimate(dict(input=100), snap.agent, snap, model='unknown')[0] is None
+    snap.agent = component('atlascloud', 'google/gemini-3.8-flash')
+    assert billing.estimate(dict(input=100), snap.agent, snap, timestamp='2027-01-01T00:00:00Z')[0] is None
+
+
+def test_invalid_cache_and_catalog_rejected():
+    with pytest.raises(ValueError):
+        billing.normalized_usage(dict(prompt_tokens=10, cached_tokens=20))
+    with pytest.raises(ValidationError):
+        RateTier(input=float('nan'), output=1)
+    for value in (0, -1, float('inf')):
+        with pytest.raises(ValidationError):
+            PricingSettings(usd_cny=value)
+    price = component('atlascloud', 'google/gemini-3.8-flash').price
+    with pytest.raises(ValidationError):
+        PricingSettings(prices=[price, price])
+
+
+def test_failure_rerun_preserves_prior_spend_and_snapshot(tmp_path):
+    item, root = job(tmp_path)
+    path = trajectory(root)
+    first = billing.refresh(item, force=True)
+    assert first.billing.amount_cny > 0
+    backup = Path(item.runtime.work_dir) / 'rerun-history' / 'rerun1' / 'task__a'
+    backup.parent.mkdir(parents=True)
+    shutil.move(str(path.parent.parent), str(backup))
+    trajectory(root, session='s2')
+    config = billing.pricing()
+    config.usd_cny = 99
+    store.pricing_doc.write(config)
+    updated = billing.refresh(first, force=True)
+    assert updated.billing.amount_cny == pytest.approx(first.billing.amount_cny*2)
+    assert updated.billing.snapshot.usd_cny == 6.7195
+    assert len(store.usage_charges.all()) == 2
+
+
+def test_regrade_copied_agent_not_counted_twice_and_judge_separate(tmp_path):
+    snap = snapshot(judge=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax'))
+    source, source_root = job(tmp_path, snap=snap)
+    trajectory(source_root)
+    original = billing.refresh(source, force=True)
+    derived, root = job(tmp_path, name='two', snap=snap,
+                        harbor_action=HarborAction(mode='regrade', source_job_id=source.id))
+    shutil.copytree(source_root / 'task__a', root / 'task__a')
+    trajectory(root, session='judge-new', phase='judge', model='anthropic/claude-opus-4.8-ccmax')
+    updated = billing.refresh(derived, force=True)
+    assert len(store.usage_charges.all()) == 2
+    assert updated.billing.agent_cny == 0
+    assert updated.billing.amount_cny == updated.billing.judge_cny
+    summary = billing.summary([original, updated])
+    assert summary['amount_cny'] == pytest.approx(original.billing.amount_cny+updated.billing.amount_cny)
+    assert summary['projects'][0]['jobs'] == 2
+    assert len(summary['models']) == 2
+
+
+def test_no_usage_does_not_become_zero(tmp_path):
+    item, _ = job(tmp_path)
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.amount_cny is None
+    assert updated.billing.status == 'pending'
+    assert any('用量缺失' in note for note in updated.billing.warnings)
+
+
+def test_official_model_in_atlas_trajectory_uses_explicit_mapping(tmp_path):
+    item, root = job(tmp_path)
+    trajectory(root, model='gpt-6.1-sol')
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.amount_cny > 0
+    assert updated.billing.by_model[0]['model'] == 'openai/gpt-6.1-sol-codex'
+
+
+def test_symlinks_and_task_output_are_not_billable(tmp_path):
+    item, root = job(tmp_path)
+    trajectory(root, session='external')
+    target = root / 'task__a' / 'agent' / 'trajectory.json'
+    other = tmp_path / 'external.json'
+    target.rename(other)
+    target.symlink_to(other)
+    trajectory(root / 'workspace', session='fake')
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.amount_cny is None
+
+
+def test_codex_live_repeated_token_events_and_atif_upgrade(tmp_path):
+    item, root = job(tmp_path)
+    path = root / 'task__a' / 'agent' / 'sessions' / 's1.jsonl'
+    path.parent.mkdir(parents=True)
+    total = dict(input_tokens=100000, output_tokens=10000, cached_input_tokens=20000, reasoning_output_tokens=3000)
+    event = dict(type='event_msg', payload=dict(type='token_count', info=dict(total_token_usage=total, last_token_usage=total)))
+    path.write_text('\n'.join(json.dumps(row) for row in [dict(type='session_meta', payload={'id': 's1'}), event, event]))
+    first = billing.refresh(item, force=True)
+    assert first.billing.requests == 1
+    trajectory(root)
+    second = billing.refresh(first, force=True)
+    assert len(store.usage_charges.all()) == 1
+    assert second.billing.amount_cny == first.billing.amount_cny
+
+
+def test_claude_streaming_message_last_usage_and_ttl_cache(tmp_path):
+    item, root = job(tmp_path, snap=snapshot(agent=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax')))
+    path = root / 'task__a' / 'agent' / 'sessions' / 'main.jsonl'
+    path.parent.mkdir(parents=True)
+    def event(out):
+        return dict(type='assistant', sessionId='s1', message=dict(id='m1', model='claude-opus-4.8', usage=dict(input_tokens=100, output_tokens=out, cache_read_input_tokens=50, cache_creation_input_tokens=20)))
+    path.write_text('\n'.join(json.dumps(row) for row in [event(1), event(10)]))
+    first = billing.refresh(item, force=True)
+    assert first.billing.requests == 1
+    entry = store.usage_charges.all()[0]
+    assert entry.tokens == dict(input=100, output=10, cache_read=50, cache_write=20, cache_write_long=0)
+    second = billing.refresh(item)
+    assert second.billing.amount_cny == first.billing.amount_cny
+
+
+def test_pricing_permission_and_dashboard_scope(client, admin_headers, member_headers, tmp_path, monkeypatch):
+    from backend.app.api import system
+    monkeypatch.setattr(system.monitor, 'latest', lambda: {})
+    monkeypatch.setattr(system.monitor, 'compact_history', lambda *_: [])
+    monkeypatch.setattr(system, 'gpu_snapshot', lambda: {})
+    response = client.get('/api/system/pricing', headers=member_headers)
+    assert response.status_code == 200
+    payload = response.json()
+    payload['usd_cny'] = 7
+    assert client.put('/api/system/pricing', headers=member_headers, json=payload).status_code == 403
+    assert client.put('/api/system/pricing', headers=admin_headers, json=payload).status_code == 200
+    first, root = job(tmp_path)
+    trajectory(root)
+    second, root2 = job(tmp_path, name='admin')
+    second.owner_id, second.owner_email = user_id_of('admin@prt.local'), 'admin@prt.local'
+    store.jobs.put(second)
+    trajectory(root2, session='admin-session')
+    billing.refresh(first, force=True)
+    billing.refresh(second, force=True)
+    member = client.get('/api/system/dashboard', headers=member_headers).json()
+    admin = client.get('/api/system/dashboard', headers=admin_headers).json()
+    assert member['billing']['jobs'] == 1
+    assert admin['billing']['jobs'] == 2
+    assert all(row['name'] != 'admin@prt.local' for row in member['billing']['people'])
+    assert admin['billing']['amount_cny'] == pytest.approx(member['billing']['amount_cny']*2)
+
+
+def test_bailian_cache_mode_and_region_are_explicit(tmp_path):
+    item, _ = job(tmp_path)
+    item.verify.agent = 'claude-code'
+    item.verify.agent_env = {'ANTHROPIC_BASE_URL': 'https://dashscope.aliyuncs.com/apps/anthropic'}
+    item.verify.model = 'qwen3.7-plus'
+    snap = billing.capture(item)
+    assert snap.agent.price.discount == .6
+    assert snap.agent.cache_mode == 'explicit'
+    value, _ = billing.estimate(dict(input=1000, output=100, cache_read=1000, cache_write=100), snap.agent, snap)
+    assert value == pytest.approx((.001*2+.0001*8+.001*.2+.0001*2.5)*.6)
+    item.verify.agent_env['ANTHROPIC_BASE_URL'] = 'https://dashscope-intl.aliyuncs.com/apps/anthropic'
+    assert billing.capture(item).agent.price is None
+
+
+def test_native_fallback_is_replaced_by_trajectory(tmp_path):
+    item, root = job(tmp_path)
+    trial = root / 'task__a'
+    trial.mkdir()
+    (trial / 'result.json').write_text(json.dumps(dict(id='native-id', agent_result={'n_input_tokens': 100000, 'n_output_tokens': 10000, 'n_cache_tokens': 20000})))
+    first = billing.refresh(item, force=True)
+    assert len(store.usage_charges.all()) == 1
+    assert first.billing.amount_cny > 0
+    trajectory(root)
+    second = billing.refresh(first, force=True)
+    assert len(store.usage_charges.all()) == 1
+    assert second.billing.amount_cny > 0
+
+
+def test_judge_usage_recorder_keeps_only_counters_and_copies_deduplicate(tmp_path, monkeypatch):
+    import importlib.util
+    from datetime import datetime, timezone
+    from backend.app.config import settings
+    spec = importlib.util.spec_from_file_location('billing_rewardkit_runner', settings.resources_dir / 'rewardkit_runner.py')
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    snap = snapshot(judge=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax'))
+    item, root = job(tmp_path, snap=snap)
+    path = root / 'task__a' / 'verifier' / 'prt-model-usage.jsonl'
+    monkeypatch.setattr(runner, 'USAGE_PATH', path)
+    response = dict(id='request-judge-1', choices=[{'content': 'private response'}], usage=dict(prompt_tokens=1000, completion_tokens=100, prompt_tokens_details={'cached_tokens': 500}))
+    kwargs = dict(model='anthropic/claude-opus-4.8-ccmax', api_key='secret-key', messages=[{'content': 'private request'}])
+    runner.record_usage(kwargs, response, datetime.now(timezone.utc), None)
+    runner.record_usage(kwargs, response, datetime.now(timezone.utc), None)
+    text = path.read_text()
+    assert 'private' not in text and 'secret-key' not in text and 'messages' not in text
+    first = billing.refresh(item, force=True)
+    assert first.billing.judge_cny > 0
+    assert first.billing.requests == 1
+    child, root2 = job(tmp_path, name='copy', snap=snap, harbor_action=HarborAction(mode='regrade', source_job_id=item.id))
+    shutil.copytree(root / 'task__a', root2 / 'task__a')
+    second = billing.refresh(child, force=True)
+    assert len(store.usage_charges.all()) == 1
+    assert second.billing.amount_cny is None  # no new recorded requests
+
+
+def test_usage_callback_registration_is_idempotent_and_async_safe(tmp_path, monkeypatch):
+    import asyncio
+    import importlib.util
+    import sys
+    from types import ModuleType
+    from backend.app.config import settings
+    spec = importlib.util.spec_from_file_location('billing_rewardkit_callback', settings.resources_dir / 'rewardkit_runner.py')
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    module = ModuleType('litellm')
+    module.callbacks = []
+    integration = ModuleType('litellm.integrations.custom_logger')
+    integration.CustomLogger = type('CustomLogger', (), {})
+    monkeypatch.setitem(sys.modules, 'litellm', module)
+    monkeypatch.setitem(sys.modules, 'litellm.integrations.custom_logger', integration)
+    path = tmp_path / 'usage.jsonl'
+    monkeypatch.setattr(runner, 'USAGE_PATH', path)
+    runner.install_usage_recorder()
+    runner.install_usage_recorder()
+    assert len(module.callbacks) == 1
+    callback = module.callbacks[0]
+    response = dict(id='r1', usage=dict(prompt_tokens=100, completion_tokens=10))
+    asyncio.run(callback.async_log_success_event({'model': 'test'}, response, None, None))
+    assert json.loads(path.read_text())['metrics']['prompt_tokens'] == 100
+
+
+def test_litellm_transport_prefixes_resolve_only_exact_server_ids():
+    snap = snapshot()
+    for model in ['gpt-6.1-sol', 'gpt-6.1-sol-codex', 'openai/gpt-6.1-sol-codex', 'openai/openai/gpt-6.1-sol-codex']:
+        value, _ = billing.estimate(dict(input=1000, output=100), snap.agent, snap, model=model)
+        assert value == pytest.approx((.001*2+.0001*10)*.15*6.7195)
+    assert billing.estimate(dict(input=1000), snap.agent, snap, model='openai/gpt-6.1-sol-codex-pro')[0] is None
+
+
+def test_delete_archives_spend_and_keeps_person_visibility(tmp_path):
+    item, root = job(tmp_path)
+    trajectory(root)
+    first = billing.refresh(item, force=True)
+    billing.archive(first)
+    store.jobs.delete(item.id)
+    dev = store.users.get(item.owner_id)
+    admin = store.users.get(user_id_of('admin@prt.local'))
+    assert billing.summary([], actor=dev)['amount_cny'] == first.billing.amount_cny
+    assert billing.summary([], actor=admin)['amount_cny'] == first.billing.amount_cny
+    stranger = dev.model_copy(update={'id': 'stranger'})
+    assert billing.summary([], actor=stranger)['amount_cny'] is None
+
+
+def test_one_invalid_trial_does_not_hide_other_spend(tmp_path):
+    item, root = job(tmp_path)
+    trajectory(root, prompt=100, cache=200)
+    other = root / 'task__b' / 'agent'
+    other.mkdir(parents=True)
+    source = root / 'task__a' / 'agent' / 'trajectory.json'
+    data = json.loads(source.read_text())
+    data['session_id'] = 'valid-session'
+    data['steps'][0]['metrics']['prompt_tokens'] = 1000
+    (other / 'trajectory.json').write_text(json.dumps(data))
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.amount_cny > 0
+    assert updated.billing.status == 'partial'
+    assert any('无法读取' in note for note in updated.billing.warnings)
+
+
+def test_claude_subagent_session_is_not_billed_twice_after_atif(tmp_path):
+    snap = snapshot(agent=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax'))
+    item, root = job(tmp_path, snap=snap)
+    area = root / 'task__a' / 'agent'
+    main = area / 'sessions' / 'parent.jsonl'
+    child = area / 'sessions' / 'parent' / 'subagents' / 'child.jsonl'
+    main.parent.mkdir(parents=True)
+    child.parent.mkdir(parents=True)
+    def event(session, msg, time):
+        return dict(type='assistant', sessionId=session, timestamp=time,
+                    message=dict(id=msg, model='claude-opus-4.8', usage=dict(input_tokens=100, output_tokens=10)))
+    main.write_text(json.dumps(event('parent', 'm1', '2026-10-22T00:00:00Z')))
+    child.write_text(json.dumps(event('child', 'm2', '2026-10-22T00:01:00Z')))
+    first = billing.refresh(item, force=True)
+    assert first.billing.requests == 2
+    path = trajectory(root, session='parent', model='claude-opus-4.8', prompt=100, output=10, cache=0)
+    data = json.loads(path.read_text())
+    data['steps'].append(dict(data['steps'][0], step_id=2))
+    path.write_text(json.dumps(data))
+    second = billing.refresh(first, force=True)
+    assert second.billing.amount_cny == first.billing.amount_cny
+    assert len(store.usage_charges.all()) == 1

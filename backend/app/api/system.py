@@ -9,7 +9,9 @@ from fastapi import APIRouter, Query
 from ..config import settings
 from ..deps import AdminUser, CurrentUser
 from ..models import JobStatus, SystemSettings, utcnow
-from ..services import monitor, resources_service
+from ..models.job import JobPublic
+from ..models.billing import PricingSettings
+from ..services import billing_service, monitor, resources_service, audit_service
 from ..services.scheduler import gpu_snapshot, scheduler
 from ..store import store
 
@@ -33,6 +35,8 @@ def metrics_history(_: CurrentUser, limit: int = Query(default=300, le=2000)) ->
 def dashboard(user: CurrentUser) -> dict[str, Any]:
     jobs = store.jobs.all()
     visible = jobs if user.is_admin else [j for j in jobs if j.owner_id == user.id]
+    billing = billing_service.summary(visible, actor=user)
+    visible = [store.jobs.get(job.id) or job for job in visible]
     active = [j for j in visible if j.status.is_active]
     active.sort(key=lambda j: (j.status != JobStatus.RUNNING, j.created_at))
 
@@ -42,12 +46,13 @@ def dashboard(user: CurrentUser) -> dict[str, Any]:
         "metrics": monitor.latest(),
         "history": monitor.compact_history(180),
         "gpu": gpu_snapshot(),
-        "active_jobs": active[:20],
-        "recent_jobs": recent,
+        "active_jobs": [JobPublic.model_validate(job.model_dump()) for job in active[:20]],
+        "recent_jobs": [JobPublic.model_validate(job.model_dump()) for job in recent],
+        "billing": billing,
         "counters": {
             "running": sum(1 for j in visible if j.status == JobStatus.RUNNING),
             "queued": sum(1 for j in visible if j.status == JobStatus.QUEUED),
-            "pending_review": sum(1 for j in jobs if j.status == JobStatus.PENDING_REVIEW),
+            "pending_review": sum(1 for j in visible if j.status == JobStatus.PENDING_REVIEW),
             "succeeded": sum(1 for j in visible if j.status == JobStatus.SUCCEEDED),
             "failed": sum(1 for j in visible if j.status == JobStatus.FAILED),
             "total": len(visible),
@@ -69,6 +74,19 @@ def read_settings(_: CurrentUser) -> SystemSettings:
         current.require_approval = settings.require_approval
         current.max_concurrent_jobs = settings.max_concurrent_jobs
     return current
+
+
+@router.get("/pricing", response_model=PricingSettings, summary="模型单价、折扣和人民币汇率")
+def read_pricing(_: CurrentUser) -> PricingSettings:
+    return billing_service.pricing()
+
+
+@router.put("/pricing", response_model=PricingSettings, summary="更新价格设置（仅影响新任务）")
+def update_pricing(payload: PricingSettings, admin: AdminUser) -> PricingSettings:
+    updated = billing_service.save_pricing(payload, admin)
+    audit_service.record("billing.pricing.update", actor=admin, target_type="system", target_id="pricing",
+                         summary="更新模型价格、折扣和人民币汇率（保留现有任务价格快照）")
+    return updated
 
 
 @router.put("/settings", response_model=SystemSettings, summary="更新系统设置（管理员）")

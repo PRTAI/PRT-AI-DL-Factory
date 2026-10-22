@@ -61,6 +61,7 @@ import {
 } from '@/components/ui'
 import { CopyButton, FRAMEWORK_LABEL, JobTypeBadge, Mono, PageHeader, StatusBadge } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
+import { BillingDetail, JobCost } from '@/components/Billing'
 import { TrialBoard } from '@/components/TrialBoard'
 import { HarborActions } from '@/components/HarborActions'
 import { VerifyOverview } from '@/components/VerifyOverview'
@@ -241,6 +242,7 @@ export default function JobDetail() {
             <span>{data.owner_email}</span>
             <span>·</span>
             <span>创建于 {formatDateTime(data.created_at)}</span>
+            <JobCost job={data} />
           </span>
         }
         actions={
@@ -426,6 +428,7 @@ export default function JobDetail() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-3 space-y-3">
+          <BillingDetail job={data} />
           {data.type === 'verify' && <VerifyOverview jobId={data.id} live={isActive} />}
           <div className="grid gap-3 lg:grid-cols-2">
             <Card>

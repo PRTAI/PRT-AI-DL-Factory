@@ -241,6 +241,8 @@ scheduler = Scheduler()
 # Helpers usable from request handlers
 # --------------------------------------------------------------------------- #
 def refresh_metrics(job: Job) -> Job:
+    from . import billing_service
+    job = billing_service.refresh(job)
     parsed = metrics_parser.parse_job(job)
     if not parsed.series and parsed.progress.percent == 0 and parsed.progress.current_step == 0:
         if parsed.progress.total_trials == 0:

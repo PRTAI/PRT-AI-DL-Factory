@@ -58,6 +58,9 @@ async def lifespan(app: FastAPI):
     adopted_datasets = dataset_service.adopt_orphan_datasets()
     if adopted_datasets:
         logger.info("moved %d pre-existing dataset(s) into the default project", adopted_datasets)
+    adopted_reviews = review_service.adopt_orphan_reviews()
+    if adopted_reviews:
+        logger.info("moved %d pre-existing review(s) into the default project", adopted_reviews)
 
     await monitor.start()
     await scheduler.start()
@@ -65,12 +68,13 @@ async def lifespan(app: FastAPI):
     # 否则会一直挂在 serving/running 上并且白占着 GPU 账。
     deployment_service.reconcile()
     export_service.reconcile()
-    # 样例审核跑在事件循环里，没有子进程可以接管，重启就等于中断。
-    review_service.reconcile()
+    # 审核的编排状态不能接管；清理旧 Agent 后将中断任务标记失败。
+    await review_service.reconcile()
     logger.info("%s %s ready", settings.app_name, settings.app_version)
     try:
         yield
     finally:
+        await review_service.shutdown()
         await scheduler.stop()
         await monitor.stop()
 

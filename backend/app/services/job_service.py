@@ -150,6 +150,8 @@ def _prepare_job(
         harbor_action=harbor_action,
     )
     job.review.required = require_approval
+    from . import billing_service
+    job.billing.snapshot = billing_service.capture(job)
     if admin_approved:
         job.review.reviewer_id = owner.id
         job.review.reviewer_email = owner.email
@@ -529,6 +531,8 @@ def _delete_job(job_id: str, *, actor: User, purge_outputs: bool = False) -> Non
     dependents = store.jobs.find(lambda item: item.harbor_action is not None and item.harbor_action.source_job_id == job_id)
     if dependents:
         raise HTTPException(409, "该任务仍被恢复或重新判分任务引用，请先删除这些派生任务")
+    from . import billing_service
+    billing_service.archive(job)
     work_dir = Path(job.runtime.work_dir or runner.work_dir_for(job))
     if work_dir.is_dir():
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -597,7 +601,8 @@ def list_jobs(
     items = store.jobs.find(keep)
     items.sort(key=lambda j: j.created_at, reverse=True)
     total = len(items)
-    return items[offset : offset + limit], total
+    from . import billing_service
+    return [billing_service.refresh(job) for job in items[offset : offset + limit]], total
 
 
 def job_log(job_id: str, *, actor: User, tail_bytes: int | None = None, offset: int = 0) -> dict[str, Any]:

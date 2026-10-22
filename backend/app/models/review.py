@@ -1,7 +1,6 @@
 """样例审核：上传一批样例 + 需求文档，按文档拆出的质检项逐题静态验收。
 
-和训练/评测任务的区别：审核不占 GPU、不进调度队列、也不需要管理员放行——它只花
-模型 API 的额度，所以是个独立子系统（位置同模型部署与合并导出）。
+审核与训练/评测一样必须归属项目，但不占 GPU、不进调度队列，也不需要管理员放行。
 
 每次审核独享一个 16 位 uuid 的工作目录（``data/reviews/<workspace>/``），原始压缩包、
 需求文档、解压出来的样例树、逐项结论和最终 docx 都留在里面，用户可以回看和下载。
@@ -12,11 +11,12 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
 from .common import Base, utcnow
+from .model_api import ReasoningEffort
 
 
 def new_review_id() -> str:
@@ -115,6 +115,8 @@ class ReviewTask(Base):
     prompt: str = ""             # 用户自定义提示词
     model_api_id: str = ""
     model_label: str = ""        # 提交时的模型显示名（配置可能后来被改名/删除）
+    agent: Literal["", "claude-code", "codex"] = ""  # 空值仅用于读取历史直接 LLM 记录
+    reasoning_effort: ReasoningEffort = ""
 
     owner_id: str
     owner_email: str = ""
@@ -155,4 +157,6 @@ class ReviewCreate(Base):
     spec_title: str = Field(default="", max_length=200)
     prompt: str = Field(default="", max_length=20_000)
     model_api_id: str = ""
-    project_id: str = ""
+    project_id: str = Field(min_length=1)
+    agent: Literal["claude-code", "codex"] = "claude-code"
+    reasoning_effort: ReasoningEffort = ""

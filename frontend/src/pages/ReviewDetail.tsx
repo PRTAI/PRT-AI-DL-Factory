@@ -32,7 +32,7 @@ import {
   Tr,
 } from '@/components/ui'
 import type { ReviewCheck, ReviewFinding, ReviewStage, ReviewVerdict } from '@/lib/types'
-import { REVIEW_STAGE, REVIEW_STATUS } from './Review'
+import { REVIEW_AGENTS, REVIEW_STAGE, REVIEW_STATUS } from './Review'
 
 const STAGES: ReviewStage[] = ['collecting', 'planning', 'checking', 'reporting', 'done']
 
@@ -90,6 +90,12 @@ export default function ReviewDetail() {
   })
   const item = review.data
   const done = item ? isTerminal(item.status) : false
+  const agentLog = useQuery({
+    queryKey: ['review-agent-log', reviewId, done],
+    queryFn: () => api.reviewAgentLog(reviewId),
+    enabled: Boolean(item?.agent),
+    refetchInterval: done ? false : 3000,
+  })
 
   const findings = useQuery({
     queryKey: ['review-findings', reviewId],
@@ -138,7 +144,7 @@ export default function ReviewDetail() {
         }
         actions={
           <>
-            <Link to="/review">
+            <Link to={`/review?project=${item.project_id}`}>
               <Button variant="ghost">
                 <ArrowLeft className="h-3.5 w-3.5" />
                 返回列表
@@ -171,8 +177,11 @@ export default function ReviewDetail() {
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           <StatusDot tone={status.tone} pulse={!done} label={done ? status.label : REVIEW_STAGE[item.stage]} />
           <Mono className="text-[11px] text-fg-subtle">{item.workspace}</Mono>
-          {item.project_id && <ProjectTag projectId={item.project_id} />}
+          <Link to={`/review?project=${item.project_id}`} title="查看该项目的质检记录">
+            <ProjectTag projectId={item.project_id} linked={false} />
+          </Link>
           {item.model_label && <Badge tone="primary">{item.model_label}</Badge>}
+          <Badge>{item.agent ? REVIEW_AGENTS[item.agent] : '直接 LLM（历史）'}</Badge>
         </div>
       </PageHeader>
 
@@ -234,6 +243,18 @@ export default function ReviewDetail() {
         </Card>
       )}
 
+      {item.agent && (
+        <Card>
+          <CardHeader title="Agent 执行日志" description="每次拆项与核查都由独立的 Agent 会话执行，原生工具轨迹保存在审核工作目录的 agents/ 下。" />
+          <CardBody>
+            {agentLog.isError ? <ErrorBox message="Agent 日志加载失败" /> : (
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-bg-elevated p-3 font-mono text-[11px] text-fg-muted">
+                {agentLog.data?.text || 'Agent 尚未产生执行日志。'}
+              </pre>
+            )}
+          </CardBody>
+        </Card>
+      )}
       {/* 质检项 */}
       <Card>
         <CardHeader

@@ -71,6 +71,7 @@ class ProjectStats(Base):
     # 按类型分开：选项目时想知道这条线是在做训练还是在做评测
     training_jobs: int = 0
     verify_jobs: int = 0
+    review_tasks: int = 0
     last_activity_at: datetime | None = None
     members: list[str] = Field(default_factory=list)
 

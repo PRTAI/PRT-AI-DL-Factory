@@ -376,6 +376,7 @@ export interface JobReview {
 }
 
 export interface Job {
+  billing?: BillingSummary
   harbor_action?: { mode: 'rerun' | 'resume' | 'regrade'; source_job_id: string; trial_name?: string | null; filter_error_types: string[] } | null
   id: string
   name: string
@@ -484,6 +485,7 @@ export interface GpuSnapshot {
 }
 
 export interface DashboardPayload {
+  billing?: SpendSummary
   at: string
   metrics: SystemMetrics
   history: MetricPoint[]
@@ -602,6 +604,7 @@ export interface ProjectStats {
   failed: number
   training_jobs: number
   verify_jobs: number
+  review_tasks: number
   last_activity_at?: string | null
   members: string[]
 }
@@ -914,6 +917,8 @@ export interface TrialDetail {
 
 // ------------------------------------------------------------ 样例审核 ----
 export type ReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type ReviewAgent = 'claude-code' | 'codex'
+export type ReasoningEffort = VerifyConfig['reasoning_effort']
 export type ReviewStage = 'pending' | 'collecting' | 'planning' | 'checking' | 'reporting' | 'done'
 export type ReviewVerdict = 'pass' | 'fail' | 'needs_review'
 export type CheckStatus = 'pending' | 'running' | 'done' | 'failed' | 'dropped'
@@ -962,6 +967,8 @@ export interface ReviewTask {
   prompt: string
   model_api_id: string
   model_label: string
+  agent: ReviewAgent | ''
+  reasoning_effort: ReasoningEffort
   owner_id: string
   owner_email: string
   project_id: string
@@ -987,3 +994,84 @@ export interface ReviewTask {
 export type VerifyAgentConfig = Pick<VerifyConfig,
   'agent' | 'model_api_id' | 'deployment_id' | 'agent_api_protocol' | 'model' | 'reasoning_effort' |
   'agent_import_path' | 'agent_env' | 'agent_kwargs'>
+
+export interface RateTier {
+  max_input?: number | null
+  input: number
+  output: number
+  cache_read?: number | null
+  explicit_cache_read?: number | null
+  cache_write?: number | null
+  cache_write_long?: number | null
+}
+
+export interface ModelPrice {
+  vendor: string
+  model: string
+  official_model: string
+  aliases: string[]
+  currency: 'CNY' | 'USD'
+  discount: number
+  tiers: RateTier[]
+  region: string
+  source: string
+  verified_on: string
+  valid_until: string
+  note: string
+}
+
+export interface PricingSettings {
+  usd_cny: number
+  exchange_date: string
+  exchange_source: string
+  prices: ModelPrice[] | null
+  updated_at: string
+  updated_by: string
+}
+
+export interface PriceSnapshot {
+  model: string
+  vendor: string
+  region: string
+  cache_mode: 'implicit' | 'explicit' | 'unknown'
+  price: ModelPrice | null
+  free: boolean
+}
+
+export interface BillingSummary {
+  status: 'estimated' | 'partial' | 'pending' | 'not_applicable'
+  amount_cny: number | null
+  agent_cny: number | null
+  judge_cny: number | null
+  requests: number
+  warnings: string[]
+  by_model: { vendor: string; model: string; phase: string; amount_cny: number | null; requests: number; unpriced: number }[]
+  snapshot: {
+    usd_cny: number
+    exchange_date: string
+    exchange_source: string
+    captured_at: string
+    historical: boolean
+    agent: PriceSnapshot
+    judge: PriceSnapshot
+  } | null
+  updated_at: string | null
+}
+
+export interface SpendRow {
+  id: string
+  name: string
+  amount_cny: number | null
+  jobs: number
+  incomplete_jobs: number
+}
+
+export interface SpendSummary {
+  amount_cny: number | null
+  jobs: number
+  incomplete_jobs: number
+  note: string
+  projects: SpendRow[]
+  people: SpendRow[]
+  models: SpendRow[]
+}

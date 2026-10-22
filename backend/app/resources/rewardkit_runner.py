@@ -6,13 +6,74 @@ Copied into Harbor tests/ as _prt_rewardkit_runner.py; stdlib only until main().
 from __future__ import annotations
 
 import logging
+import json
+import os
 import runpy
 import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
+
+USAGE_PATH = Path("/logs/verifier/prt-model-usage.jsonl")
+
+
+def record_usage(kwargs, response, start_time, end_time) -> None:
+    """Store counters only: no prompts, responses, endpoint credentials or keys."""
+    try:
+        usage = getattr(response, "usage", None)
+        if usage is None and isinstance(response, dict):
+            usage = response.get("usage")
+        if hasattr(usage, "model_dump"):
+            usage = usage.model_dump()
+        if not isinstance(usage, dict) or usage.get("prompt_tokens") is None or usage.get("completion_tokens") is None:
+            return
+        details = usage.get("prompt_tokens_details") or {}
+        creation = usage.get("cache_creation_input_tokens") or details.get("cache_creation_tokens") or 0
+        model = kwargs.get("model") or ""
+        request_id = (response.get("id") if isinstance(response, dict) else getattr(response, "id", None)) or kwargs.get("litellm_call_id")
+        if not request_id:
+            return
+        payload = {
+            "schema_version": "prt-usage-v1", "request_id": str(request_id), "model": model,
+            "timestamp": (start_time if isinstance(start_time, datetime) else datetime.now(timezone.utc)).isoformat(),
+            "metrics": {"prompt_tokens": usage["prompt_tokens"], "completion_tokens": usage["completion_tokens"],
+                        "cached_tokens": details.get("cached_tokens") or usage.get("cache_read_input_tokens") or 0,
+                        "extra": {"cache_creation_input_tokens": creation,
+                                  "cache_creation": details.get("cache_creation_token_details") or usage.get("cache_creation") or {}}},
+        }
+        USAGE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        # One append syscall per response also works across concurrent CLI processes.
+        fd = os.open(USAGE_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        try:
+            os.write(fd, (json.dumps(payload, ensure_ascii=False) + "\n").encode())
+        finally:
+            os.close(fd)
+    except Exception:
+        logging.getLogger(__name__).warning("Could not record Judge Token usage", exc_info=True)
+
+
+def install_usage_recorder() -> None:
+    try:
+        import litellm
+        from litellm.integrations.custom_logger import CustomLogger
+
+        if getattr(litellm, "_prt_usage_recorder", False):
+            return
+
+        class UsageRecorder(CustomLogger):
+            def log_success_event(self, kwargs, response_obj, start_time, end_time):
+                record_usage(kwargs, response_obj, start_time, end_time)
+
+            async def async_log_success_event(self, kwargs, response_obj, start_time, end_time):
+                record_usage(kwargs, response_obj, start_time, end_time)
+
+        litellm.callbacks.append(UsageRecorder())
+        litellm._prt_usage_recorder = True
+    except ImportError:
+        logging.getLogger(__name__).warning("LiteLLM unavailable; Judge usage recording skipped")
 
 
 def _can_mount() -> bool:
@@ -67,6 +128,7 @@ def install_fallback() -> None:
 
 def main() -> None:
     install_fallback()
+    install_usage_recorder()
     runpy.run_module("rewardkit", run_name="__main__", alter_sys=True)
 
 

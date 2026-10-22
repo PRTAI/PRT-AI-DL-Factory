@@ -1,17 +1,15 @@
 """样例审核：上传 → 采证 → 拆质检项 → 并发 subagent 判定 → 固定格式 docx。
 
-不走 GPU 调度队列（不吃显卡，只吃模型 API 额度），四个阶段都在平台进程内跑，
-所以位置类比 ``deployment_service`` / ``export_service``。
+不走 GPU 调度队列。平台编排四个阶段，真正的 Agent 通过 Harbor 子进程在容器内运行。
 
 两条硬规矩，都是为了报告可信：
 
-1. **模型不采证**。文件在不在、权限位多少、字段是不是空串，全部由
-   ``review_evidence`` 用代码读出来；模型只在这些事实上判「符不符合规范」。
+1. 平台先用 ``review_evidence`` 采集可复查事实，Agent 可以用工具读取只读原文和附件；
+   压缩包原始权限仍以平台采证为准。
 2. **模型不许编规范**。拆出的每个质检项必须附规范原文逐字摘录（``quote``），
    平台回查需求文档，定位不上的项**直接丢弃**并写进备注。
 
-模型也不被允许产生任何落盘产物：没有脚本、没有中间文件，交付物只有 docx
-（外加平台自己写的 manifest / checks / findings / report JSON，用于复查）。
+Agent 在独立容器里运行，工具轨迹和 JSON 结论随任务留存；正式返修报告仍由平台生成。
 """
 
 from __future__ import annotations
@@ -40,7 +38,7 @@ from ..models import (
     utcnow,
 )
 from ..store import store
-from . import archive, audit_service, llm_client, review_evidence, review_report
+from . import archive, audit_service, llm_client, model_api_service, project_service, review_agent_service, review_evidence, review_report
 
 CHUNK = 4 * 1024 * 1024
 MAX_DOCS = 10
@@ -67,7 +65,7 @@ def _paths(item: ReviewTask) -> dict[str, Path]:
         "docs": base / "docs",
         "extracted": base / "extracted",
         "findings": base / "findings",
-        "llm": base / "llm",
+        "agents": base / "agents",
         "manifest": base / "manifest.json",
         "checks": base / "checks.json",
         "report_json": base / "report.json",
@@ -137,6 +135,11 @@ def _assert_can_view(item: ReviewTask, actor: User) -> None:
     raise HTTPException(status.HTTP_403_FORBIDDEN, detail="只有审核的发起人或管理员可以查看")
 
 
+def agent_log(review_id: str, *, actor: User, tail_bytes: int = 64_000) -> dict[str, Any]:
+    item = get_review(review_id, actor=actor)
+    return {"text": review_agent_service.log_tail(item, tail_bytes), "running": not item.status.is_terminal}
+
+
 # --------------------------------------------------------------------------- #
 # 创建
 # --------------------------------------------------------------------------- #
@@ -148,7 +151,8 @@ def create_review(
     docs: list[tuple[str, BinaryIO]],
     owner: User,
 ) -> ReviewTask:
-    config = _model_api_or_400(payload.model_api_id, owner.id)
+    project = project_service.assert_usable(payload.project_id.strip())
+    config = _model_api_or_400(payload.model_api_id, owner.id, payload.agent)
     if not docs:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请至少上传一份需求文档（质检规范）")
     if len(docs) > MAX_DOCS:
@@ -163,9 +167,11 @@ def create_review(
         prompt=payload.prompt.strip(),
         model_api_id=config.id,
         model_label=f"{config.name}（{config.model_id}）",
+        agent=payload.agent,
+        reasoning_effort=payload.reasoning_effort,
         owner_id=owner.id,
         owner_email=owner.email,
-        project_id=payload.project_id,
+        project_id=project.id,
         archive_name=archive_name,
     )
     paths = _paths(item)
@@ -191,13 +197,14 @@ def create_review(
         raise
 
     store.reviews.put(item)
+    project_service.touch(project.id)
     audit_service.record(
         "review.create",
         actor=owner,
         target_type="review",
         target_id=item.id,
         summary=f"提交样例审核「{item.name}」",
-        detail={"workspace": item.workspace, "docs": item.doc_names, "model_api": config.id},
+        detail={"workspace": item.workspace, "docs": item.doc_names, "model_api": config.id, "project_id": project.id, "agent": item.agent},
     )
     _spawn(item.id)
     return item
@@ -234,14 +241,16 @@ def _safe_name(filename: str) -> str:
     return name[:180]
 
 
-def _model_api_or_400(model_api_id: str, user_id: str) -> ModelApiConfig:
+def _model_api_or_400(model_api_id: str, user_id: str, agent: str) -> ModelApiConfig:
     if not model_api_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择用于审核的模型 API")
     config = store.model_apis.get(model_api_id)
     if config is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="模型 API 配置不存在")
-    from . import model_api_service
-    resolved = model_api_service.effective(config, user_id=user_id)
+    if agent not in {"claude-code", "codex"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择 Claude Code 或 Codex Agent")
+    protocol = model_api_service.agent_protocol(agent)
+    resolved = model_api_service.effective(config, protocol, user_id=user_id)
     if not resolved.enabled:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=f"模型 API「{resolved.name}」已停用")
     if not resolved.ready:
@@ -257,7 +266,7 @@ def cancel_review(review_id: str, *, actor: User) -> ReviewTask:
     _assert_can_control(item, actor)
     if item.status.is_terminal:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="该审核已经结束")
-    task = _running.pop(review_id, None)
+    task = _running.get(review_id)
     if task is not None:
         task.cancel()
     _mark(review_id, ReviewStatus.CANCELLED, error="已取消")
@@ -269,6 +278,9 @@ def delete_review(review_id: str, *, actor: User, purge_files: bool = False) -> 
     _assert_can_control(item, actor)
     if not item.status.is_terminal:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="请先取消再删除")
+    task = _running.get(review_id)
+    if task is not None and not task.done():
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="Agent 正在清理容器，请稍后删除")
     if purge_files:
         shutil.rmtree(work_dir(item), ignore_errors=True)
     store.reviews.delete(review_id)
@@ -288,15 +300,44 @@ def _assert_can_control(item: ReviewTask, actor: User) -> None:
     raise HTTPException(status.HTTP_403_FORBIDDEN, detail="只有审核的发起人或管理员可以操作")
 
 
-def reconcile() -> None:
+async def reconcile() -> None:
     """平台重启后把没人看管的审核标成失败。
 
-    审核跑在事件循环里，没有可以接管的子进程——重启就等于中断，只能让用户重提。
+    编排状态在事件循环里；重启时先回收旧 Agent 子进程和容器，再标记中断。
     """
-    for item in store.reviews.find(lambda i: not i.status.is_terminal):
+    for item in store.reviews.all():
         if item.id in _running:
             continue
-        _mark(item.id, ReviewStatus.FAILED, error="平台重启时审核被中断，请重新提交")
+        try:
+            await review_agent_service.reap_orphans(item)
+        except Exception as exc:
+            _mark(item.id, ReviewStatus.FAILED, error=f"平台重启时审核被中断，旧 Agent 清理失败：{type(exc).__name__}，请管理员检查容器")
+            continue
+        if not item.status.is_terminal:
+            _mark(item.id, ReviewStatus.FAILED, error="平台重启时审核被中断，请重新提交")
+
+
+async def shutdown() -> None:
+    tasks = list(_running.values())
+    for task in tasks:
+        if not task.cancelling():
+            task.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def adopt_orphan_reviews() -> int:
+    """保留旧记录，将空项目或已失效项目的质检收进默认项目；重复启动不会重复迁移。"""
+    project_ids = {project.id for project in store.projects.all()}
+    orphans = store.reviews.find(lambda item: item.project_id not in project_ids)
+    if not orphans:
+        return 0
+    oldest = min(orphans, key=lambda item: item.created_at)
+    project = project_service.ensure_default_project(owner_id=oldest.owner_id, owner_email=oldest.owner_email)
+    for item in orphans:
+        store.reviews.update(item.id, lambda entry: setattr(entry, "project_id", project.id))
+    project_service.touch(project.id)
+    return len(orphans)
 
 
 # --------------------------------------------------------------------------- #
@@ -330,7 +371,7 @@ async def run_review(review_id: str) -> None:
     store.reviews.update(review_id, start)
 
     try:
-        config = _model_api_or_400(item.model_api_id, item.owner_id)
+        config = _model_api_or_400(item.model_api_id, item.owner_id, item.agent)
         manifest = await asyncio.to_thread(_stage_collect, review_id)
         if not manifest["tasks"]:
             raise HTTPException(
@@ -576,7 +617,7 @@ CHECK_SYSTEM = """\
 你是评测题包静态验收的执行者。本次你**只负责一条质检项**，其他问题一概不管、不报。
 
 铁律：
-1. 只依据用户给出的证据判定。证据里没有的信息不许推测，也不许假设文件内容。
+1. 依据平台证据和通过工具读取的原始文件判定；没有读取到的信息不许推测，也不许假设文件内容。
 2. 判定只有三种：
    - pass：证据足以证明这道题满足这条要求；
    - fail：证据足以证明这道题**违反**这条要求，此时必须在 problems 里写清楚
@@ -910,16 +951,24 @@ async def _ask_json(
     user: str,
     tag: str,
 ) -> Any:
-    """发一次请求并解析 JSON；解析失败追加「只输出 JSON」再试一次。"""
+    """运行一次 Agent 会话并读取结论 JSON；格式错误时明确要求修正后再运行一次。"""
     attempt_user = user
     last = ""
     for attempt in (1, 2):
-        text, usage = await llm_client.chat(
-            config,
-            system=system,
-            user=attempt_user,
-            timeout=settings.review_llm_timeout_seconds,
-        )
+        try:
+            text, usage = await review_agent_service.run(
+                _current(review_id),
+                system=system,
+                user=attempt_user,
+                tag=tag,
+                attempt=attempt,
+            )
+        except review_agent_service.ReviewAgentError as exc:
+            _archive_call(
+                review_id, config, tag=tag, attempt=attempt, user=attempt_user,
+                text="", error=str(exc),
+            )
+            raise
         _archive_call(review_id, config, tag=tag, attempt=attempt, user=attempt_user, text=text)
         _add_usage(review_id, usage)
         try:
@@ -941,19 +990,21 @@ def _archive_call(
     attempt: int,
     user: str,
     text: str,
+    error: str = "",
 ) -> None:
-    """留档排错用。密钥不在这里——``redacted_request`` 只给出请求头的键名。"""
+    """保存 harness 输出与错误；密钥仅通过 Harbor 的阶段环境变量注入。"""
     try:
         item = _current(review_id)
-        directory = _paths(item)["llm"]
+        directory = _paths(item)["agents"] / "responses"
         directory.mkdir(parents=True, exist_ok=True)
         seq = len(list(directory.glob("*.json"))) + 1
         _write_json(
             directory / f"{seq:03d}-{tag}-{attempt}.json",
             {
-                "request": llm_client.redacted_request(config, {"user_chars": len(user)}),
+                "request": {"agent": item.agent, "model": config.model_id, "base_url": config.base_url, "user_chars": len(user)},
                 "prompt": user,
                 "response": text,
+                "error": error,
             },
         )
     except Exception:  # noqa: BLE001 - 留档失败不该影响审核

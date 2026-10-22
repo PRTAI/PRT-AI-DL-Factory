@@ -7,11 +7,12 @@
  */
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { ClipboardCheck, FileDown, Package, Plus, Square, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth, useProject } from '@/lib/store'
+import { supportsProtocol } from '@/lib/model-api'
 import { formatBytes, formatPercent, formatRelative } from '@/lib/utils'
 import { Mono, PageHeader, InlineHint } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
@@ -35,7 +36,7 @@ import {
   Th,
   Tr,
 } from '@/components/ui'
-import type { ReviewStage, ReviewStatus, ReviewTask } from '@/lib/types'
+import type { ReasoningEffort, ReviewAgent, ReviewStage, ReviewStatus, ReviewTask } from '@/lib/types'
 
 const FILE_INPUT =
   'w-full rounded-lg border border-dashed border-border bg-bg-elevated px-3 py-5 text-xs text-fg-muted ' +
@@ -62,6 +63,7 @@ const ARCHIVE_ACCEPT = '.zip,.tar,.tar.gz,.tgz'
 const DOC_ACCEPT = '.docx,.pdf,.md,.txt'
 
 const DEFAULT_PROMPT = `请按规范逐题静态验收，重点关注目录结构、必需文件、metadata 字段与脚本权限位。`
+export const REVIEW_AGENTS: Record<ReviewAgent, string> = { 'claude-code': 'Claude Code', codex: 'Codex' }
 
 /* -------------------------------------------------------------------------- */
 /* 提交对话框                                                                  */
@@ -77,6 +79,8 @@ function SubmitDialog({
 }) {
   const { projectId } = useProject()
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: api.modelApis, enabled: open })
+  const projects = useQuery({ queryKey: ['projects', 'review-submit'], queryFn: () => api.projects(), enabled: open })
+  const [reviewProjectId, setReviewProjectId] = React.useState('')
 
   const [archive, setArchive] = React.useState<File | null>(null)
   const [docs, setDocs] = React.useState<File[]>([])
@@ -85,16 +89,25 @@ function SubmitDialog({
   const [specTitle, setSpecTitle] = React.useState('')
   const [prompt, setPrompt] = React.useState(DEFAULT_PROMPT)
   const [modelApiId, setModelApiId] = React.useState('')
+  const [agent, setAgent] = React.useState<ReviewAgent>('claude-code')
+  const [effort, setEffort] = React.useState<ReasoningEffort>('')
   const [progress, setProgress] = React.useState(0)
   const [error, setError] = React.useState<string | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
 
-  const ready = (modelApis.data ?? []).filter((item) => item.ready)
+  const protocol = agent === 'claude-code' ? 'anthropic' : 'responses'
+  const ready = (modelApis.data ?? []).filter((item) => item.ready && supportsProtocol(item, protocol))
+  const selectedModel = ready.find((item) => item.id === modelApiId)
   // 当前账号一个都没配密钥时不让提交——审核全程靠模型判定，没有 API 走不下去。
   const noModel = !modelApis.isLoading && ready.length === 0
+  const selectedProject = projects.data?.find((row) => row.project.id === reviewProjectId)?.project
 
   React.useEffect(() => {
-    if (!modelApiId && ready.length > 0) setModelApiId(ready[0].id)
+    if (open) setReviewProjectId(projectId)
+  }, [open, projectId])
+
+  React.useEffect(() => {
+    if (!ready.some((item) => item.id === modelApiId)) setModelApiId(ready[0]?.id ?? '')
   }, [modelApiId, ready])
 
   const reset = () => {
@@ -109,7 +122,7 @@ function SubmitDialog({
   }
 
   const submit = async () => {
-    if (!archive || docs.length === 0 || !modelApiId) return
+    if (!archive || docs.length === 0 || !selectedModel || !selectedProject || selectedProject.archived) return
     setError(null)
     setSubmitting(true)
     const form = new FormData()
@@ -120,7 +133,9 @@ function SubmitDialog({
     form.append('spec_title', specTitle)
     form.append('prompt', prompt)
     form.append('model_api_id', modelApiId)
-    form.append('project_id', projectId)
+    form.append('agent', agent)
+    form.append('reasoning_effort', effort)
+    form.append('project_id', selectedProject.id)
     try {
       const item = await api.createReview(form, setProgress)
       toast.success('审核已提交', { description: `工作目录 ${item.workspace}` })
@@ -143,7 +158,7 @@ function SubmitDialog({
       }}
       width="max-w-2xl"
       title="提交样例审核"
-      description="平台先解压采证，再按需求文档把质检内容拆成若干项逐题判定，最后出固定格式的返修报告。"
+      description="Agent 在独立容器中读取规范、检查原始文件；平台校验结论并生成返修报告。"
       footer={
         <>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
@@ -151,7 +166,7 @@ function SubmitDialog({
           </Button>
           <Button
             variant="primary"
-            disabled={!archive || docs.length === 0 || !modelApiId}
+            disabled={!archive || docs.length === 0 || !selectedModel || !selectedProject || selectedProject.archived}
             loading={submitting}
             onClick={submit}
           >
@@ -161,9 +176,21 @@ function SubmitDialog({
       }
     >
       <div className="space-y-4">
+        <Field label="所属项目" required hint="质检数据、结论和报告统一归属该项目。">
+          <Select
+            value={reviewProjectId}
+            onValueChange={setReviewProjectId}
+            placeholder={projects.isLoading ? '加载中…' : '请选择质检所属项目'}
+            options={(projects.data ?? []).map(({ project }) => ({ value: project.id, label: project.name }))}
+          />
+          {!projects.isLoading && !projects.data?.length && (
+            <p className="mt-1 text-xs text-fg-muted">请先到「项目」页创建项目。</p>
+          )}
+          {projects.isError && <ErrorBox message="项目加载失败，请重新打开提交窗口重试。" />}
+        </Field>
         {noModel && (
           <InlineHint>
-            还没有可用的模型 API（需要你已填密钥且配置已启用）。请先到「个人设置 → 我的 API Key」为平台填写自己的密钥。
+            没有支持当前 Agent 的可用模型。{agent === 'claude-code' ? 'Claude Code 需要 Anthropic 接口。' : 'Codex 需要 OpenAI Responses 接口。'}请检查模型接口和个人 API Key。
           </InlineHint>
         )}
 
@@ -225,7 +252,13 @@ function SubmitDialog({
           />
         </Field>
 
-        <Field label="模型 API" required hint="只列你已在个人设置中填写密钥、且已启用的配置">
+        <Field label="Agent harness" required hint="使用真正的工具调用循环，原始数据只读挂载，工具轨迹随任务留存。">
+          <Select value={agent} onValueChange={(value) => setAgent(value as ReviewAgent)} options={[
+            { value: 'claude-code', label: 'Claude Code', description: 'Anthropic Messages 接口，例如 DeepSeek Flash' },
+            { value: 'codex', label: 'Codex', description: 'OpenAI Responses 接口' },
+          ]} />
+        </Field>
+        <Field label="模型 API" required hint={`仅列支持 ${agent === 'claude-code' ? 'Anthropic Messages' : 'OpenAI Responses'} 且已配置密钥的模型`}>
           <Select
             value={modelApiId}
             onValueChange={setModelApiId}
@@ -237,6 +270,13 @@ function SubmitDialog({
               description: `${item.provider} · ${item.model_id}`,
             }))}
           />
+        </Field>
+        {selectedModel && <InlineHint>本次组合：{REVIEW_AGENTS[agent]} + {selectedModel.model_id}</InlineHint>}
+        <Field label="思考强度" hint="默认交给 Agent；平台会按 harness 支持的档位设置。">
+          <Select value={effort || 'default'} onValueChange={(value) => setEffort(value === 'default' ? '' : value as ReasoningEffort)} options={[
+            { value: 'default', label: '默认' },
+            ...['low', 'medium', 'high', 'xhigh', 'max'].map((value) => ({ value, label: value })),
+          ]} />
         </Field>
 
         <Field label="自定义提示词" hint="补充说明这批数据的关注点；不会替代需求文档，只是叠加在上面">
@@ -255,14 +295,29 @@ function SubmitDialog({
 /* -------------------------------------------------------------------------- */
 export default function Review() {
   const { user } = useAuth()
+  const { projectId, setProject } = useProject()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const queryClient = useQueryClient()
   const [mineOnly, setMineOnly] = React.useState(true)
   const [open, setOpen] = React.useState(false)
+  const urlProject = searchParams.get('project') ?? ''
+  const effectiveProject = urlProject || projectId
+  const projects = useQuery({
+    queryKey: ['projects', 'names'],
+    queryFn: () => api.projects({ include_archived: true }),
+    staleTime: 30_000,
+  })
+
+  React.useEffect(() => {
+    if (!urlProject) return
+    setProject(urlProject)
+    setSearchParams({}, { replace: true })
+  }, [urlProject, setProject, setSearchParams])
 
   const reviews = useQuery({
-    queryKey: ['reviews', mineOnly],
-    queryFn: () => api.reviews({ mine_only: mineOnly }),
+    queryKey: ['reviews', mineOnly, effectiveProject],
+    queryFn: () => api.reviews({ mine_only: mineOnly, project_id: effectiveProject || undefined }),
     // 审核在进程内跑，没有 WebSocket 推送，靠轮询看进度
     refetchInterval: 4000,
   })
@@ -291,7 +346,7 @@ export default function Review() {
     <div>
       <PageHeader
         title="样例审核"
-        description="按需求文档对样例数据做逐题静态验收，输出固定格式的返修报告。不占 GPU，也不进调度队列。"
+        description="通过 Agent harness + 模型在容器内审核原始数据，质检和报告归属于项目。不占 GPU。"
         actions={
           <>
             {user?.role === 'admin' && (
@@ -307,6 +362,19 @@ export default function Review() {
         }
       />
 
+      <div className="mb-4 max-w-sm">
+        <Select
+          value={effectiveProject || 'all'}
+          onValueChange={(value) => setProject(value === 'all' ? '' : value)}
+          options={[
+            { value: 'all', label: '全部项目' },
+            ...(projects.data ?? []).map(({ project }) => ({
+              value: project.id,
+              label: `${project.name}${project.archived ? '（已归档）' : ''}`,
+            })),
+          ]}
+        />
+      </div>
       <Card>
         {reviews.isLoading ? (
           <div className="space-y-2 p-4">
@@ -314,6 +382,8 @@ export default function Review() {
             <Skeleton className="h-9" />
             <Skeleton className="h-9" />
           </div>
+        ) : reviews.isError ? (
+          <ErrorBox message={reviews.error instanceof ApiError ? reviews.error.message : '审核记录加载失败'} />
         ) : items.length === 0 ? (
           <EmptyState
             icon={<ClipboardCheck className="h-6 w-6" />}
@@ -331,6 +401,7 @@ export default function Review() {
               <Tr>
                 <Th>批次</Th>
                 <Th>供应商</Th>
+                <Th>Agent / 模型</Th>
                 <Th>状态</Th>
                 <Th className="text-right">受检</Th>
                 <Th className="text-right">不合格</Th>
@@ -361,6 +432,8 @@ export default function Review() {
         onOpenChange={setOpen}
         onCreated={(item) => {
           void queryClient.invalidateQueries({ queryKey: ['reviews'] })
+          void queryClient.invalidateQueries({ queryKey: ['projects'] })
+          setProject(item.project_id)
           navigate(`/review/${item.id}`)
         }}
       />
@@ -392,10 +465,16 @@ function ReviewRow({
         </button>
         <div className="mt-0.5 flex items-center gap-1.5">
           <Mono className="text-[10px] text-fg-subtle">{item.workspace}</Mono>
-          {item.project_id && <ProjectTag projectId={item.project_id} />}
+          <Link to={`/review?project=${item.project_id}`} title="查看该项目的质检记录">
+            <ProjectTag projectId={item.project_id} linked={false} />
+          </Link>
         </div>
       </Td>
       <Td className="text-fg-muted">{item.supplier || '—'}</Td>
+      <Td>
+        <div className="text-xs">{item.agent ? REVIEW_AGENTS[item.agent] : '直接 LLM（历史）'}</div>
+        <div className="mt-0.5 max-w-56 truncate text-[10px] text-fg-subtle" title={item.model_label}>{item.model_label || '—'}</div>
+      </Td>
       <Td>
         <StatusDot tone={status.tone} pulse={running} label={running ? REVIEW_STAGE[item.stage] : status.label} />
         {item.error && <div className="mt-0.5 max-w-60 truncate text-[10px] text-danger">{item.error}</div>}

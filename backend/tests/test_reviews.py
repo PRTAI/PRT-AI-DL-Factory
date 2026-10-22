@@ -1,6 +1,6 @@
 """样例审核：采证、防编造闸门、返回校验、汇总口径、报告固定格式、接口权限。
 
-模型调用全部打桩（``llm_client.chat``），测试不碰网络。真正值得测的是平台自己的
+Agent 执行全部打桩（``review_agent_service.run``），测试不碰网络。真正值得测的是平台自己的
 那一半：证据是不是从压缩包的记录里读出来的、模型胡编的质检项有没有被拦掉、
 模型说不清的题有没有被算成通过、报告的四节骨架有没有变。
 """
@@ -22,8 +22,9 @@ from backend.app.models import (
     ReviewStatus,
     ReviewVerdict,
 )
-from backend.app.services import archive, llm_client, review_evidence, review_service
+from backend.app.services import archive, review_agent_service, review_evidence, review_service
 from backend.app.store import store
+from .conftest import project_id
 
 SPEC_TEXT = """\
 # 外发版-评测题包交付规范（rewardkit）20260913
@@ -127,11 +128,11 @@ def _evidence_ids(user: str) -> list[str]:
     return re.findall(r'"task_id": "([^"]+)"', body)
 
 
-def _stub_chat(monkeypatch, *, plan: dict, results):
+def _stub_agent(monkeypatch, *, plan: dict, results):
     """results(code, task_ids) -> list[dict]"""
     calls: list[str] = []
 
-    async def fake_chat(config, *, system, user, **kwargs):
+    async def fake_agent(config, *, system, user, **kwargs):
         del config, kwargs
         if "质检方案设计者" in system:
             calls.append("plan")
@@ -140,7 +141,7 @@ def _stub_chat(monkeypatch, *, plan: dict, results):
         calls.append(f"check:{code}")
         return json.dumps({"results": results(code, _evidence_ids(user))}, ensure_ascii=False), {}
 
-    monkeypatch.setattr(llm_client, "chat", fake_chat)
+    monkeypatch.setattr(review_agent_service, "run", fake_agent)
     return calls
 
 
@@ -170,7 +171,7 @@ def _honest_results(code: str, task_ids: list[str]) -> list[dict]:
 def _model_api() -> ModelApiConfig:
     config = store.model_apis.first(lambda c: c.name == "review-stub")
     if config is None:
-        config = ModelApiConfig(name="review-stub", provider="openai")
+        config = ModelApiConfig(name="review-stub", provider="anthropic")
         store.model_apis.put(config)
     from .conftest import grant_key
     for user in store.users.all():  # 每个账号用自己的密钥，测试里大家都填同一个
@@ -194,6 +195,7 @@ def _submit(samples_zip: Path, spec_doc: Path, *, prompt: str = "") -> str:
                 spec_title="外发版-评测题包交付规范（rewardkit）20260913",
                 prompt=prompt,
                 model_api_id=config.id,
+                project_id=project_id(),
             ),
             archive_name=samples_zip.name,
             archive_stream=arc,
@@ -263,7 +265,7 @@ def test_fabricated_quote_is_dropped(monkeypatch, samples_zip, spec_doc):
             },
         ]
     }
-    _stub_chat(monkeypatch, plan=plan, results=_honest_results)
+    _stub_agent(monkeypatch, plan=plan, results=_honest_results)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -295,7 +297,7 @@ def test_all_checks_fabricated_fails_the_review(monkeypatch, samples_zip, spec_d
             }
         ]
     }
-    _stub_chat(monkeypatch, plan=plan, results=_honest_results)
+    _stub_agent(monkeypatch, plan=plan, results=_honest_results)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -319,7 +321,7 @@ def test_unknown_task_id_is_dropped_and_missing_answer_needs_review(
             {"task_id": task_ids[0], "verdict": "pass", "problems": []},
         ]
 
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=sloppy)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=sloppy)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -341,7 +343,7 @@ def test_fail_without_problems_is_downgraded(monkeypatch, samples_zip, spec_doc)
     def mute(code: str, task_ids: list[str]) -> list[dict]:
         return [{"task_id": tid, "verdict": "fail", "problems": []} for tid in task_ids]
 
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=mute)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=mute)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -356,7 +358,7 @@ def test_fail_without_problems_is_downgraded(monkeypatch, samples_zip, spec_doc)
 def test_non_json_reply_is_retried_then_fails_the_check(monkeypatch, samples_zip, spec_doc):
     attempts: list[str] = []
 
-    async def fake_chat(config, *, system, user, **kwargs):
+    async def fake_agent(config, *, system, user, **kwargs):
         del config, kwargs
         if "质检方案设计者" in system:
             return json.dumps(PLAN_TWO_CHECKS, ensure_ascii=False), {}
@@ -367,7 +369,7 @@ def test_non_json_reply_is_retried_then_fails_the_check(monkeypatch, samples_zip
         task_ids = re.findall(r'"task_id": "([^"]+)"', user)
         return json.dumps({"results": _honest_results(code, task_ids)}, ensure_ascii=False), {}
 
-    monkeypatch.setattr(llm_client, "chat", fake_chat)
+    monkeypatch.setattr(review_agent_service, "run", fake_agent)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -387,7 +389,7 @@ def test_non_json_reply_is_retried_then_fails_the_check(monkeypatch, samples_zip
 # 阶段 ④：汇总与报告
 # --------------------------------------------------------------------------- #
 def test_aggregation_and_pass_rate(monkeypatch, samples_zip, spec_doc):
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -461,7 +463,7 @@ def test_docx_keeps_the_fixed_format(monkeypatch, samples_zip, spec_doc):
             ]
         return _honest_results(code, task_ids)
 
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=mixed)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=mixed)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -492,7 +494,7 @@ def test_docx_keeps_the_fixed_format(monkeypatch, samples_zip, spec_doc):
 
 
 def test_manual_section_is_omitted_when_empty(monkeypatch, samples_zip, spec_doc):
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -505,7 +507,7 @@ def test_manual_section_is_omitted_when_empty(monkeypatch, samples_zip, spec_doc
 # 留存与接口
 # --------------------------------------------------------------------------- #
 def test_workspace_layout_is_preserved(monkeypatch, samples_zip, spec_doc):
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
@@ -525,27 +527,27 @@ def test_workspace_layout_is_preserved(monkeypatch, samples_zip, spec_doc):
     ):
         assert (base / rel).exists(), rel
     # 模型不许留下过程文件：工作目录里只有平台自己写的 JSON、上传件与 docx
-    produced = {q.suffix for q in base.glob("*")} | {q.suffix for q in (base / "llm").glob("*")}
+    produced = {q.suffix for q in base.glob("*")} | {q.suffix for q in (base / "agents" / "responses").glob("*")}
     assert produced <= {"", ".json", ".docx"}
 
 
-def test_llm_archive_never_contains_the_api_key(monkeypatch, samples_zip, spec_doc):
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
+def test_agent_archive_never_contains_the_api_key(monkeypatch, samples_zip, spec_doc):
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
     review_id = _submit(samples_zip, spec_doc)
     _run(review_id)
 
     item = store.reviews.get(review_id)
-    archived = list((review_service.work_dir(item) / "llm").glob("*.json"))
+    archived = list((review_service.work_dir(item) / "agents" / "responses").glob("*.json"))
     assert archived
     blob = "\n".join(p.read_text("utf-8") for p in archived)
     assert "sk-stub-key" not in blob
-    assert "header_keys" in blob
+    assert '"agent": "claude-code"' in blob
 
 
 def test_api_history_download_and_isolation(
     monkeypatch, client, member_headers, admin_headers, samples_zip, spec_doc
 ):
-    _stub_chat(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
     config = _model_api()
     with samples_zip.open("rb") as arc, spec_doc.open("rb") as doc:
         response = client.post(
@@ -560,6 +562,7 @@ def test_api_history_download_and_isolation(
                 "supplier": "铂瑞缇",
                 "spec_title": "交付规范",
                 "model_api_id": config.id,
+                "project_id": project_id(),
             },
         )
     assert response.status_code == 201, response.text
@@ -608,6 +611,8 @@ def test_api_history_download_and_isolation(
     ).json()["access_token"]
     stranger_headers = {"Authorization": f"Bearer {token}"}
     assert client.get(f"/api/reviews/{review_id}", headers=stranger_headers).status_code == 403
+    assert client.get(f"/api/reviews/{review_id}/log", headers=stranger_headers).status_code == 403
+    assert client.get(f"/api/reviews/{review_id}/log", headers=member_headers).status_code == 200
     assert client.delete(f"/api/reviews/{review_id}", headers=stranger_headers).status_code == 403
 
 
@@ -619,7 +624,7 @@ def test_submit_rejects_bad_input(client, member_headers, samples_zip, spec_doc)
             "/api/reviews",
             headers=member_headers,
             files=[("archive", ("samples.zip", arc.read(), "application/zip"))],
-            data={"name": "无文档", "model_api_id": config.id},
+            data={"name": "无文档", "model_api_id": config.id, "project_id": project_id()},
         )
     assert response.status_code == 422
 
@@ -633,7 +638,7 @@ def test_submit_rejects_bad_input(client, member_headers, samples_zip, spec_doc)
             ("archive", ("样例.txt", b"not an archive", "text/plain")),
             ("docs", ("交付规范.md", body, "text/markdown")),
         ],
-        data={"name": "错格式", "model_api_id": config.id},
+        data={"name": "错格式", "model_api_id": config.id, "project_id": project_id()},
     )
     assert response.status_code == 400
     assert "打包" in response.json()["detail"]
@@ -646,6 +651,167 @@ def test_submit_rejects_bad_input(client, member_headers, samples_zip, spec_doc)
             ("archive", ("samples.zip", samples_zip.read_bytes(), "application/zip")),
             ("docs", ("交付规范.md", body, "text/markdown")),
         ],
-        data={"name": "坏模型", "model_api_id": "mdl_nope"},
+        data={"name": "坏模型", "model_api_id": "mdl_nope", "project_id": project_id()},
     )
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("project_value,expected", [
+    (None, 422), ("", 422), ("   ", 400), ("prj_missing", 404), ("archived", 400),
+])
+def test_submission_requires_usable_project(
+    monkeypatch, client, member_headers, samples_zip, spec_doc, project_value, expected,
+):
+    from backend.app.models import Project
+
+    monkeypatch.setattr(review_service, "_spawn", lambda _: None)
+    if project_value == "archived":
+        project = Project(name="归档质检项目", owner_id=_owner().id, archived=True)
+        store.projects.put(project)
+        project_value = project.id
+    data = {"name": "项目校验", "model_api_id": _model_api().id}
+    if project_value is not None:
+        data["project_id"] = project_value
+    before = len(store.reviews.all())
+    response = client.post(
+        "/api/reviews", headers=member_headers, data=data,
+        files=[
+            ("archive", ("samples.zip", samples_zip.read_bytes(), "application/zip")),
+            ("docs", ("规范.md", spec_doc.read_bytes(), "text/markdown")),
+        ],
+    )
+    assert response.status_code == expected, response.text
+    assert len(store.reviews.all()) == before
+
+
+def test_review_project_is_canonical_and_history_is_scoped(
+    monkeypatch, client, member_headers, samples_zip, spec_doc,
+):
+    monkeypatch.setattr(review_service, "_spawn", lambda _: None)
+    project = client.post("/api/projects", headers=member_headers, json={"name": "质检归属测试"}).json()
+    response = client.post(
+        "/api/reviews", headers=member_headers,
+        data={"name": "项目内质检", "model_api_id": _model_api().id, "project_id": project["slug"]},
+        files=[
+            ("archive", ("samples.zip", samples_zip.read_bytes(), "application/zip")),
+            ("docs", ("规范.md", spec_doc.read_bytes(), "text/markdown")),
+        ],
+    )
+    assert response.status_code == 201, response.text
+    item = response.json()
+    assert item["project_id"] == project["id"]
+    rows = client.get("/api/reviews", headers=member_headers, params={"project_id": project["id"]}).json()
+    assert [row["id"] for row in rows] == [item["id"]]
+    other_rows = client.get("/api/reviews", headers=member_headers, params={"project_id": project_id()}).json()
+    assert item["id"] not in {row["id"] for row in other_rows}
+    detail = client.get(f"/api/projects/{project['id']}", headers=member_headers).json()
+    assert detail["stats"]["review_tasks"] == 1
+    assert detail["project"]["updated_at"] >= item["created_at"]
+
+
+@pytest.mark.parametrize("review_status", ["queued", "succeeded", "failed", "cancelled"])
+def test_project_with_reviews_cannot_be_deleted(client, admin_headers, review_status):
+    from backend.app.models import Project, ReviewTask
+
+    project = Project(name=f"保留质检-{review_status}", owner_id=_owner().id)
+    store.projects.put(project)
+    item = ReviewTask(name="历史质检", owner_id=_owner().id, project_id=project.id, status=review_status)
+    store.reviews.put(item)
+    response = client.delete(f"/api/projects/{project.id}", headers=admin_headers)
+    assert response.status_code == 409
+    assert "质检" in response.json()["detail"]
+    assert store.projects.get(project.id) is not None
+
+
+def test_orphan_review_migration_preserves_valid_archived_project():
+    from backend.app.models import Project, ReviewTask
+
+    project = Project(name="已有归档项目", owner_id=_owner().id, archived=True)
+    store.projects.put(project)
+    blank = ReviewTask(name="无归属历史质检", owner_id=_owner().id)
+    missing = ReviewTask(name="失效项目历史质检", owner_id=_owner().id, project_id="deleted_project")
+    valid = ReviewTask(name="归档项目质检", owner_id=_owner().id, project_id=project.id)
+    for item in (blank, missing, valid):
+        store.reviews.put(item)
+    try:
+        assert review_service.adopt_orphan_reviews() == 2
+        adopted = store.reviews.get(blank.id).project_id
+        assert store.projects.get(adopted) is not None
+        assert store.reviews.get(missing.id).project_id == adopted
+        assert store.reviews.get(valid.id).project_id == project.id
+        assert review_service.adopt_orphan_reviews() == 0
+    finally:
+        for item in (blank, missing, valid):
+            store.reviews.delete(item.id)
+
+
+def test_failed_agent_call_preserves_error(monkeypatch, samples_zip, spec_doc):
+    async def fail(*args, **kwargs):
+        raise review_agent_service.ReviewAgentError("Agent 未生成结论文件")
+
+    monkeypatch.setattr(review_agent_service, "run", fail)
+    review_id = _submit(samples_zip, spec_doc)
+    _run(review_id)
+    item = store.reviews.get(review_id)
+    assert item.status is ReviewStatus.FAILED
+    logs = list((review_service.work_dir(item) / "agents" / "responses").glob("*.json"))
+    assert len(logs) == 1
+    archived = json.loads(logs[0].read_text())
+    assert archived["error"] == "Agent 未生成结论文件"
+    assert "sk-stub-key" not in logs[0].read_text()
+
+
+def test_review_pipeline_does_not_call_bare_llm(monkeypatch, samples_zip, spec_doc):
+    from backend.app.services import llm_client
+
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("审核不得回退到直接 LLM 调用")
+
+    monkeypatch.setattr(llm_client, "chat", forbidden)
+    _stub_agent(monkeypatch, plan=PLAN_TWO_CHECKS, results=_honest_results)
+    review_id = _submit(samples_zip, spec_doc)
+    _run(review_id)
+    assert store.reviews.get(review_id).status is ReviewStatus.SUCCEEDED
+
+
+def test_restart_also_reaps_cancelled_reviews(monkeypatch):
+    from backend.app.models import ReviewTask
+
+    item = ReviewTask(name="已取消的审核", owner_id=_owner().id, project_id=project_id(), agent="claude-code", status=ReviewStatus.CANCELLED)
+    store.reviews.put(item)
+    reaped = []
+
+    async def reap(entry):
+        reaped.append(entry.id)
+
+    monkeypatch.setattr(review_agent_service, "reap_orphans", reap)
+    asyncio.run(review_service.reconcile())
+    assert item.id in reaped
+    assert store.reviews.get(item.id).status is ReviewStatus.CANCELLED
+
+
+@pytest.mark.parametrize("agent,provider,expected", [
+    ("claude-code", "anthropic", 201), ("codex", "openai", 201),
+    ("claude-code", "openai", 400), ("codex", "anthropic", 400), ("oracle", "anthropic", 422),
+])
+def test_review_validates_harness_and_model_protocol(
+    monkeypatch, client, member_headers, samples_zip, spec_doc, agent, provider, expected,
+):
+    from .conftest import grant_key, user_id_of
+
+    monkeypatch.setattr(review_service, "_spawn", lambda _: None)
+    config = ModelApiConfig(name="review-protocol", provider=provider)
+    store.model_apis.put(config)
+    grant_key(user_id_of("dev@prt.local"), config.id, "sk-review-protocol")
+    response = client.post(
+        "/api/reviews", headers=member_headers,
+        data={"name": "Agent 组合", "project_id": project_id(), "model_api_id": config.id, "agent": agent},
+        files=[
+            ("archive", ("samples.zip", samples_zip.read_bytes(), "application/zip")),
+            ("docs", ("规范.md", spec_doc.read_bytes(), "text/markdown")),
+        ],
+    )
+    assert response.status_code == expected, response.text
+    if expected == 201:
+        assert response.json()["agent"] == agent
+        assert store.reviews.get(response.json()["id"]).agent == agent

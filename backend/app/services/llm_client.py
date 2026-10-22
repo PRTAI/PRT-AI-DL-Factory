@@ -28,11 +28,20 @@ RETRY_STATUSES = {408, 409, 425, 429, 500, 502, 503, 504}
 class LLMError(RuntimeError):
     """调用失败（网络、鉴权、限流重试耗尽）。消息可以直接给用户看，不含密钥。"""
 
+    def __init__(self, message: str, *, diagnostics: list[dict[str, Any]] | None = None) -> None:
+        super().__init__(message)
+        self.diagnostics = diagnostics or []
+
 
 def base_url_for(config: ModelApiConfig) -> str:
     spec = PROVIDERS.get(config.provider, {})
     url = config.base_url.strip() or str(spec.get("default_base_url", ""))
-    return url.rstrip("/")
+    url = url.rstrip("/")
+    # Anthropic SDK 在 base_url 后追加 /v1/messages；平台用 HTTP 直调，
+    # 必须补齐同样的版本路径（例如 DeepSeek 的 /anthropic 根地址）。
+    if url and config.provider == "anthropic" and not url.endswith("/v1"):
+        url += "/v1"
+    return url
 
 
 def _headers(config: ModelApiConfig) -> dict[str, str]:
@@ -87,6 +96,8 @@ def build_payload(
 def extract_text(provider: str, data: dict[str, Any]) -> str:
     if provider == "anthropic":
         blocks = data.get("content") or []
+        if isinstance(blocks, str):
+            return blocks.strip()
         parts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"]
         return "".join(parts).strip()
     choices = data.get("choices") or []
@@ -99,6 +110,25 @@ def extract_text(provider: str, data: dict[str, Any]) -> str:
             b.get("text", "") for b in content if isinstance(b, dict)
         )
     return (content or "").strip()
+
+
+def response_summary(provider: str, data: dict[str, Any]) -> dict[str, Any]:
+    """只保留响应结构与用量，失败时也能判断是否耗尽预算；不将思考内容当作结论。"""
+    if provider == "anthropic":
+        blocks = data.get("content") or []
+        types = [str(block.get("type", "unknown")) for block in blocks if isinstance(block, dict)]
+        stop = data.get("stop_reason")
+    else:
+        choice = (data.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        types = [key for key in ("content", "reasoning_content", "tool_calls") if message.get(key)]
+        stop = choice.get("finish_reason")
+    return {
+        "response_keys": sorted(data),
+        "stop_reason": stop,
+        "content_types": types,
+        "usage": extract_usage(provider, data),
+    }
 
 
 def extract_usage(provider: str, data: dict[str, Any]) -> dict[str, int]:
@@ -135,17 +165,31 @@ async def chat(
         config, system=system, user=user, max_tokens=max_tokens, temperature=temperature
     )
     last = ""
+    diagnostics: list[dict[str, Any]] = []
     for attempt in range(1, attempts + 1):
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(base + suffix, json=payload, headers=_headers(config))
             if resp.status_code >= 400:
-                last = f"HTTP {resp.status_code}: {resp.text[:400]}"
+                last = f"HTTP {resp.status_code}: {resp.text.replace(config.api_key.strip(), '[REDACTED]')[:400]}"
                 if resp.status_code in RETRY_STATUSES and attempt < attempts:
                     await asyncio.sleep(min(2 ** attempt, 16))
                     continue
-                raise LLMError(last)
+                raise LLMError(last, diagnostics=diagnostics)
             data = resp.json()
+            if not isinstance(data, dict):
+                raise LLMError("模型接口响应不是 JSON 对象", diagnostics=diagnostics)
+            if data.get("error"):
+                error = str(data["error"]).replace(config.api_key.strip(), "[REDACTED]")[:400]
+                raise LLMError(f"模型接口返回错误：{error}", diagnostics=diagnostics)
+            summary = response_summary(config.provider, data)
+            diagnostics.append(summary)
+            expected = "content" if config.provider == "anthropic" else "choices"
+            if expected not in data:
+                raise LLMError(
+                    f"模型接口响应缺少 {expected} 字段，请检查接口地址与协议",
+                    diagnostics=diagnostics,
+                )
         except LLMError:
             raise
         except Exception as exc:  # 网络错误 / 非 JSON 响应
@@ -153,18 +197,25 @@ async def chat(
             if attempt < attempts:
                 await asyncio.sleep(min(2 ** attempt, 16))
                 continue
-            raise LLMError(f"调用模型 API 失败：{last}") from exc
+            raise LLMError(f"调用模型 API 失败：{last}", diagnostics=diagnostics) from exc
 
         text = extract_text(config.provider, data)
         if not text:
             last = "模型返回了空内容"
+            stop = summary["stop_reason"]
+            if stop in {"max_tokens", "length"}:
+                raise LLMError(
+                    f"模型输出达到 token 上限（{stop}），但未返回正文；请提高输出预算或关闭该模型的思考模式",
+                    diagnostics=diagnostics,
+                )
+            last += f"（stop_reason={stop or '未提供'}；内容类型={','.join(summary['content_types']) or '无'}）"
             if attempt < attempts:
                 await asyncio.sleep(1.0)
                 continue
-            raise LLMError(last)
+            raise LLMError(last, diagnostics=diagnostics)
         return text, extract_usage(config.provider, data)
 
-    raise LLMError(f"调用模型 API 失败：{last}")
+    raise LLMError(f"调用模型 API 失败：{last}", diagnostics=diagnostics)
 
 
 # --------------------------------------------------------------------------- #

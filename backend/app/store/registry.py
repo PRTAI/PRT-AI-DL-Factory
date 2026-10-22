@@ -25,6 +25,7 @@ from ..models import (
     UserApiKey,
 )
 from .json_store import JsonCollection, JsonDocument, JsonlLog
+from ..models.billing import BillingArchive, PricingSettings, UsageCharge
 
 
 class Store:
@@ -57,6 +58,9 @@ class Store:
         self.settings_doc: JsonDocument[SystemSettings] = JsonDocument(
             db / "settings.json", SystemSettings
         )
+        self.pricing_doc = JsonDocument(db / "pricing.json", PricingSettings)
+        self.usage_charges = JsonCollection(db / "usage_charges.json", UsageCharge)
+        self.billing_archives = JsonCollection(db / "billing_archives.json", BillingArchive)
         self.audit = JsonlLog(settings.audit_dir / "audit.jsonl")
 
     # Convenience wrappers used all over the services layer.

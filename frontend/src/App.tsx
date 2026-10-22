@@ -103,7 +103,7 @@ export default function App() {
         <Route path="/datasets" element={<Datasets />} />
         <Route path="/models" element={<Models />} />
         <Route path="/deployments" element={<Deployments />} />
-        {/* 审核不是训练任务，项目归属可选，所以不套 ProjectGate */}
+        {/* 审核在提交窗口必选项目；列表保留跨项目及已归档项目的历史查询 */}
         <Route path="/review" element={<Review />} />
         <Route path="/review/:reviewId" element={<ReviewDetail />} />
         <Route

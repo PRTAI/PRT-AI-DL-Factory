@@ -406,6 +406,11 @@ function ProjectCard({
         <Chip label="任务" value={stats.total_jobs} />
         {stats.training_jobs > 0 && <Chip label="训练" value={stats.training_jobs} tone="primary" />}
         {stats.verify_jobs > 0 && <Chip label="评测" value={stats.verify_jobs} tone="info" />}
+        {stats.review_tasks > 0 && (
+          <Link to={`/review?project=${project.id}`} title="查看项目的质检记录">
+            <Chip label="质检" value={stats.review_tasks} tone="primary" />
+          </Link>
+        )}
         {stats.running > 0 && <Chip label="运行中" value={stats.running} tone="success" pulse />}
         {stats.pending_review > 0 && <Chip label="待审" value={stats.pending_review} tone="warning" />}
         {project.tags.map((tag) => (

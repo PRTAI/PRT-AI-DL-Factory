@@ -34,6 +34,7 @@ import {
 import { PageHeader } from '@/components/common'
 import { HarborImagePanel } from '@/components/HarborImagePanel'
 import { ModelApiPanel } from '@/components/ModelApiPanel'
+import { PricingPanel } from '@/components/PricingPanel'
 
 export default function Admin() {
   // /admin?tab=models 可以直接分享给要维护模型平台的人
@@ -53,6 +54,7 @@ export default function Admin() {
           <TabsTrigger value="users">账号管理</TabsTrigger>
           <TabsTrigger value="review">待审核</TabsTrigger>
           <TabsTrigger value="models">模型 API</TabsTrigger>
+          <TabsTrigger value="pricing">价格与折扣</TabsTrigger>
           <TabsTrigger value="settings">系统设置</TabsTrigger>
           <TabsTrigger value="harbor-image">Harbor 镜像</TabsTrigger>
           <TabsTrigger value="toolchain">工具链</TabsTrigger>
@@ -68,6 +70,7 @@ export default function Admin() {
         <TabsContent value="models" className="mt-3">
           <ModelApiPanel />
         </TabsContent>
+        <TabsContent value="pricing" className="mt-3"><PricingPanel /></TabsContent>
         <TabsContent value="settings" className="mt-3">
           <SettingsPanel />
         </TabsContent>

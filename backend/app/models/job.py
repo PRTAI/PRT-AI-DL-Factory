@@ -13,6 +13,7 @@ from typing import Any, Literal
 from pydantic import Field, field_validator, model_serializer, model_validator
 
 from ..redaction import public_payload
+from .billing import BillingSummary
 
 from .common import (
     Base,
@@ -408,6 +409,7 @@ class Job(Base):
     runtime: JobRuntime = Field(default_factory=JobRuntime)
     progress: JobProgress = Field(default_factory=JobProgress)
     metrics: JobMetricsSummary = Field(default_factory=JobMetricsSummary)
+    billing: BillingSummary = Field(default_factory=BillingSummary)
 
     sft: SFTConfig | None = None
     rl: RLConfig | None = None

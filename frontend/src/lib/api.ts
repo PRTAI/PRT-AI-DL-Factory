@@ -25,6 +25,7 @@ import type {
   ModelProviderInfo,
   ModelPlatform,
   PlatformCatalog,
+  PricingSettings,
   UserApiKey,
   RegistryDataset,
   ReviewFinding,
@@ -434,6 +435,7 @@ export const api = {
     request<ReviewTask[]>(`/api/reviews${qs(params)}`),
   review: (id: string) => request<ReviewTask>(`/api/reviews/${id}`),
   reviewFindings: (id: string) => request<ReviewFinding[]>(`/api/reviews/${id}/findings`),
+  reviewAgentLog: (id: string) => request<{ text: string; running: boolean }>(`/api/reviews/${id}/log`),
   // 压缩包可能很大，照 uploadDataset 用 XHR 才能拿到上传进度
   createReview: (form: FormData, onProgress?: (percent: number) => void) =>
     new Promise<ReviewTask>((resolve, reject) => {
@@ -474,6 +476,9 @@ export const api = {
   harborImageRecipe: () => request<{ dockerfile: string }>('/api/system/harbor-image/recipe'),
   buildHarborImage: () => request('/api/system/harbor-image/build', { method: 'POST' }),
   settings: () => request<SystemSettings>('/api/system/settings'),
+  pricing: () => request<PricingSettings>('/api/system/pricing'),
+  updatePricing: (payload: PricingSettings) =>
+    request<PricingSettings>('/api/system/pricing', { method: 'PUT', body: JSON.stringify(payload) }),
   updateSettings: (payload: SystemSettings) =>
     request<SystemSettings>('/api/system/settings', { method: 'PUT', body: JSON.stringify(payload) }),
   info: () =>

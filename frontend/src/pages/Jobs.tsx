@@ -26,6 +26,7 @@ import {
 } from '@/components/ui'
 import { JOB_STATUS_OPTIONS, JobTypeBadge, PageHeader, StatusBadge } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
+import { JobCost } from '@/components/Billing'
 
 const TYPE_OPTIONS: { value: JobType | 'all'; label: string }[] = [
   { value: 'all', label: '全部类型' },
@@ -363,6 +364,7 @@ export default function Jobs() {
                         <div className="num mt-0.5 truncate text-[11px] text-fg-subtle">{job.id}</div>
                       </Link>
                       {job.note && <div className="mt-0.5 line-clamp-1 text-[11px] text-fg-muted">{job.note}</div>}
+                      <JobCost job={job} />
                     </Td>
                     <Td>
                       <ProjectTag projectId={job.project_id} className="max-w-full text-xs" />

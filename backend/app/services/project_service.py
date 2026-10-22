@@ -82,6 +82,11 @@ def stats_for(project_id: str, jobs: list[Job] | None = None) -> ProjectStats:
         if stats.last_activity_at is None or job.updated_at > stats.last_activity_at:
             stats.last_activity_at = job.updated_at
     stats.members = sorted(m for m in members if m)
+    reviews = store.reviews.find(lambda item: item.project_id == project_id)
+    stats.review_tasks = len(reviews)
+    for item in reviews:
+        if stats.last_activity_at is None or item.updated_at > stats.last_activity_at:
+            stats.last_activity_at = item.updated_at
     return stats
 
 
@@ -264,6 +269,12 @@ def delete_project(project_id: str, *, actor: User) -> None:
             status.HTTP_409_CONFLICT,
             detail=f"项目下还有 {datasets} 个数据集，无法删除；请先转移数据集或归档项目",
         )
+    reviews = store.reviews.count(lambda item: item.project_id == project.id)
+    if reviews:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail=f"项目下还有 {reviews} 个质检任务，无法删除；可以改为归档",
+        )
     store.projects.delete(project.id)
     audit_service.record(
         "project.delete",
@@ -306,7 +317,7 @@ def ensure_default_project(*, owner_id: str, owner_email: str) -> Project:
         project = Project(
             name=DEFAULT_PROJECT_NAME,
             slug=slugify(DEFAULT_PROJECT_NAME),
-            description="未指定项目的历史任务与数据集",
+            description="未指定项目的历史任务、数据集与质检",
             owner_id=owner_id,
             owner_email=owner_email,
         )

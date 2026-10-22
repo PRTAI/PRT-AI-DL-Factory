@@ -83,7 +83,8 @@ class Settings(BaseSettings):
     review_max_tasks: int = 500           # 单次审核最多受检题数，超出即拒绝
     review_evidence_bytes: int = 8000     # 每份证据文本截断长度
     review_batch_chars: int = 60_000      # 一次 subagent 请求里证据 JSON 的字符上限
-    review_llm_timeout_seconds: float = 300.0
+    review_agent_timeout_seconds: float = 900.0
+    review_agent_image: str = "prt-ai-factory-harbor-eval-base-image:latest"
     review_max_doc_chars: int = 120_000   # 需求文档送进 prompt 的上限
 
     @field_validator(

@@ -23,6 +23,7 @@ import { formatBytes, formatDuration, formatNumber, formatRate, elapsedSeconds }
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Progress, Stat, Table, Td, Th, Tr } from '@/components/ui'
 import { JobTypeBadge, PageHeader, StatusBadge } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
+import { JobCost, SpendDashboard } from '@/components/Billing'
 import { Meter, UtilizationChart } from '@/components/charts'
 
 const timeLabel = (value: string | number) =>
@@ -116,6 +117,7 @@ export default function Dashboard() {
         />
       </div>
 
+      <SpendDashboard data={dashboard.data?.billing} />
       {/* ---------------------------------------------------- utilisation -- */}
       <div className="grid gap-3 xl:grid-cols-2">
         <Card>
@@ -355,6 +357,7 @@ export default function Dashboard() {
                     {job.name}
                   </Link>
                   <ProjectTag projectId={job.project_id} linked={false} className="mt-0.5 flex" />
+                  <JobCost job={job} />
                 </Td>
                 <Td>
                   <JobTypeBadge type={job.type} framework={job.framework} />
@@ -388,6 +391,7 @@ function ActiveJobRow({ job }: { job: Job }) {
         <Link to={`/jobs/${job.id}`} className="block min-w-0">
           <div className="truncate text-sm font-medium text-fg hover:text-primary">{job.name}</div>
           <ProjectTag projectId={job.project_id} linked={false} className="mt-0.5" />
+          <JobCost job={job} />
           <div className="mt-0.5">
             <JobTypeBadge type={job.type} framework={job.framework} />
           </div>

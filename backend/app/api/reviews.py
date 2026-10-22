@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 
 from ..deps import CurrentUser
-from ..models import ReviewCreate, ReviewTask
+from ..models import ReasoningEffort, ReviewCreate, ReviewTask
 from ..services import review_service
 
 router = APIRouter(prefix="/reviews", tags=["reviews"])
@@ -36,7 +36,9 @@ async def create_review(
     spec_title: str = Form(default="", description="依据规范名，进「一、说明」"),
     prompt: str = Form(default="", description="自定义提示词"),
     model_api_id: str = Form(...),
-    project_id: str = Form(default=""),
+    project_id: str = Form(..., min_length=1, description="质检所属项目"),
+    agent: Literal["claude-code", "codex"] = Form(default="claude-code", description="审核 Agent harness"),
+    reasoning_effort: ReasoningEffort = Form(default=""),
 ) -> ReviewTask:
     if not archive.filename:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="缺少压缩包文件名")
@@ -50,6 +52,8 @@ async def create_review(
         prompt=prompt,
         model_api_id=model_api_id,
         project_id=project_id,
+        agent=agent,
+        reasoning_effort=reasoning_effort,
     )
     return review_service.create_review(
         payload,
@@ -68,6 +72,13 @@ def get_review(review_id: str, user: CurrentUser) -> ReviewTask:
 @router.get("/{review_id}/findings", summary="逐题结论")
 def get_findings(review_id: str, user: CurrentUser) -> list[dict[str, Any]]:
     return review_service.findings_of(review_id, actor=user)
+
+
+@router.get("/{review_id}/log", summary="审核 Agent 执行日志")
+def get_agent_log(
+    review_id: str, user: CurrentUser, tail_bytes: int = Query(default=64_000, ge=1024, le=200_000),
+) -> dict[str, Any]:
+    return review_service.agent_log(review_id, actor=user, tail_bytes=tail_bytes)
 
 
 @router.get("/{review_id}/report.docx", summary="下载返修报告")
