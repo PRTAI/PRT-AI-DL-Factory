@@ -37,6 +37,11 @@ export default function Dashboard() {
     queryFn: () => api.dashboard(),
     refetchInterval: 10_000,
   })
+  const spend = useQuery({
+    queryKey: ['billing-summary'],
+    queryFn: api.spendSummary,
+    refetchInterval: query => query.state.data?.updating_jobs ? 2000 : 15_000,
+  })
 
   // Seed the chart from the REST snapshot until the socket delivers history.
   const points = stream.points.length ? stream.points : (dashboard.data?.history ?? [])
@@ -117,7 +122,7 @@ export default function Dashboard() {
         />
       </div>
 
-      <SpendDashboard data={dashboard.data?.billing} loading={dashboard.isPending} error={dashboard.isError} />
+      <SpendDashboard data={spend.data} loading={spend.isPending} error={spend.isError} />
       {/* ---------------------------------------------------- utilisation -- */}
       <div className="grid gap-3 xl:grid-cols-2">
         <Card>

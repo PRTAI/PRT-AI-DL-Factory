@@ -13,6 +13,8 @@ import os
 import threading
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -27,15 +29,20 @@ from ..store import store
 
 logger = logging.getLogger(__name__)
 _LOCK = threading.RLock()
-_REFRESHED: dict[str, float] = {}
 _MAX_JSON = 64 * 1024 * 1024
+_JOB_LOCKS = [threading.RLock() for _ in range(64)]
+_BILLING_VERSION = 2
+
+
+def price_catalog() -> list[ModelPrice]:
+    return [ModelPrice.model_validate(row) for row in json.loads(
+        (settings.resources_dir / "model_pricing.json").read_text(encoding="utf-8"))]
 
 
 def pricing() -> PricingSettings:
     result = store.pricing_doc.read()
     if result.prices is None:
-        result.prices = [ModelPrice.model_validate(row) for row in json.loads(
-            (settings.resources_dir / "model_pricing.json").read_text(encoding="utf-8"))]
+        result.prices = price_catalog()
     return result
 
 
@@ -49,7 +56,7 @@ def _vendor(url: str) -> tuple[str, str]:
     host = (urlsplit(url).hostname or "").lower()
     if host == "api.atlascloud.ai":
         return "atlascloud", ""
-    if host == "dashscope.aliyuncs.com":
+    if host == "dashscope.aliyuncs.com" or host.endswith(".cn-beijing.maas.aliyuncs.com"):
         return "alibaba", "cn-beijing"
     if host.endswith(".aliyuncs.com"):
         return "alibaba", "other"
@@ -175,7 +182,7 @@ def estimate(tokens: dict[str, int], component: PriceSnapshot, snapshot: Billing
     if price.valid_until and date > price.valid_until:
         return None, [f"价格已过有效期（{price.valid_until}）：{price.model}"]
     warnings = []
-    if price.note and price.vendor == "deepseek":
+    if price.note and "按高峰价格上限估算" in price.note:
         warnings.append(price.note)
     total_input = sum(tokens.get(key, 0) for key in ("input", "cache_read", "cache_write", "cache_write_long"))
     if aggregate and len(price.tiers) > 1:
@@ -314,7 +321,19 @@ def _raw_sessions(trial: Path, snapshot: BillingSnapshot):
                 yield phase, session, model, list(usages.values())
 
 
-def _charges(trial: Path, job: Job, snapshot: BillingSnapshot, ledger: dict[str, UsageCharge]):
+@dataclass
+class UsageRecord:
+    phase: str
+    session: str
+    model: str
+    usages: list[tuple[dict[str, int], bool, str]]
+    warnings: list[str] = field(default_factory=list)
+
+
+def _scan_trial(trial: Path, snapshot: BillingSnapshot) -> tuple[list[UsageRecord], set[str]]:
+    # Only read logs here. Ledger ownership and writes are resolved at commit time.
+    records: list[UsageRecord] = []
+    obsolete: set[str] = set()
     found_agent = False
     # New LLM Judges record counters through the platform RewardKit entrypoint.
     for directory, dirs, files in os.walk(trial, followlinks=False):
@@ -326,7 +345,7 @@ def _charges(trial: Path, job: Job, snapshot: BillingSnapshot, ledger: dict[str,
         path = Path(directory) / "prt-model-usage.jsonl"
         if path.is_symlink() or not path.is_file() or path.stat().st_size > _MAX_JSON:
             continue
-        records = {}
+        requests = {}
         with path.open(encoding="utf-8", errors="replace") as handle:
             for line in handle:
                 try:
@@ -335,14 +354,14 @@ def _charges(trial: Path, job: Job, snapshot: BillingSnapshot, ledger: dict[str,
                     continue
                 if not isinstance(record, dict) or record.get("schema_version") != "prt-usage-v1" or not record.get("request_id"):
                     continue
-                records[record["request_id"]] = record
-        for request_id, record in records.items():
+                requests[record["request_id"]] = record
+        for request_id, record in requests.items():
             tokens = normalized_usage(record.get("metrics") or {})
-            yield _charge(job, snapshot, "judge", "llm:" + request_id, record.get("model") or snapshot.judge.model,
-                          [(tokens, False, record.get("timestamp") or "")], ledger)
+            records.append(UsageRecord("judge", "llm:" + request_id, record.get("model") or snapshot.judge.model,
+                                       [(tokens, False, record.get("timestamp") or "")]))
     for phase, session, model, usages in _raw_sessions(trial, snapshot):
         found_agent |= phase == "agent"
-        yield _charge(job, snapshot, phase, session, model, usages, ledger)
+        records.append(UsageRecord(phase, session, model, usages))
     for path, phase in _trajectories(trial):
         data = _read(path)
         if not str(data.get("schema_version", "")).startswith("ATIF"):
@@ -380,29 +399,28 @@ def _charges(trial: Path, job: Job, snapshot: BillingSnapshot, ledger: dict[str,
                     groups[default_model].append((tokens, True, ""))
         for model, usages in groups.items():
             found_agent |= phase == "agent"
-            charge = _charge(job, snapshot, phase, session, model, usages, ledger)
+            charge = UsageRecord(phase, session, model, usages)
             if missing_usage:
                 charge.warnings.append("轨迹中部分模型请求缺少用量，此部分未计入")
-            yield charge
+            records.append(charge)
     if found_agent:
         data = _read(trial / "result.json") or _read(trial / "results.json")
         if data.get("id"):
             fallback_id = _identity("agent", "trial:" + str(data["id"]), snapshot.agent.model)
-            if fallback_id in ledger:
-                store.usage_charges.delete(fallback_id)
-                ledger.pop(fallback_id, None)
+            obsolete.add(fallback_id)
     if found_agent or snapshot.agent.free:
-        return
+        return records, obsolete
     # Old native results have no cache-write split. Be explicit about the gap.
     data = _read(trial / "result.json") or _read(trial / "results.json")
     metrics = data.get("agent_result") or {}
     if metrics.get("n_input_tokens") is None or metrics.get("n_output_tokens") is None or not data.get("id"):
-        return
+        return records, obsolete
     tokens = normalized_usage({"prompt_tokens": metrics["n_input_tokens"], "completion_tokens": metrics["n_output_tokens"], "cached_tokens": metrics.get("n_cache_tokens")})
     if any(tokens.values()):
-        result = _charge(job, snapshot, "agent", "trial:" + str(data["id"]), snapshot.agent.model, [(tokens, True, data.get("started_at") or "")], ledger)
+        result = UsageRecord("agent", "trial:" + str(data["id"]), snapshot.agent.model, [(tokens, True, data.get("started_at") or "")])
         result.warnings.append("仅有 Harbor 汇总用量，缺少缓存写入明细，费用可能不完整")
-        yield result
+        records.append(result)
+    return records, obsolete
 
 
 def _identity(phase, session, model):
@@ -444,27 +462,45 @@ def _charge(job, snapshot, phase, session, model, usages, ledger) -> UsageCharge
                        requests=len(usages), warnings=sorted(warnings), snapshot=snapshot)
 
 
+def _input_signature(job: Job) -> str:
+    # Metrics/rename updates are unrelated to usage; run lifecycle changes invalidate the cache.
+    value = [_BILLING_VERSION, job.status.value, job.runtime.started_at, job.runtime.finished_at,
+             job.runtime.output_dir, job.runtime.work_dir, job.verify.model if job.verify else "",
+             job.harbor_action.model_dump(mode="json") if job.harbor_action else None]
+    return hashlib.sha256(json.dumps(value, default=str, sort_keys=True).encode()).hexdigest()
+
+
+def needs_refresh(job: Job) -> bool:
+    if job.type != JobType.VERIFY:
+        return False
+    saved = job.billing
+    if not saved.updated_at or saved.input_signature != _input_signature(job):
+        return True
+    age = (utcnow() - saved.updated_at).total_seconds()
+    # Recheck finished tasks occasionally for late-written/copied logs, including after restart.
+    recent_finish = job.runtime.finished_at and (utcnow() - job.runtime.finished_at).total_seconds() < 60
+    return age >= (15 if job.status.is_active or recent_finish else 3600)
+
+
 def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None) -> Job:
     if job.type != JobType.VERIFY:
-        if job.billing.status == "not_applicable":
+        return job
+    ancestors = set(_ancestors or ())
+    if job.id in ancestors:
+        return job
+    ancestors.add(job.id)
+    if job.harbor_action and job.harbor_action.source_job_id != job.id:
+        source = store.jobs.get(job.harbor_action.source_job_id)
+        if source:
+            refresh(source, force=force, _ancestors=ancestors)
+    # The same job is never scanned twice concurrently; different jobs read in parallel.
+    with _JOB_LOCKS[int(hashlib.sha256(job.id.encode()).hexdigest(), 16) % len(_JOB_LOCKS)]:
+        job = store.jobs.get(job.id) or job
+        if not force and not needs_refresh(job):
             return job
-        billing = BillingSummary(status="not_applicable")
-        return store.jobs.update(job.id, lambda item: setattr(item, "billing", billing)) or job
-    with _LOCK:
-        if not force and time.monotonic() - _REFRESHED.get(job.id, 0) < 15:
-            return store.jobs.get(job.id) or job
-        ancestors = set(_ancestors or ())
-        if job.id in ancestors:
-            return job
-        ancestors.add(job.id)
-        if job.harbor_action and job.harbor_action.source_job_id != job.id:
-            source = store.jobs.get(job.harbor_action.source_job_id)
-            if source:
-                refresh(source, force=force, _ancestors=ancestors)
+        signature = _input_signature(job)
         snapshot = job.billing.snapshot or capture(job, historical=True)
-        ledger = {row.id: row for row in store.usage_charges.all()}
-        changes = {}
-        warnings = set()
+        records, obsolete, warnings = [], set(), set()
         try:
             trials = list(_paths(job))
         except (OSError, ValueError):
@@ -472,53 +508,127 @@ def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None
             warnings.add("部分用量记录无法读取，当前费用不完整")
         for trial in trials:
             try:
-                for charge in _charges(trial, job, snapshot, ledger):
-                    old = ledger.get(charge.id)
-                    # A truncated/replaced copy must not erase previously observed consumption.
-                    if old and sum(charge.tokens.values()) < sum(old.tokens.values()):
-                        continue
-                    if old != charge:
-                        changes[charge.id] = charge
-                        ledger[charge.id] = charge
+                collected, removed = _scan_trial(trial, snapshot)
+                records.extend(collected)
+                obsolete.update(removed)
             except (OSError, ValueError, TypeError, AttributeError):
                 logger.warning("Could not read complete billing usage for %s", job.id, exc_info=True)
                 warnings.add("部分用量记录无法读取，当前费用不完整")
-        if changes:
-            store.usage_charges.put_many(row for key, row in changes.items() if key in ledger)
-        entries = [row for row in ledger.values() if row.job_id == job.id]
-        amounts = [row.amount_cny for row in entries if row.amount_cny is not None]
-        for row in entries:
-            warnings.update(row.warnings)
-        phases = {}
-        for phase in ("agent", "judge"):
-            component = getattr(snapshot, phase)
-            rows = [row for row in entries if row.phase == phase]
-            values = [row.amount_cny for row in rows if row.amount_cny is not None]
-            phases[phase] = sum(values) if values else 0.0 if component.free else None
-            if not component.free and not rows:
-                if phase == "agent" and job.harbor_action and job.harbor_action.mode == "regrade":
-                    phases[phase] = 0.0
-                else:
-                    warnings.add(f"{'Agent' if phase == 'agent' else 'Judge'} 用量缺失；仅统计有记录的调用")
-        if snapshot.historical:
-            warnings.add("历史任务按首次统计时的价格估算，无法还原历史账单")
-        grouped = defaultdict(lambda: {"amount_cny": None, "requests": 0, "unpriced": 0})
-        for row in entries:
-            group = grouped[(row.vendor, row.model, row.phase)]
-            group["requests"] += row.requests
-            group["unpriced"] += int(row.amount_cny is None or bool(row.warnings))
-            if row.amount_cny is not None:
-                group["amount_cny"] = (group["amount_cny"] or 0) + row.amount_cny
-        amount = sum(amounts) if amounts else 0.0 if all(value == 0 for value in phases.values()) else None
-        incomplete = any(value is None for value in phases.values()) or any(row.amount_cny is None or row.warnings for row in entries) or "部分用量记录无法读取，当前费用不完整" in warnings
-        billing = BillingSummary(status="pending" if amount is None else "partial" if incomplete else "estimated",
-                                 amount_cny=amount, agent_cny=phases["agent"], judge_cny=phases["judge"],
-                                 snapshot=snapshot, requests=sum(row.requests for row in entries), warnings=sorted(warnings),
-                                 by_model=[dict(vendor=vendor, model=model, phase=phase, **data) for (vendor, model, phase), data in grouped.items()],
-                                 updated_at=utcnow())
-        updated = store.jobs.update(job.id, lambda item: setattr(item, "billing", billing)) or job
-        _REFRESHED[job.id] = time.monotonic()
-        return updated
+        with _LOCK:
+            current = store.jobs.get(job.id)
+            if current is None or _input_signature(current) != signature:
+                return current or job
+            ledger = {row.id: row for row in store.usage_charges.all()}
+            changes = {}
+            for record in records:
+                charge = _charge(job, snapshot, record.phase, record.session, record.model, record.usages, ledger)
+                charge.warnings.extend(record.warnings)
+                old = ledger.get(charge.id)
+                if old and sum(charge.tokens.values()) < sum(old.tokens.values()):
+                    continue
+                if old != charge:
+                    changes[charge.id] = charge
+                    ledger[charge.id] = charge
+            # Commit replacements before deleting aggregate fallbacks, so failed writes cannot erase spend.
+            if changes:
+                store.usage_charges.put_many(changes.values())
+            for identity in obsolete:
+                if identity in ledger:
+                    store.usage_charges.delete(identity)
+                    ledger.pop(identity, None)
+            entries = [row for row in ledger.values() if row.job_id == job.id]
+            amounts = [row.amount_cny for row in entries if row.amount_cny is not None]
+            for row in entries:
+                warnings.update(row.warnings)
+            phases = {}
+            for phase in ("agent", "judge"):
+                component = getattr(snapshot, phase)
+                rows = [row for row in entries if row.phase == phase]
+                values = [row.amount_cny for row in rows if row.amount_cny is not None]
+                phases[phase] = sum(values) if values else 0.0 if component.free else None
+                if not component.free and not rows:
+                    if phase == "agent" and job.harbor_action and job.harbor_action.mode == "regrade":
+                        phases[phase] = 0.0
+                    else:
+                        warnings.add(f"{'Agent' if phase == 'agent' else 'Judge'} 用量缺失；仅统计有记录的调用")
+            if snapshot.historical:
+                warnings.add("历史任务按首次统计时的价格估算，无法还原历史账单")
+            grouped = defaultdict(lambda: {"amount_cny": None, "requests": 0, "unpriced": 0})
+            for row in entries:
+                group = grouped[(row.vendor, row.model, row.phase)]
+                group["requests"] += row.requests
+                group["unpriced"] += int(row.amount_cny is None or bool(row.warnings))
+                if row.amount_cny is not None:
+                    group["amount_cny"] = (group["amount_cny"] or 0) + row.amount_cny
+            amount = sum(amounts) if amounts else 0.0 if all(value == 0 for value in phases.values()) else None
+            incomplete = any(value is None for value in phases.values()) or any(row.amount_cny is None or row.warnings for row in entries) or "部分用量记录无法读取，当前费用不完整" in warnings
+            billing = BillingSummary(status="pending" if amount is None else "partial" if incomplete else "estimated",
+                                     amount_cny=amount, agent_cny=phases["agent"], judge_cny=phases["judge"],
+                                     snapshot=snapshot, requests=sum(row.requests for row in entries), warnings=sorted(warnings),
+                                     by_model=[dict(vendor=vendor, model=model, phase=phase, **data) for (vendor, model, phase), data in grouped.items()],
+                                     updated_at=utcnow(), input_signature=signature)
+            updated = store.jobs.update(job.id, lambda item: setattr(item, "billing", billing)) or job
+            return updated
+
+
+class BillingWorker:
+    """Bounded background queue; request handlers only enqueue IDs and read saved totals."""
+
+    def __init__(self, workers: int = 4, capacity: int = 256):
+        self.workers, self.capacity = workers, capacity
+        self._lock = threading.RLock()
+        self._executor: ThreadPoolExecutor | None = None
+        self._pending: set[str] = set()
+        self._retry_at: dict[str, float] = {}
+
+    def start(self) -> None:
+        with self._lock:
+            if self._executor is None:
+                self._executor = ThreadPoolExecutor(max_workers=self.workers, thread_name_prefix="prt-billing")
+
+    def stop(self) -> None:
+        with self._lock:
+            executor, self._executor = self._executor, None
+        if executor:
+            executor.shutdown(wait=True, cancel_futures=True)
+        with self._lock:
+            self._pending.clear()
+            self._retry_at.clear()
+
+    def request(self, jobs: list[Job]) -> list[str]:
+        waiting = []
+        with self._lock:
+            for job in jobs:
+                if not needs_refresh(job):
+                    continue
+                waiting.append(job.id)
+                if (self._executor is None or job.id in self._pending or len(self._pending) >= self.capacity
+                        or time.monotonic() < self._retry_at.get(job.id, 0)):
+                    continue
+                self._pending.add(job.id)
+                try:
+                    self._executor.submit(self._run, job.id)
+                except RuntimeError:
+                    self._pending.discard(job.id)
+        return waiting
+
+    def _run(self, job_id: str) -> None:
+        try:
+            job = store.jobs.get(job_id)
+            if job:
+                refresh(job)
+            with self._lock:
+                self._retry_at.pop(job_id, None)
+        except Exception:
+            logger.exception("Background billing failed for %s", job_id)
+            with self._lock:
+                self._retry_at[job_id] = time.monotonic() + 30
+        finally:
+            with self._lock:
+                self._pending.discard(job_id)
+
+
+worker = BillingWorker()
 
 
 def archive(job: Job) -> None:
@@ -532,7 +642,6 @@ def archive(job: Job) -> None:
 
 
 def summary(jobs: list[Job], *, actor=None) -> dict:
-    jobs = [refresh(job) for job in sorted(jobs, key=lambda item: item.created_at)]
     groups = {key: {} for key in ("projects", "people", "models")}
     project_names = {project.id: project.name for project in store.projects.all()}
 

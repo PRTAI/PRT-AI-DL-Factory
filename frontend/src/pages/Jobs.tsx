@@ -77,7 +77,7 @@ export default function Jobs() {
   const effectiveProject = scopeToProject ? projectId : ''
   const jobs = useQuery({
     queryKey: ['jobs', status, type, query, ownerId, effectiveProject],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api.jobs({
         status: status === 'all' ? undefined : [status],
         type: type === 'all' ? undefined : [type],
@@ -85,14 +85,15 @@ export default function Jobs() {
         owner_id: ownerId || undefined,
         q: query || undefined,
         limit: 200,
-      }),
-    refetchInterval: 8000,
+      }, signal),
+    refetchInterval: query => query.state.data?.billing_pending?.length ? 2000 : 8000,
   })
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['jobs'] })
     queryClient.invalidateQueries({ queryKey: ['job-overview'] })
     queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+    queryClient.invalidateQueries({ queryKey: ['billing-summary'] })
   }
 
   const review = useMutation({
@@ -364,7 +365,7 @@ export default function Jobs() {
                         <div className="num mt-0.5 truncate text-[11px] text-fg-subtle">{job.id}</div>
                       </Link>
                       {job.note && <div className="mt-0.5 line-clamp-1 text-[11px] text-fg-muted">{job.note}</div>}
-                      <JobCost job={job} />
+                      <JobCost job={job} updating={jobs.data?.billing_pending?.includes(job.id)} />
                     </Td>
                     <Td>
                       <ProjectTag projectId={job.project_id} className="max-w-full text-xs" />

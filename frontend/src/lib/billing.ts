@@ -1,4 +1,4 @@
-import type { Job, SpendRow } from './types'
+import type { Job, ModelPrice, SpendRow } from './types'
 
 export const BILLING_UNAVAILABLE = '后端尚未提供费用数据，请同步新版后端并重启服务后刷新页面。'
 
@@ -26,4 +26,22 @@ export function spendChartRows(rows: SpendRow[], limit = 8) {
   return rows.filter(row => row.amount_cny != null && row.amount_cny > 0)
     .sort((a, b) => b.amount_cny! - a.amount_cny!)
     .slice(0, limit)
+}
+
+export function supplementPrices(prices: ModelPrice[], catalog: ModelPrice[]) {
+  const key = (vendor: string, model: string) => `${vendor}/${model.toLowerCase()}`
+  const occupied = new Set(prices.flatMap(row => [row.model, ...row.aliases].map(name => key(row.vendor, name))))
+  const result = prices.map(row => ({ ...row, aliases: [...row.aliases] }))
+  for (const price of catalog) {
+    const existing = result.find(row => key(row.vendor, row.model) === key(price.vendor, price.model))
+    // Preserve admin tariffs, discounts and region; only enrich a matching region's aliases.
+    if (existing && existing.region !== price.region) continue
+    if (!existing && occupied.has(key(price.vendor, price.model))) continue
+    const aliases = price.aliases.filter(alias => !occupied.has(key(price.vendor, alias)))
+    if (existing) existing.aliases.push(...aliases)
+    else result.push({ ...price, aliases })
+    occupied.add(key(price.vendor, price.model))
+    aliases.forEach(alias => occupied.add(key(price.vendor, alias)))
+  }
+  return result
 }

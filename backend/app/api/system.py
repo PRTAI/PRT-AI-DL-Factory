@@ -10,7 +10,7 @@ from ..config import settings
 from ..deps import AdminUser, CurrentUser
 from ..models import JobStatus, SystemSettings, utcnow
 from ..models.job import JobPublic
-from ..models.billing import PricingSettings
+from ..models.billing import ModelPrice, PricingSettings
 from ..services import billing_service, monitor, resources_service, audit_service
 from ..services.scheduler import gpu_snapshot, scheduler
 from ..store import store
@@ -32,11 +32,9 @@ def metrics_history(_: CurrentUser, limit: int = Query(default=300, le=2000)) ->
 
 
 @router.get("/dashboard", summary="数据大屏聚合数据")
-def dashboard(user: CurrentUser) -> dict[str, Any]:
+def dashboard(user: CurrentUser, include_billing: bool = True) -> dict[str, Any]:
     jobs = store.jobs.all()
     visible = jobs if user.is_admin else [j for j in jobs if j.owner_id == user.id]
-    billing = billing_service.summary(visible, actor=user)
-    visible = [store.jobs.get(job.id) or job for job in visible]
     active = [j for j in visible if j.status.is_active]
     active.sort(key=lambda j: (j.status != JobStatus.RUNNING, j.created_at))
 
@@ -48,7 +46,7 @@ def dashboard(user: CurrentUser) -> dict[str, Any]:
         "gpu": gpu_snapshot(),
         "active_jobs": [JobPublic.model_validate(job.model_dump()) for job in active[:20]],
         "recent_jobs": [JobPublic.model_validate(job.model_dump()) for job in recent],
-        "billing": billing,
+        **({"billing": _spend_summary(visible, user)} if include_billing else {}),
         "counters": {
             "running": sum(1 for j in visible if j.status == JobStatus.RUNNING),
             "queued": sum(1 for j in visible if j.status == JobStatus.QUEUED),
@@ -60,6 +58,20 @@ def dashboard(user: CurrentUser) -> dict[str, Any]:
             "datasets": store.datasets.count(),
         },
     }
+
+
+def _spend_summary(jobs, user) -> dict[str, Any]:
+    pending = billing_service.worker.request(jobs)
+    result = billing_service.summary(jobs, actor=user)
+    result["updating_jobs"] = len(pending)
+    return result
+
+
+@router.get("/billing", summary="已保存的费用汇总；后台渐进更新")
+def billing_summary(user: CurrentUser) -> dict[str, Any]:
+    jobs = store.jobs.all()
+    visible = jobs if user.is_admin else [job for job in jobs if job.owner_id == user.id]
+    return _spend_summary(visible, user)
 
 
 @router.get("/toolchain", summary="框架/工具链可用性")
@@ -87,6 +99,11 @@ def update_pricing(payload: PricingSettings, admin: AdminUser) -> PricingSetting
     audit_service.record("billing.pricing.update", actor=admin, target_type="system", target_id="pricing",
                          summary="更新模型价格、折扣和人民币汇率（保留现有任务价格快照）")
     return updated
+
+
+@router.get("/pricing/catalog", response_model=list[ModelPrice], summary="已核验的内置模型价格目录")
+def read_price_catalog(_: CurrentUser) -> list[ModelPrice]:
+    return billing_service.price_catalog()
 
 
 @router.put("/settings", response_model=SystemSettings, summary="更新系统设置（管理员）")

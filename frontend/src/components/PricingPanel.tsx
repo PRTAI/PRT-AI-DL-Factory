@@ -2,6 +2,7 @@ import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { supplementPrices } from '@/lib/billing'
 import type { ModelPrice, PricingSettings, RateTier } from '@/lib/types'
 import { Button, Card, CardBody, CardHeader, Dialog, ErrorBox, Field, Input, NumberInput, Select, Skeleton, Table, Td, Th, Tr } from '@/components/ui'
 
@@ -15,6 +16,17 @@ export function PricingPanel() {
   const save = useMutation({
     mutationFn: api.updatePricing,
     onSuccess: (next) => { queryClient.setQueryData(['pricing'], next); setDraft(null); toast.success('已保存；现有任务保留原价格快照') },
+    onError: (error) => toast.error(error.message),
+  })
+  const supplement = useMutation({
+    mutationFn: api.priceCatalog,
+    onSuccess: (catalog) => {
+      const current = draft ?? query.data
+      if (!current) return
+      const next = supplementPrices(current.prices ?? [], catalog)
+      setDraft({ ...current, prices: next })
+      toast.success('已补充缺失型号和别名；现有单价与折扣保留，请检查后保存')
+    },
     onError: (error) => toast.error(error.message),
   })
   if (query.isError) return <ErrorBox message={query.error.message} />
@@ -31,6 +43,10 @@ export function PricingPanel() {
           <Field label="汇率来源"><Input value={value.exchange_source} onChange={(e) => setDraft({ ...value, exchange_source: e.target.value })} /></Field>
         </div>
         <p className="text-xs text-fg-muted">Atlas 别名明确对应官方基础型号；ccmax 不自动按 Fast 加价。百炼默认北京、6 折；其他地域需配置相应价格。Judge 的 batched 模式不自动享受供应商 Batch API 折扣。缺少单价或用量会提示不完整。</p>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button loading={supplement.isPending} onClick={() => supplement.mutate()}>补充内置价格</Button>
+          <span className="text-xs text-fg-muted">补充新版目录中的缺失型号与别名，保留已设置的单价和折扣。</span>
+        </div>
         <div className="flex gap-2"><Input placeholder="搜索平台或模型" value={search} onChange={(e) => setSearch(e.target.value)} /><Button onClick={() => setEdit({ index: -1, price: { vendor: 'custom', model: '', official_model: '', aliases: [], currency: 'CNY', discount: 1, tiers: [{ input: 0, output: 0 }], region: '', source: '管理员定价', verified_on: new Date().toLocaleDateString('sv-SE'), valid_until: '', note: '' } })}>添加单价</Button></div>
         <Table><thead><tr><Th>平台 / 模型</Th><Th>官方型号</Th><Th>输入 / 输出</Th><Th>折扣系数</Th><Th>核验日期</Th><Th>操作</Th></tr></thead><tbody>
           {prices.map((price, index) => ({ price, index })).filter(({ price }) => `${price.vendor} ${price.model} ${price.official_model}`.toLowerCase().includes(search.toLowerCase())).map(({ price, index }) => <Tr key={`${price.vendor}/${price.model}`}>

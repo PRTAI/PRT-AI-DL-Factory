@@ -26,6 +26,7 @@ import type {
   ModelPlatform,
   PlatformCatalog,
   PricingSettings,
+  SpendSummary,
   UserApiKey,
   RegistryDataset,
   ReviewFinding,
@@ -271,8 +272,8 @@ export const api = {
     q?: string
     limit?: number
     offset?: number
-  } = {}) =>
-    request<{ items: Job[]; total: number; offset: number; limit: number }>(`/api/jobs${qs(params)}`),
+  } = {}, signal?: AbortSignal) =>
+    request<{ items: Job[]; total: number; offset: number; limit: number; billing_pending?: string[] }>(`/api/jobs${qs(params)}`, { signal }),
   jobOverview: (projectId = '') =>
     request<{
       total: number
@@ -470,13 +471,15 @@ export const api = {
     request<{ points: MetricPoint[]; interval_seconds: number }>(
       `/api/system/metrics/history${qs({ limit })}`,
     ),
-  dashboard: () => request<DashboardPayload>('/api/system/dashboard'),
+  dashboard: () => request<DashboardPayload>('/api/system/dashboard?include_billing=false'),
+  spendSummary: () => request<SpendSummary>('/api/system/billing'),
   toolchain: () => request<ToolchainRow[]>('/api/system/toolchain'),
   harborImage: () => request<{ image: string; ready: boolean; image_id: string; status: string; error: string; log: string }>('/api/system/harbor-image'),
   harborImageRecipe: () => request<{ dockerfile: string }>('/api/system/harbor-image/recipe'),
   buildHarborImage: () => request('/api/system/harbor-image/build', { method: 'POST' }),
   settings: () => request<SystemSettings>('/api/system/settings'),
   pricing: () => request<PricingSettings>('/api/system/pricing'),
+  priceCatalog: () => request<NonNullable<PricingSettings['prices']>>('/api/system/pricing/catalog'),
   updatePricing: (payload: PricingSettings) =>
     request<PricingSettings>('/api/system/pricing', { method: 'PUT', body: JSON.stringify(payload) }),
   updateSettings: (payload: SystemSettings) =>

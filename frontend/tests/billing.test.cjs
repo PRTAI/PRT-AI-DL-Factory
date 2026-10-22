@@ -7,7 +7,7 @@ const ts = require('typescript')
 const source = fs.readFileSync(path.join(__dirname, '../src/lib/billing.ts'), 'utf8')
 const context = { exports: {} }
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context)
-const { money, jobCostState, spendChartRows } = context.exports
+const { money, jobCostState, spendChartRows, supplementPrices } = context.exports
 
 test('missing server support differs from pending usage and missing tariffs', () => {
   assert.equal(jobCostState({ status: 'succeeded' }).label, '费用服务未启用')
@@ -38,4 +38,25 @@ test('spend rankings exclude unknown costs, preserve partial estimates and do no
   assert.equal(chart[1].incomplete_jobs, 2)
   assert.equal(rows[0].id, 'missing')
   assert.equal(spendChartRows([{ amount_cny: null }]).length, 0)
+})
+
+test('catalog supplementation preserves custom rates and discounts and avoids alias conflicts', () => {
+  const prices = [
+    { vendor: 'deepseek', model: 'deepseek-flash', aliases: [], region: '', discount: .5, tiers: [{ input: 99 }] },
+    { vendor: 'alibaba', model: 'custom-qwen', aliases: ['qwen3.7-max'], region: 'cn-beijing' },
+  ]
+  const catalog = [
+    { vendor: 'deepseek', model: 'deepseek-flash', aliases: ['deepseek-flash[1m]'], region: '', discount: 1, tiers: [{ input: 2 }] },
+    { vendor: 'alibaba', model: 'qwen3.7-max', aliases: [], region: 'cn-beijing' },
+    { vendor: 'tencent', model: 'hy4-preview', aliases: [], region: 'guangzhou' },
+  ]
+  const result = supplementPrices(prices, catalog)
+  assert.equal(result.length, 3)
+  assert.equal(result[0].discount, .5)
+  assert.equal(result[0].tiers[0].input, 99)
+  assert.deepEqual(Array.from(result[0].aliases), ['deepseek-flash[1m]'])
+  assert.equal(prices[0].aliases.length, 0)
+  assert.equal(JSON.stringify(supplementPrices(result, catalog)), JSON.stringify(result))
+  const foreign = [{ ...catalog[0], region: 'other', aliases: [] }]
+  assert.equal(supplementPrices(foreign, catalog)[0].aliases.length, 0)
 })

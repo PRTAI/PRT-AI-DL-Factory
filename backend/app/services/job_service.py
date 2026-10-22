@@ -603,8 +603,7 @@ def list_jobs(
     items = store.jobs.find(keep)
     items.sort(key=lambda j: j.created_at, reverse=True)
     total = len(items)
-    from . import billing_service
-    return [billing_service.refresh(job) for job in items[offset : offset + limit]], total
+    return items[offset : offset + limit], total
 
 
 def job_log(job_id: str, *, actor: User, tail_bytes: int | None = None, offset: int = 0) -> dict[str, Any]:

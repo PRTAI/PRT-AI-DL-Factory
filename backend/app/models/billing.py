@@ -100,6 +100,7 @@ class UsageCharge(Base):
 
 
 class BillingSummary(Base):
+    input_signature: str = ""
     status: Literal["estimated", "partial", "pending", "not_applicable"] = "pending"
     amount_cny: float | None = None
     agent_cny: float | None = None

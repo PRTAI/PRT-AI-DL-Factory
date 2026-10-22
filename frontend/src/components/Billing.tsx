@@ -3,12 +3,12 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { useAuth } from '@/lib/store'
 import type { Job, SpendRow, SpendSummary } from '@/lib/types'
 import { BILLING_UNAVAILABLE, jobCostState, money, spendChartRows } from '@/lib/billing'
-import { Card, CardBody, CardHeader, Table, Td, Th, Tr } from '@/components/ui'
+import { Card, CardBody, CardHeader, Table, Tabs, TabsContent, TabsList, TabsTrigger, Td, Th, Tr } from '@/components/ui'
 
-export function JobCost({ job }: { job: Job }) {
+export function JobCost({ job, updating = false }: { job: Job; updating?: boolean }) {
   if (job.type !== 'verify') return null
   const { label, hint } = jobCostState(job)
-  return <span className="mt-0.5 block text-[11px] text-fg-muted" title={hint}>{label}</span>
+  return <span className="mt-0.5 block text-[11px] text-fg-muted" title={hint}>{label}{updating && ' · 更新中'}</span>
 }
 
 function SourceLink({ source }: { source: string }) {
@@ -54,16 +54,16 @@ export function BillingDetail({ job }: { job: Job }) {
 
 function SpendChart({ rows, title, color }: { rows: SpendRow[]; title: string; color: string }) {
   const chart = spendChartRows(rows)
-  if (!chart.length) return <div className="flex h-48 items-center justify-center rounded-md bg-bg-elevated p-4 text-center text-xs text-fg-muted">
+  if (!chart.length) return <div className="flex h-80 items-center justify-center rounded-md bg-bg-elevated p-4 text-center text-xs text-fg-muted">
     {rows.some(row => row.amount_cny != null) ? '已统计的费用为 ¥0.00' : '暂无可计价的用量，收到费用记录后显示图表'}
   </div>
-  return <div role="img" aria-label={`${title}费用排行，单位人民币，最多显示前 8 项`} className="min-w-0" style={{ height: Math.max(192, chart.length * 36 + 32) }}>
+  return <div role="img" aria-label={`${title}费用排行，单位人民币，最多显示前 8 项`} className="h-80 min-w-0">
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={chart} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" horizontal={false} />
         <XAxis type="number" tick={{ fill: 'var(--fg-subtle)', fontSize: 10 }} tickFormatter={value => money(Number(value))} axisLine={false} tickLine={false} />
-        <YAxis type="category" dataKey="id" width={100} tick={{ fill: 'var(--fg-muted)', fontSize: 11 }} axisLine={false} tickLine={false}
-          tickFormatter={id => { const name = chart.find(row => row.id === id)?.name ?? String(id); return name.length > 12 ? `${name.slice(0, 11)}…` : name }} />
+        <YAxis type="category" dataKey="id" width={32} tick={{ fill: 'var(--fg-muted)', fontSize: 11 }} axisLine={false} tickLine={false}
+          tickFormatter={id => `#${chart.findIndex(row => row.id === id) + 1}`} />
         <Tooltip cursor={{ fill: 'var(--bg-elevated)' }} content={({ active, payload }) => {
           if (!active || !payload?.length) return null
           const row = payload[0].payload as SpendRow
@@ -93,22 +93,43 @@ export function SpendDashboard({ data, loading = false, error = false }: { data?
       <div className="flex flex-wrap items-baseline gap-4">
         <strong className="num text-2xl">{money(data.amount_cny)}</strong>
         <span className="text-xs text-fg-muted">{data.jobs} 个评测任务 · {data.incomplete_jobs} 个费用不完整或待统计</span>
+        {!!data.updating_jobs && <span role="status" className="text-xs text-primary">正在后台更新 {data.updating_jobs} 个任务的费用，结果将逐步显示</span>}
       </div>
-      <p className="text-xs text-fg-muted">图表按已记录费用排序，最多显示前 8 项；未定价的用量不按零费用计算，完整明细见下表。</p>
-      <div className="grid gap-3 xl:grid-cols-3">
-        {([{ key: 'projects', title: '按项目' }, { key: 'people', title: '按人员' }, { key: 'models', title: '按模型' }] as const).map(({ key, title }, index) => <div key={key} className="min-w-0 space-y-3">
-          <h3 className="mb-2 text-sm font-medium">{title}</h3>
-          <SpendChart rows={data[key]} title={title} color={`var(--chart-${index + 1})`} />
-          <div className="max-h-80 overflow-auto rounded-md border border-border"><Table>
-            <thead><tr><Th>名称</Th><Th>费用</Th><Th>任务</Th></tr></thead>
-            <tbody>{data[key].map((row) => <Tr key={row.id}>
-              <Td className="max-w-40 break-all text-xs">{key === 'projects' ? <Link className="link" to={`/jobs?project=${row.id}`}>{row.name}</Link> : <span title={row.id}>{row.name}</span>}</Td>
-              <Td className="num whitespace-nowrap text-xs">{money(row.amount_cny)}{row.incomplete_jobs > 0 && <div className="text-[10px] text-warning">{row.incomplete_jobs} 项不完整</div>}</Td>
-              <Td className="num text-xs">{row.jobs}</Td>
-            </Tr>)}{!data[key].length && <tr><Td colSpan={3}>暂无记录</Td></tr>}</tbody>
-          </Table></div>
-        </div>)}
-      </div>
+      <Tabs defaultValue="projects">
+        <TabsList aria-label="费用统计维度">
+          <TabsTrigger value="projects">按项目</TabsTrigger><TabsTrigger value="people">按人员</TabsTrigger><TabsTrigger value="models">按模型</TabsTrigger>
+        </TabsList>
+        {([{ key: 'projects', title: '按项目' }, { key: 'people', title: '按人员' }, { key: 'models', title: '按模型' }] as const).map(({ key, title }, index) => {
+          const ranked = spendChartRows(data[key])
+          const rows = [...data[key]].sort((a, b) => (b.amount_cny ?? -1) - (a.amount_cny ?? -1))
+          return <TabsContent key={key} value={key} className="pt-4">
+            <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+              <div className="min-w-0">
+                <h3 className="mb-2 text-xs font-medium">费用排行 · 前 8 项</h3>
+                <SpendChart rows={data[key]} title={title} color={`var(--chart-${index + 1})`} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="mb-2 text-xs font-medium">完整明细 · {rows.length} 项</h3>
+                <div className="h-80 overflow-auto rounded-md border border-border"><Table>
+                  <thead className="sticky top-0 z-10 bg-card"><tr><Th>名称</Th><Th className="whitespace-nowrap">费用</Th><Th className="whitespace-nowrap">任务</Th></tr></thead>
+                  <tbody>{rows.map((row) => {
+                    const rank = ranked.findIndex(item => item.id === row.id)
+                    return <Tr key={row.id}>
+                      <Td className="w-full min-w-32 break-all text-xs">
+                        {rank >= 0 && <span className="num mr-2 text-fg-subtle">#{rank + 1}</span>}
+                        {key === 'projects' ? <Link className="link" to={`/jobs?project=${row.id}`}>{row.name}</Link> : <span title={row.id}>{row.name}</span>}
+                      </Td>
+                      <Td className="num whitespace-nowrap text-xs">{money(row.amount_cny)}{row.incomplete_jobs > 0 && <div className="text-[10px] text-warning">{row.incomplete_jobs} 项不完整</div>}</Td>
+                      <Td className="num text-xs">{row.jobs}</Td>
+                    </Tr>
+                  })}{!rows.length && <tr><Td colSpan={3}>暂无记录</Td></tr>}</tbody>
+                </Table></div>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-fg-muted">图中序号对应明细排名，悬停可查看完整名称；未定价的用量不按零费用计算。</p>
+          </TabsContent>
+        })}
+      </Tabs>
     </CardBody>
   </Card>
 }

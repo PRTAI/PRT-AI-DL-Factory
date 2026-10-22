@@ -2,6 +2,8 @@
 
 import json
 import shutil
+import hashlib
+import threading
 from pathlib import Path
 
 import pytest
@@ -18,11 +20,133 @@ from .conftest import project_id, user_id_of
 
 @pytest.fixture(autouse=True)
 def isolated_billing(tmp_path, monkeypatch):
+    # Drain background work before rebinding stores; individual concurrency tests start their own worker.
+    billing.worker.stop()
+    worker = billing.BillingWorker()
+    monkeypatch.setattr(billing, 'worker', worker)
     monkeypatch.setattr(store, 'usage_charges', JsonCollection(tmp_path / 'ledger.json', UsageCharge))
     monkeypatch.setattr(store, 'billing_archives', JsonCollection(tmp_path / 'archived.json', BillingArchive))
     monkeypatch.setattr(store, 'pricing_doc', JsonDocument(tmp_path / 'pricing.json', PricingSettings))
     monkeypatch.setattr(store, 'jobs', JsonCollection(tmp_path / 'jobs.json', Job))
-    billing._REFRESHED.clear()
+    yield
+    worker.stop()
+
+
+def test_finished_cost_is_persisted_and_reused_after_reload(tmp_path, monkeypatch):
+    item, root = job(tmp_path)
+    trajectory(root)
+    result = billing.refresh(item, force=True)
+    assert result.billing.input_signature
+    # Simulate a restart: no in-memory collection or refresh timestamps survive.
+    monkeypatch.setattr(store, 'jobs', JsonCollection(store.jobs.path, Job))
+    monkeypatch.setattr(billing, '_scan_trial', lambda *_: pytest.fail('cached task must not scan logs'))
+    restored = billing.refresh(store.jobs.get(item.id))
+    assert restored.billing.amount_cny == result.billing.amount_cny
+    assert restored.billing.updated_at == result.billing.updated_at
+    assert not billing.needs_refresh(restored)
+    renamed = restored.model_copy(deep=True)
+    renamed.name = 'renamed'
+    assert not billing.needs_refresh(renamed)
+    renamed.status = JobStatus.RUNNING
+    assert billing.needs_refresh(renamed)
+
+
+def test_parallel_scan_does_not_block_lists_and_preserves_ledger(tmp_path, monkeypatch, client, member_headers):
+    from backend.app.api import system
+    monkeypatch.setattr(system.monitor, 'latest', lambda: {})
+    monkeypatch.setattr(system.monitor, 'compact_history', lambda *_: [])
+    monkeypatch.setattr(system, 'gpu_snapshot', lambda: {})
+    first, root = job(tmp_path)
+    trajectory(root, session='shared-session')
+    second, root2 = job(tmp_path, name='two')
+    # Ensure the lock stripes differ; the production worker count remains bounded.
+    lock_index = lambda value: int(hashlib.sha256(value.encode()).hexdigest(), 16) % len(billing._JOB_LOCKS)
+    while lock_index(first.id) == lock_index(second.id):
+        store.jobs.delete(second.id)
+        second, root2 = job(tmp_path, name=second.name + 'x')
+    trajectory(root2, session='shared-session')
+    barrier = threading.Barrier(2)
+    release = threading.Event()
+    entered = threading.Event()
+    scan = billing._scan_trial
+    calls = []
+
+    def slow_scan(*args):
+        calls.append(args[0])
+        barrier.wait(timeout=5)
+        entered.set()
+        assert release.wait(5)
+        return scan(*args)
+
+    monkeypatch.setattr(billing, '_scan_trial', slow_scan)
+    billing.worker.start()
+    try:
+        billing.worker.request([first, second])
+        assert entered.wait(5), 'two tasks must enter scanning concurrently'
+        billing.worker.request([first, second])
+        response = client.get('/api/jobs', headers=member_headers)
+        assert response.status_code == 200
+        assert set(response.json()['billing_pending']) == {first.id, second.id}
+        assert all(row['billing']['amount_cny'] is None for row in response.json()['items'])
+        # Dashboard counters load independently, while costs have their own progressive endpoint.
+        counters = client.get('/api/system/dashboard?include_billing=false', headers=member_headers)
+        assert counters.status_code == 200 and 'billing' not in counters.json()
+        summary = client.get('/api/system/billing', headers=member_headers)
+        assert summary.status_code == 200 and summary.json()['updating_jobs'] == 2
+        assert len(calls) == 2  # duplicate page requests never enqueue duplicate scans
+    finally:
+        release.set()
+        billing.worker.stop()
+    assert len(store.usage_charges.all()) == 1  # concurrent copies do not double bill
+    saved = [store.jobs.get(first.id), store.jobs.get(second.id)]
+    assert sum(row.billing.requests for row in saved) == 1
+    assert all(not billing.needs_refresh(row) for row in saved)
+    assert client.get('/api/system/billing', headers=member_headers).json()['updating_jobs'] == 0
+
+
+def test_worker_capacity_and_failure_do_not_drop_saved_costs(tmp_path, monkeypatch):
+    item, root = job(tmp_path)
+    trajectory(root)
+    saved = billing.refresh(item, force=True)
+    saved.status = JobStatus.RUNNING
+    store.jobs.put(saved)
+    release = threading.Event()
+    entered = threading.Event()
+
+    def fail(*_args, **_kwargs):
+        entered.set()
+        assert release.wait(5)
+        raise RuntimeError('temporary disk error')
+
+    monkeypatch.setattr(billing, 'refresh', fail)
+    worker = billing.BillingWorker(workers=1, capacity=1)
+    worker.start()
+    try:
+        worker.request([saved])
+        assert entered.wait(5)
+        another, _ = job(tmp_path, name='other')
+        worker.request([saved, another])
+        assert worker._pending == {saved.id}
+    finally:
+        release.set()
+        worker.stop()
+    assert store.jobs.get(item.id).billing.amount_cny == saved.billing.amount_cny
+
+
+def test_run_changed_during_scan_does_not_commit_stale_totals(tmp_path, monkeypatch):
+    item, root = job(tmp_path)
+    trajectory(root)
+    scan = billing._scan_trial
+
+    def changed(*args):
+        store.jobs.update(item.id, lambda value: setattr(value, 'status', JobStatus.RUNNING))
+        return scan(*args)
+
+    monkeypatch.setattr(billing, '_scan_trial', changed)
+    refreshed = billing.refresh(item, force=True)
+    assert refreshed.status == JobStatus.RUNNING
+    assert refreshed.billing.updated_at is None
+    assert not store.usage_charges.all()
 
 
 def component(vendor, model):
@@ -80,6 +204,66 @@ def test_catalog_discounts_exact_and_gemini_answer():
         assert billing._matches(rate, model.split('/', 1)[1])
         assert not billing._matches(rate, model + '-unknown')
     assert all(p.discount == .6 for p in settings.prices if p.vendor == 'alibaba')
+
+
+def test_qwen_max_and_long_context_tariffs():
+    for model in ('qwen3.8-max', 'qwen3.7-max', 'qwen3.7-max-2026-06-08'):
+        snap = snapshot(agent=component('alibaba', model))
+        amount, _ = billing.estimate(dict(input=100000, output=10000), snap.agent, snap)
+        assert amount == pytest.approx((.1 * 12 + .01 * 36) * .6)
+    snap = snapshot(agent=component('alibaba', 'qwen3.7-plus'))
+    low, _ = billing.estimate(dict(input=256000, output=1000), snap.agent, snap)
+    high, _ = billing.estimate(dict(input=256001, output=1000), snap.agent, snap)
+    assert low == pytest.approx((.256 * 2 + .001 * 8) * .6)
+    assert high == pytest.approx((.256001 * 6 + .001 * 24) * .6)
+    assert component('alibaba', 'qwen3.7-flash-2026-07-15').price.model == 'qwen3.7-flash'
+
+
+def test_deepseek_claude_context_alias_is_billable(tmp_path):
+    item, root = job(tmp_path)
+    item.verify.agent = 'claude-code'
+    item.verify.model = 'deepseek-flash[1m]'
+    item.verify.agent_env = {'ANTHROPIC_BASE_URL': 'https://api.deepseek.com/anthropic'}
+    item.billing.snapshot = billing.capture(item)
+    store.jobs.put(item)
+    assert item.billing.snapshot.agent.price.model == 'deepseek-flash'
+    trajectory(root, model='deepseek-flash', prompt=100000, output=10000, cache=20000)
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.agent_cny == pytest.approx(.08 * 2 + .01 * 8 + .02 * .04)
+    assert not any('价格待配置' in note for note in updated.billing.warnings)
+    assert any('高峰价格上限' in note for note in updated.billing.warnings)
+    assert not billing._matches(item.billing.snapshot.agent.price, 'deepseek-flash-unknown')
+
+
+def test_deepseek_vendor_and_direct_supply_prices_remain_distinct():
+    rates = [('deepseek', 'deepseek-v4-pro', 9),
+             ('tencent', 'deepseek-v4-pro', 12),
+             ('tencent', 'deepseek/deepseek-v4-pro', 9),
+             ('tencent', 'deepseek-v4-flash-0731', 3),
+             ('tencent', 'deepseek/deepseek-v4-flash-0731', 2)]
+    for vendor, model, expected in rates:
+        snap = snapshot(agent=component(vendor, model))
+        amount, _ = billing.estimate(dict(input=1000000), snap.agent, snap)
+        assert amount == expected
+    assert component('alibaba', 'deepseek-v4.1-flash').price.tiers[0].cache_read == .2
+    assert component('deepseek', 'deepseek-flash').price.tiers[0].cache_read == .04
+
+
+def test_beijing_workspace_endpoint_does_not_match_foreign_or_spoofed_hosts():
+    assert billing._vendor('https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1') == ('alibaba', 'cn-beijing')
+    assert billing._vendor('https://workspace.ap-southeast-1.maas.aliyuncs.com/v1') == ('alibaba', 'other')
+    assert billing._vendor('https://workspace.cn-beijing.maas.aliyuncs.com.evil.test/v1') == ('custom', '')
+
+
+def test_catalog_available_without_overwriting_saved_prices(client, member_headers):
+    saved = PricingSettings(prices=[])
+    store.pricing_doc.write(saved)
+    response = client.get('/api/system/pricing/catalog', headers=member_headers)
+    assert response.status_code == 200
+    PricingSettings(prices=response.json())
+    assert any(row['model'] == 'qwen3.7-max' for row in response.json())
+    assert billing.pricing().prices == []
+    assert client.get('/api/system/pricing/catalog').status_code == 401
 
 
 def test_rmb_cache_and_reasoning_not_double_counted():

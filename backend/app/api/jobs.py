@@ -10,7 +10,7 @@ from starlette.background import BackgroundTask
 
 from ..deps import AdminUser, CurrentUser
 from ..models import Job, JobCreate, JobReviewRequest, JobStatus, JobType
-from ..services import job_download_service, job_service
+from ..services import billing_service, job_download_service, job_service
 from ..models.job import JobPublic, JobRenameRequest
 from ..models.job import HarborActionRequest, HarborTrialActionRequest, VerifyBatchCreate
 from ..services import harbor_action_service
@@ -42,7 +42,9 @@ def list_jobs(
         limit=limit,
         offset=offset,
     )
-    return {"items": [JobPublic.model_validate(item.model_dump()) for item in items], "total": total, "offset": offset, "limit": limit}
+    pending = billing_service.worker.request(items)
+    return {"items": [JobPublic.model_validate(item.model_dump()) for item in items], "total": total,
+            "offset": offset, "limit": limit, "billing_pending": pending}
 
 
 @router.get("/overview", summary="任务统计")

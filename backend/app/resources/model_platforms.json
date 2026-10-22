@@ -5,7 +5,11 @@
     "models": [
       {"model": "qwen3.8-max", "protocols": ["openai", "anthropic", "responses"]},
       {"model": "qwen3.8-flash", "protocols": ["openai", "anthropic", "responses"]},
-      {"model": "qwen3.7-plus", "protocols": ["openai", "anthropic", "responses"]}
+      {"model": "qwen3.7-plus", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "qwen3.7-max", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "qwen3.7-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "deepseek-v4.1-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "deepseek-v4-pro-0813", "protocols": ["openai", "anthropic", "responses"]}
     ],
     "sources": ["https://help.aliyun.com/zh/model-studio/base-url", "https://help.aliyun.com/zh/model-studio/anthropic-api-messages", "https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-responses"]
   },
@@ -16,7 +20,16 @@
       {"model": "hy3", "protocols": ["openai", "anthropic", "responses"]},
       {"model": "deepseek-v4-pro", "protocols": ["openai", "anthropic", "responses"]},
       {"model": "glm-5.3", "protocols": ["openai", "anthropic", "responses"]},
-      {"model": "kimi-k3", "protocols": ["openai", "anthropic", "responses"]}
+      {"model": "kimi-k3", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "hy4-preview", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "deepseek/deepseek-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "deepseek/deepseek-v4-pro-0813", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "deepseek-v4.1-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "glm-5.3-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "glm-5.3-flashx", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "kimi-k2.7-code", "protocols": ["openai", "anthropic"]},
+      {"model": "minimax-m3.1-flash", "protocols": ["openai", "anthropic", "responses"]},
+      {"model": "minimax-m3", "protocols": ["openai", "anthropic", "responses"]}
     ],
     "sources": ["https://cloud.tencent.com/document/product/1823/130079", "https://cloud.tencent.com/document/product/1823/131903", "https://cloud.tencent.com/document/product/1823/133532"]
   },

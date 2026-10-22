@@ -9,6 +9,7 @@ Serves the JSON API under ``/api``, WebSocket streams under ``/ws``, and — whe
 from __future__ import annotations
 
 import logging
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from .api import api_router, ws_router
 from .config import REPO_ROOT, settings
 from .services import (
+    billing_service,
     dataset_service,
     deployment_service,
     export_service,
@@ -62,6 +64,7 @@ async def lifespan(app: FastAPI):
     if adopted_reviews:
         logger.info("moved %d pre-existing review(s) into the default project", adopted_reviews)
 
+    billing_service.worker.start()
     await monitor.start()
     await scheduler.start()
     # 部署和导出的进程不归调度器管，重启后要各自对账一次，
@@ -76,6 +79,7 @@ async def lifespan(app: FastAPI):
     finally:
         await review_service.shutdown()
         await scheduler.stop()
+        await asyncio.to_thread(billing_service.worker.stop)
         await monitor.stop()
 
 

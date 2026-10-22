@@ -1068,6 +1068,7 @@ export interface SpendRow {
 }
 
 export interface SpendSummary {
+  updating_jobs?: number
   amount_cny: number | null
   jobs: number
   incomplete_jobs: number
