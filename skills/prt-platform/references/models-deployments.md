@@ -31,7 +31,7 @@
 }
 ```
 
-示例解析器仅说明字段位置，实际值必须匹配模型及服务器 vLLM 版本，不普遍套用 Qwen 配置。`source` 可为 `model`、`job`、`path`，分别提供对应 `model_id`、`job_id`、`model_path`；路径属于服务器。Codex 使用 `responses`，Claude Code 使用 `anthropic`，通常对话接口使用 `openai`。Agent 协议需要匹配工具调用解析器；Codex 对外模型名不能带 `/`。`port` 可省略让平台分配，不擅自停止已有服务来抢端口。
+示例解析器仅说明字段位置，实际值必须匹配模型及服务器 vLLM 版本，不普遍套用 Qwen 配置。`source` 可为 `model`、`job`、`path`，分别提供对应 `model_id`、`job_id`、`model_path`；路径属于服务器。Codex 使用 `responses`，Claude Code 原生使用 `anthropic`，启用 [OpenAI Bridge](jobs.md#claude-code--openai-bridge) 时上游使用 `responses`；通常对话接口使用 `openai`。Agent 协议需要匹配工具调用解析器；Codex 对外模型名不能带 `/`。`port` 可省略让平台分配，不擅自停止已有服务来抢端口。
 
 `POST /deployments` 返回 `starting` 后轮询 `GET /deployments/{id}`、`GET /deployments/{id}/log?tail_bytes=24000`，到 `serving` 才是就绪。探活成功并不证明复杂业务工具调用正确，按用户要求验证真实工作流。
 

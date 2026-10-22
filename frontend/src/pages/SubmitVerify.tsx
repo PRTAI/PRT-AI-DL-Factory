@@ -515,7 +515,6 @@ export default function SubmitVerify() {
   const patch = (values: Partial<VerifyConfig>) => setConfig((previous) => ({ ...previous, ...values }))
   const modelApis = useQuery({ queryKey: ['model-apis'], queryFn: () => api.modelApis() })
   const agentWireProtocol = wireProtocol(config)
-  const agentProtocol = agentWireProtocol === 'responses' ? 'openai' : agentWireProtocol
   React.useEffect(() => {
     if (!modelApis.data) return
     setConfig((prev) => {
@@ -642,7 +641,7 @@ export default function SubmitVerify() {
         resources: { n_gpus: nGpus, priority: 0, env: cleanKv(taskEnv) },
         verify: {
           ...config,
-          agent_api_protocol: agentProtocol,
+          ...agentConfig(config),
           task_names: splitList(taskFilter),
           exclude_task_names: splitList(excludeFilter),
           agent_env: cleanKv(config.agent_env),

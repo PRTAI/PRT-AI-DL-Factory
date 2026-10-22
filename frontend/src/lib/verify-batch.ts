@@ -1,9 +1,10 @@
 import type { DeploymentEndpoint, ModelApi, VerifyAgentConfig } from './types'
 
 export function agentConfig(config: VerifyAgentConfig): VerifyAgentConfig {
+  const protocol = agentWireProtocol(config)
   return {
     agent: config.agent, model_api_id: config.model_api_id, deployment_id: config.deployment_id ?? '',
-    agent_api_protocol: config.agent_api_protocol, model: config.model,
+    agent_api_protocol: protocol === 'responses' ? 'openai' : protocol, model: config.model,
     use_openai_bridge: config.use_openai_bridge ?? false,
     reasoning_effort: config.reasoning_effort, agent_import_path: config.agent_import_path,
     agent_env: config.agent_env, agent_kwargs: config.agent_kwargs,

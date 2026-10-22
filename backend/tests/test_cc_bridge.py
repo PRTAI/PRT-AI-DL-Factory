@@ -42,6 +42,42 @@ def test_manual_bridge_resolves_upstream_and_disables_deferred_tool_search():
     assert model_api_service.agent_protocol('claude-code', 'openai', use_openai_bridge=True) == 'responses'
 
 
+@pytest.mark.parametrize('requested', ['', 'openai', 'anthropic'])
+def test_bridge_overrides_saved_native_protocol(requested):
+    value = config(agent_api_protocol=requested)
+    assert model_api_service.agent_protocol('claude-code', requested, use_openai_bridge=True) == 'responses'
+    assert model_api_service.resolve_agent(value, user_id='unused').env['PRT_CC_BRIDGE_ENABLED'] == '1'
+
+
+def test_native_claude_still_rejects_openai_without_bridge():
+    with pytest.raises(HTTPException) as caught:
+        model_api_service.agent_protocol('claude-code', 'openai')
+    assert '必须使用 Anthropic' in caught.value.detail
+
+
+@pytest.mark.parametrize('requested', ['openai', 'anthropic'])
+@pytest.mark.parametrize('source', ['manual', 'platform'])
+def test_api_single_submit_accepts_bridge_with_openai_or_saved_protocol(client, member_headers, harbor_dataset, requested, source):
+    value = config(dataset_id=harbor_dataset.id, agent_api_protocol=requested)
+    if source == 'platform':
+        platform = ModelPlatformConfig(vendor='atlascloud', name='Responses-only bridge', endpoints={'responses': 'https://api.atlascloud.ai/v1'})
+        model = ModelApiConfig(name='GPT Responses only', model='openai/gpt-6.1-sol-codex', model_is_server_id=True,
+                               platform_id=platform.id, supported_protocols=['responses'])
+        store.model_platforms.put(platform)
+        store.model_apis.put(model)
+        grant_key(user_id_of('dev@prt.local'), platform.id, 'sk-manual-bridge-secret')
+        value.model_api_id = model.id
+        value.agent_env = {}
+    response = client.post('/api/jobs', headers=member_headers, json={
+        'name': 'bridge submit', 'type': 'verify', 'project_id': project_id(),
+        'resources': {'n_gpus': 0}, 'verify': value.model_dump(),
+    })
+    assert response.status_code == 201, response.text
+    assert response.json()['verify']['use_openai_bridge'] is True
+    assert response.json()['verify']['agent_api_protocol'] == 'openai'
+    assert 'sk-manual-bridge-secret' not in response.text
+
+
 @pytest.mark.parametrize('agent', ['codex', 'oracle', 'custom:Agent'])
 def test_bridge_rejects_other_agents(agent):
     with pytest.raises(HTTPException):
@@ -95,14 +131,16 @@ def test_builder_stages_bridge_bundle_and_masks_all_credentials(tmp_path, harbor
     assert 'prt_cc_bridge_runtime.py' not in built.files
 
 
-def test_api_batch_retains_each_rows_bridge_flag(client, member_headers, harbor_dataset):
+@pytest.mark.parametrize('requested', ['openai', 'anthropic'])
+def test_api_batch_retains_each_rows_bridge_flag(client, member_headers, harbor_dataset, requested):
     body = {'common': {'name': 'bridge batch', 'type': 'verify', 'project_id': project_id(),
                        'resources': {'n_gpus': 0}, 'verify': {'dataset_id': harbor_dataset.id}},
-            'agents': [config().model_dump(include={'agent','use_openai_bridge','model','agent_env'}), {'agent': 'oracle'}]}
+            'agents': [config(agent_api_protocol=requested).model_dump(include={'agent','agent_api_protocol','use_openai_bridge','model','agent_env'}), {'agent': 'oracle'}]}
     response = client.post('/api/jobs/verify-batch', headers=member_headers, json=body)
     assert response.status_code == 201, response.text
     jobs = response.json()
     assert jobs[0]['verify']['use_openai_bridge'] is True
+    assert jobs[0]['verify']['agent_api_protocol'] == 'openai'
     assert jobs[1]['verify']['use_openai_bridge'] is False
     assert 'sk-manual-bridge-secret' not in response.text
 

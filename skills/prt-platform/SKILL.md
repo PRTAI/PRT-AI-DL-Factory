@@ -1,6 +1,6 @@
 ---
 name: prt-platform
-description: "使用平台地址及用户凭据，通过 PRT AI DL Factory HTTP API 操作项目、数据集、训练评测任务和模型部署。适用于远程平台操作与任务排障；无需平台源码或 SSH。"
+description: "使用平台地址及用户凭据，通过 PRT AI DL Factory HTTP API 操作项目、数据集、训练评测和模型部署，查询费用并排查任务。无需平台源码或 SSH。"
 ---
 
 # PRT 平台操作
@@ -33,9 +33,12 @@ python3 "$PRT_API" schema --model VerifyConfig
 - 项目创建、数据集上传/替换/检查：读 [references/projects-data.md](references/projects-data.md)。
 - Harbor 评测、批量 Agent、SFT/RL、审核、原地重跑/评分/恢复：读 [references/jobs.md](references/jobs.md)。
 - 本地模型、个人供应商密钥、vLLM 部署与训练产物导出：读 [references/models-deployments.md](references/models-deployments.md)。
+- 任务费用、项目/人员/模型花费汇总与价格折扣：读 [references/billing.md](references/billing.md)。
 - 通用客户端参数、下载与故障判断：读 [references/client.md](references/client.md)。
 
 其他平台功能（账户、审核报告、系统设置等）通过 `schema --search` 找到真实路由，再用 `request` 调用。不要靠界面名称推测 HTTP 方法或字段。资源名称用于检索，变更必须使用服务器返回的 ID；重名时核实负责人、项目和创建时间。
+
+页面出现开关不代表后端已支持：使用 Bridge 前检查 `VerifyConfig` 和 `VerifyAgentConfig` 是否包含 `use_openai_bridge`；费用统计检查 `/system/pricing` 及 `/system/dashboard` 返回的 `billing`。缺失时报告前后端版本不一致，需要更新并重启后端，不将未知字段发给旧服务端（它可能静默忽略）。
 
 ## 执行与核验
 

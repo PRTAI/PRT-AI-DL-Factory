@@ -61,3 +61,14 @@ test('bridge mode is per agent and requires Responses without changing native Cl
   assert.equal(rows[0].config.use_openai_bridge, true)
   assert.equal(agentConfig({ agent: 'oracle', agent_env: {}, agent_kwargs: {} }).use_openai_bridge, false)
 })
+
+test('single and batch submissions normalize saved protocol using the bridge switch', () => {
+  const saved = { agent: 'claude-code', agent_api_protocol: 'anthropic', use_openai_bridge: true, agent_env: {}, agent_kwargs: {} }
+  const single = agentConfig(saved)
+  assert.equal(single.use_openai_bridge, true)
+  assert.equal(single.agent_api_protocol, 'openai')
+  const added = context.exports.appendVerifyAgent([], saved)
+  assert.equal(added[0].config.agent_api_protocol, 'openai')
+  assert.equal(agentConfig({ ...single, use_openai_bridge: false }).agent_api_protocol, 'anthropic')
+  assert.equal(agentConfig({ ...saved, agent: 'codex', use_openai_bridge: false }).agent_api_protocol, 'openai')
+})

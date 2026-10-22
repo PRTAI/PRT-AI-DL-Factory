@@ -117,7 +117,7 @@ export default function Dashboard() {
         />
       </div>
 
-      <SpendDashboard data={dashboard.data?.billing} />
+      <SpendDashboard data={dashboard.data?.billing} loading={dashboard.isPending} error={dashboard.isError} />
       {/* ---------------------------------------------------- utilisation -- */}
       <div className="grid gap-3 xl:grid-cols-2">
         <Card>

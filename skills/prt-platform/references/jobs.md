@@ -31,7 +31,7 @@
 
 - 任务来源使用 `dataset_id`、`tasks_path`、`registry_dataset` 中对应的一种；不能把本地压缩包路径填入 `tasks_path`。有过滤需求时用 `task_names`、`exclude_task_names`、`n_tasks`，以服务端 Agent/catalog 能力为准。
 - `model_api_id` 复用个人供应商密钥；`deployment_id` 复用本地就绪部署；或 `model` + `agent_env` 手动接入。优先前两种，不混用。`oracle` / `nop` 不要求模型。
-- Claude Code 使用 Anthropic 协议，Codex 使用 Responses（API 字段 `agent_api_protocol` 的可选值以 schema 为准，不自行填写 `responses`）；平台按 harness 解析。不要把供应商的模型前缀擅自删除或补加。
+- Claude Code 原生使用 Anthropic；启用 `use_openai_bridge:true` 后可使用 GPT 等支持 OpenAI Responses 的模型，`agent_api_protocol` 填 `openai`。Codex 也使用 Responses（该 API 字段填 `openai`，不自行填写 `responses`）。不要把供应商的模型前缀擅自删除或补加。
 - RewardKit 数据集有评分时需选 `judge_model_api_id`；`judge_api_protocol` 为 `anthropic` / `openai`，`batch_judge` 控制 batched 评分。`disable_verification=true` 只用于用户要求的无评分运行，不能为绕过缺少 Judge 配置而偷偷启用。
 - `agent_kwargs` 是字符串字典；Codex 原生设置放在 `agent_kwargs.config` 的 JSON **字符串**中。当前平台补充 MCP 启动等待，但资源列表为空仍不表示没有 MCP tools。不要因一次工具选择失败就重配 MCP 或替换 harness。
 - `timeout_multiplier` 默认 1；阶段倍率为 `agent_timeout_multiplier` / `verifier_timeout_multiplier`。大倍率会把数小时任务拉长至数天，不能作为默认排障手段。
@@ -54,6 +54,16 @@
 ```
 
 返回多个 Job，名称自动追加模型名最后一段，oracle 用 Agent 名。共用 dataset/Judge/资源配置，Agent 差异放在 `agents` 列表；不要用循环提交来冒充原子批量请求。
+
+### Claude Code + OpenAI Bridge
+
+先确认在线 schema 支持 `use_openai_bridge`，再选择 `supported_protocols` 含 `responses` 且个人密钥 `ready` 的模型。例如单条任务的 `verify` 或批量的某一条 `agents` 配置：
+
+```json
+{"agent":"claude-code","use_openai_bridge":true,"agent_api_protocol":"openai","model_api_id":"mdl_GPT"}
+```
+
+仅标准 `claude-code` 支持此开关；每条批量 Agent 独立设置。使用本地服务时传支持 Responses 的 `deployment_id`；手动配置时传实际 `model` 和 `agent_env.OPENAI_API_KEY`、`OPENAI_BASE_URL`。只支持 Chat Completions 的接口不能据此当作 Responses 使用。Bridge 在 trial 容器内自动启动，保留 Claude Code 工具与 MCP；不需要用户另建全局桥接服务，首次运行需联网安装依赖。重跑/恢复沿用开关。若仍提示必须使用 Anthropic，先核对实际提交的开关和在线 schema，不通过切换成原生 Anthropic 来掩盖版本问题。
 
 ## SFT / 偏好训练
 

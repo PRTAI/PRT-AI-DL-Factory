@@ -127,9 +127,13 @@ def public(item: ModelApiConfig, user_id: str | None = None) -> ModelApiPublic:
 
 
 def agent_protocol(agent: str, requested: str = "", *, use_openai_bridge: bool = False) -> str | None:
-    if use_openai_bridge and agent != "claude-code":
-        raise HTTPException(400, "OpenAI Bridge 仅支持标准 claude-code Agent")
-    forced = "responses" if use_openai_bridge or agent == "codex" else "anthropic" if agent == "claude-code" else None
+    if use_openai_bridge:
+        if agent != "claude-code":
+            raise HTTPException(400, "OpenAI Bridge 仅支持标准 claude-code Agent")
+        # Bridge determines the upstream protocol, including for older drafts
+        # that still carry Claude Code's native Anthropic selection.
+        return "responses"
+    forced = "responses" if agent == "codex" else "anthropic" if agent == "claude-code" else None
     if forced and requested and requested != ("openai" if forced == "responses" else forced):
         raise HTTPException(400, f"{agent} 必须使用 {'OpenAI' if forced == 'responses' else 'Anthropic'} 接口")
     return forced or requested or None

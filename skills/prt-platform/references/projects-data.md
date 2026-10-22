@@ -11,6 +11,8 @@
 
 列表为团队共享，能读到不代表能修改。先复用用户指明的项目，名称不唯一时核实 ID；不要为了测试连通性创建项目。
 
+样例审核也必须归属项目：`POST /reviews` 是 multipart，必填 `project_id`、`name`、`model_api_id`、`archive` 与可重复的 `docs` 文件字段，`agent` 选择 `claude-code` 或 `codex`。这是 Agent harness 审核，不是单次 LLM 调用；Claude Code 原生需要 Anthropic，Codex 需要 Responses，当前审核 schema 没有评测用的 Bridge 开关。先用 `schema --path /reviews --method POST` 获取实际字段；现有 `upload` 子命令仅上传数据集，不能拿它代替审核的多文件请求。审核结果查询 `/reviews?project_id=...`、`/reviews/{id}`、`/reviews/{id}/findings` 和 `/reviews/{id}/log`；成功后可下载 `/reviews/{id}/report.docx`。
+
 ## 上传与校验
 
 `GET /datasets/specs` 返回服务端支持的格式说明。`GET /datasets?project_id=...&mine_only=true&kind=...` 查询已有数据。客户端调用 multipart `POST /datasets`，字段为 `file`、`name`、`kind`、`project_id`、`description`、逗号分隔的 `tags`、`rewardkit`。

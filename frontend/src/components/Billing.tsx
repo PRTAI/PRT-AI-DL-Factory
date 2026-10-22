@@ -1,19 +1,14 @@
 import { Link } from 'react-router-dom'
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { useAuth } from '@/lib/store'
-import type { Job, SpendSummary } from '@/lib/types'
+import type { Job, SpendRow, SpendSummary } from '@/lib/types'
+import { BILLING_UNAVAILABLE, jobCostState, money, spendChartRows } from '@/lib/billing'
 import { Card, CardBody, CardHeader, Table, Td, Th, Tr } from '@/components/ui'
-
-export function money(value?: number | null) {
-  if (value === null || value === undefined) return '—'
-  if (value > 0 && value < 0.000001) return '<¥0.000001'
-  return `¥${value.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: value > 0 && value < 0.01 ? 6 : 2 })}`
-}
 
 export function JobCost({ job }: { job: Job }) {
   if (job.type !== 'verify') return null
-  const billing = job.billing
-  const label = billing?.amount_cny == null ? '费用待统计' : `${money(billing.amount_cny)} · ${billing.status === 'partial' ? '部分估算' : '预估'}`
-  return <span className="mt-0.5 block text-[11px] text-fg-muted" title={billing?.warnings.join('\n')}>{label}</span>
+  const { label, hint } = jobCostState(job)
+  return <span className="mt-0.5 block text-[11px] text-fg-muted" title={hint}>{label}</span>
 }
 
 function SourceLink({ source }: { source: string }) {
@@ -27,6 +22,7 @@ export function BillingDetail({ job }: { job: Job }) {
   return <Card>
     <CardHeader title="API 预估费用" description="只计算已记录的模型 Token；不含工具、缓存存储、订阅与本地 GPU 费用。" />
     <CardBody className="space-y-3 text-xs">
+      {!billing && <p role="status" className="text-warning">{BILLING_UNAVAILABLE}</p>}
       <div className="flex flex-wrap gap-6">
         <span>已记录费用 <strong className="num text-lg">{money(billing?.amount_cny)}</strong></span>
         <span>Agent {money(billing?.agent_cny)}</span><span>Judge {money(billing?.judge_cny)}</span>
@@ -56,9 +52,41 @@ export function BillingDetail({ job }: { job: Job }) {
   </Card>
 }
 
-export function SpendDashboard({ data }: { data?: SpendSummary }) {
+function SpendChart({ rows, title, color }: { rows: SpendRow[]; title: string; color: string }) {
+  const chart = spendChartRows(rows)
+  if (!chart.length) return <div className="flex h-48 items-center justify-center rounded-md bg-bg-elevated p-4 text-center text-xs text-fg-muted">
+    {rows.some(row => row.amount_cny != null) ? '已统计的费用为 ¥0.00' : '暂无可计价的用量，收到费用记录后显示图表'}
+  </div>
+  return <div role="img" aria-label={`${title}费用排行，单位人民币，最多显示前 8 项`} className="min-w-0" style={{ height: Math.max(192, chart.length * 36 + 32) }}>
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={chart} layout="vertical" margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" horizontal={false} />
+        <XAxis type="number" tick={{ fill: 'var(--fg-subtle)', fontSize: 10 }} tickFormatter={value => money(Number(value))} axisLine={false} tickLine={false} />
+        <YAxis type="category" dataKey="id" width={100} tick={{ fill: 'var(--fg-muted)', fontSize: 11 }} axisLine={false} tickLine={false}
+          tickFormatter={id => { const name = chart.find(row => row.id === id)?.name ?? String(id); return name.length > 12 ? `${name.slice(0, 11)}…` : name }} />
+        <Tooltip cursor={{ fill: 'var(--bg-elevated)' }} content={({ active, payload }) => {
+          if (!active || !payload?.length) return null
+          const row = payload[0].payload as SpendRow
+          return <div className="max-w-80 rounded-lg border border-border bg-card p-3 text-xs shadow-xl">
+            <p className="break-all font-medium">{row.name}</p>
+            <p className="num mt-1">{money(row.amount_cny)} · {row.jobs} 个任务</p>
+            {row.incomplete_jobs > 0 && <p className="mt-1 text-warning">{row.incomplete_jobs} 个任务费用不完整</p>}
+          </div>
+        }} />
+        <Bar dataKey="amount_cny" name="人民币费用" fill={color} radius={[0, 4, 4, 0]} maxBarSize={20} isAnimationActive={false} />
+      </BarChart>
+    </ResponsiveContainer>
+  </div>
+}
+
+export function SpendDashboard({ data, loading = false, error = false }: { data?: SpendSummary; loading?: boolean; error?: boolean }) {
   const { user } = useAuth()
-  if (!data) return null
+  if (!data) return <Card>
+    <CardHeader title="API 费用统计" description="按项目、人员和模型汇总人民币费用" />
+    <CardBody><p role="status" className={`text-sm ${loading ? 'text-fg-muted' : 'text-warning'}`}>
+      {loading ? '正在加载费用统计…' : error ? '费用数据加载失败，请重试或检查后端连接。' : BILLING_UNAVAILABLE}
+    </p></CardBody>
+  </Card>
   return <Card>
     <CardHeader title="API 费用统计" description={data.note} actions={user?.role === 'admin' && <Link className="link text-xs" to="/admin?tab=pricing">价格与折扣</Link>} />
     <CardBody className="space-y-3">
@@ -66,9 +94,11 @@ export function SpendDashboard({ data }: { data?: SpendSummary }) {
         <strong className="num text-2xl">{money(data.amount_cny)}</strong>
         <span className="text-xs text-fg-muted">{data.jobs} 个评测任务 · {data.incomplete_jobs} 个费用不完整或待统计</span>
       </div>
+      <p className="text-xs text-fg-muted">图表按已记录费用排序，最多显示前 8 项；未定价的用量不按零费用计算，完整明细见下表。</p>
       <div className="grid gap-3 xl:grid-cols-3">
-        {([{ key: 'projects', title: '按项目' }, { key: 'people', title: '按人员' }, { key: 'models', title: '按模型' }] as const).map(({ key, title }) => <div key={key}>
+        {([{ key: 'projects', title: '按项目' }, { key: 'people', title: '按人员' }, { key: 'models', title: '按模型' }] as const).map(({ key, title }, index) => <div key={key} className="min-w-0 space-y-3">
           <h3 className="mb-2 text-sm font-medium">{title}</h3>
+          <SpendChart rows={data[key]} title={title} color={`var(--chart-${index + 1})`} />
           <div className="max-h-80 overflow-auto rounded-md border border-border"><Table>
             <thead><tr><Th>名称</Th><Th>费用</Th><Th>任务</Th></tr></thead>
             <tbody>{data[key].map((row) => <Tr key={row.id}>
