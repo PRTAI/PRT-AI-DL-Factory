@@ -235,6 +235,104 @@ def test_deepseek_claude_context_alias_is_billable(tmp_path):
     assert not billing._matches(item.billing.snapshot.agent.price, 'deepseek-flash-unknown')
 
 
+def test_flash_price_supplements_old_catalog_without_overwriting_custom_rates():
+    unrelated = component('atlascloud', 'openai/gpt-6.1-sol-codex').price
+    store.pricing_doc.write(PricingSettings(prices=[unrelated]))
+    assert component('deepseek', 'deepseek-flash[1m]').price.tiers[0].input == 2
+    custom = component('deepseek', 'deepseek-flash').price.model_copy(deep=True)
+    custom.aliases = []  # Older saved catalogs have no Claude context alias.
+    custom.tiers[0].input = 7
+    store.pricing_doc.write(PricingSettings(prices=[custom]))
+    assert component('deepseek', 'deepseek-flash[1m]').price.tiers[0].input == 7
+    store.pricing_doc.write(PricingSettings(prices=[]))
+    assert billing.pricing().prices == []
+
+
+@pytest.mark.parametrize('keep_logs', [True, False])
+def test_flash_missing_historical_prices_repaired_without_duplicate_charges(tmp_path, keep_logs):
+    item, root = job(tmp_path)
+    item.verify.agent = 'claude-code'
+    item.verify.model = 'deepseek-flash[1m]'
+    item.verify.disable_verification = False
+    item.verify.agent_env = {'ANTHROPIC_BASE_URL': 'https://api.deepseek.com/anthropic'}
+    item.verify.verifier_env = {'JUDGE_BASE_URL': 'https://api.deepseek.com', 'JUDGE_MODEL': 'deepseek-flash[1m]'}
+    store.pricing_doc.write(PricingSettings(prices=[]))
+    item.billing.snapshot = billing.capture(item, historical=True)
+    store.jobs.put(item)
+    for phase in ('agent', 'judge'):
+        trajectory(root, phase=phase, model='deepseek-flash')
+    unpriced = billing.refresh(item, force=True)
+    assert unpriced.billing.amount_cny is None
+    ids = {row.id for row in store.usage_charges.all()}
+    assert len(ids) == 2
+    if not keep_logs:
+        shutil.rmtree(root / 'task__a')
+    # Simulate pre-fix cached signatures and an installed catalog missing DeepSeek.
+    store.pricing_doc.write(PricingSettings())
+    unrelated = component('atlascloud', 'openai/gpt-6.1-sol-codex').price
+    store.pricing_doc.write(PricingSettings(prices=[unrelated]))
+    store.jobs.update(item.id, lambda value: setattr(value.billing, 'input_signature', 'old-signature'))
+    assert billing.needs_refresh(store.jobs.get(item.id))
+    updated = billing.refresh(store.jobs.get(item.id))
+    expected = .08 * 2 + .01 * 8 + .02 * .04
+    assert updated.billing.agent_cny == pytest.approx(expected)
+    assert updated.billing.judge_cny == pytest.approx(expected)
+    assert updated.billing.amount_cny == pytest.approx(expected * 2)
+    assert {row.id for row in store.usage_charges.all()} == ids
+    assert not any('价格待配置' in note for note in updated.billing.warnings)
+    assert updated.billing.snapshot.agent.price.model == 'deepseek-flash'
+    assert updated.billing.snapshot.judge.price.model == 'deepseek-flash'
+    assert not billing.needs_refresh(updated)
+    repeated = billing.refresh(updated, force=True)
+    assert repeated.billing.amount_cny == updated.billing.amount_cny
+    assert {row.id for row in store.usage_charges.all()} == ids
+    resumed, resumed_root = job(tmp_path, name='resumed', snap=updated.billing.snapshot,
+                               harbor_action=HarborAction(mode='resume', source_job_id=item.id))
+    resumed.verify = item.verify.model_copy(deep=True)
+    store.jobs.put(resumed)
+    for phase in ('agent', 'judge'):
+        trajectory(resumed_root, phase=phase, model='deepseek-flash')
+    billing.refresh(resumed, force=True)
+    assert {row.id for row in store.usage_charges.all()} == ids
+    assert all(row.job_id == item.id for row in store.usage_charges.all())
+
+
+@pytest.mark.parametrize('constraint', ['disabled', 'changed_provider', 'subscription'])
+def test_flash_repair_respects_account_and_pricing_constraints(tmp_path, monkeypatch, constraint):
+    from backend.app.models.model_api import ModelApiConfig, ModelPlatformConfig
+    item, _ = job(tmp_path, snap=snapshot(agent=PriceSnapshot(vendor='deepseek', model='deepseek-flash[1m]')))
+    item.verify.agent = 'claude-code'
+    item.verify.model = 'deepseek-flash[1m]'
+    item.verify.agent_env = {'ANTHROPIC_BASE_URL': 'https://api.deepseek.com/anthropic'}
+    if constraint == 'disabled':
+        store.pricing_doc.write(PricingSettings(prices=[]))
+    elif constraint == 'changed_provider':
+        item.verify.agent_env['ANTHROPIC_BASE_URL'] = 'https://example.com/anthropic'
+    else:
+        monkeypatch.setattr(store, 'model_apis', JsonCollection(tmp_path / 'apis.json', ModelApiConfig))
+        monkeypatch.setattr(store, 'model_platforms', JsonCollection(tmp_path / 'platforms.json', ModelPlatformConfig))
+        platform = ModelPlatformConfig(vendor='deepseek', name='subscription', access_mode='subscription',
+                                       endpoints={'anthropic': 'https://api.deepseek.com/anthropic'})
+        store.model_platforms.put(platform)
+        api = ModelApiConfig(name='deepseek-flash[1m]', platform_id=platform.id, provider='anthropic')
+        store.model_apis.put(api)
+        item.verify.model_api_id = api.id
+    assert billing._repair_flash_snapshot(item.billing.snapshot, item).agent.price is None
+
+
+def test_flash_valid_historical_prices_are_not_repriced(tmp_path):
+    item, root = job(tmp_path, snap=snapshot(agent=component('deepseek', 'deepseek-flash[1m]')))
+    item.verify.agent = 'claude-code'
+    item.verify.model = 'deepseek-flash[1m]'
+    item.verify.agent_env = {'ANTHROPIC_BASE_URL': 'https://api.deepseek.com/anthropic'}
+    item.billing.snapshot.agent.price.tiers[0].input = 7
+    store.jobs.put(item)
+    trajectory(root, model='deepseek-flash')
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.agent_cny == pytest.approx(.08 * 7 + .01 * 8 + .02 * .04)
+    assert updated.billing.snapshot.agent.price.tiers[0].input == 7
+
+
 def test_deepseek_vendor_and_direct_supply_prices_remain_distinct():
     rates = [('deepseek', 'deepseek-v4-pro', 9),
              ('tencent', 'deepseek-v4-pro', 12),

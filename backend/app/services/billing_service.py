@@ -43,6 +43,12 @@ def pricing() -> PricingSettings:
     result = store.pricing_doc.read()
     if result.prices is None:
         result.prices = price_catalog()
+    elif result.prices and not any(row.vendor == "deepseek" and _matches(row, "deepseek-flash")
+                                   for row in result.prices):
+        # Existing installations may have saved a catalog before Flash was added.
+        # Keep custom tariffs, and respect [] as an explicit opt-out from pricing.
+        result.prices.append(next(row for row in price_catalog()
+                                  if row.vendor == "deepseek" and row.model == "deepseek-flash"))
     return result
 
 
@@ -70,8 +76,20 @@ def _vendor(url: str) -> tuple[str, str]:
             "generativelanguage.googleapis.com": ("google", "")}.get(host, ("custom", ""))
 
 
+def _flash_name(model: str) -> str:
+    name = model.lower()
+    for prefix in ("deepseek/", "openai/", "anthropic/"):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+    return "deepseek-flash" if name == "deepseek-flash[1m]" else name
+
+
 def _matches(price: ModelPrice, model: str) -> bool:
-    return model.lower() in {name.lower() for name in [price.model, *price.aliases]}
+    names = [price.model, *price.aliases]
+    if price.vendor == "deepseek" and _flash_name(model) == "deepseek-flash":
+        return any(_flash_name(name) == "deepseek-flash" for name in names)
+    return model.lower() in {name.lower() for name in names}
 
 
 def _canonical_model(model: str, component: PriceSnapshot) -> str:
@@ -136,6 +154,27 @@ def capture(job: Job, *, historical: bool = False) -> BillingSnapshot | None:
     return BillingSnapshot(usd_cny=config.usd_cny, exchange_date=config.exchange_date,
                            exchange_source=config.exchange_source, historical=historical,
                            agent=_component(job, config, "agent"), judge=_component(job, config, "judge"))
+
+
+def _repair_flash_snapshot(snapshot: BillingSnapshot, job: Job) -> BillingSnapshot:
+    """Fill only missing official Flash prices, without repricing valid snapshots."""
+    repaired = snapshot
+    config = None
+    for phase in ("agent", "judge"):
+        old = getattr(snapshot, phase)
+        if old.free or old.price or old.vendor != "deepseek" or _flash_name(old.model) != "deepseek-flash":
+            continue
+        config = config or pricing()
+        candidate = _component(job, config, phase)
+        # Reuse account/access-mode checks; changed providers must not rewrite history.
+        if (candidate.free or not candidate.price or candidate.vendor != old.vendor
+                or candidate.region != old.region or _flash_name(candidate.model) != _flash_name(old.model)):
+            continue
+        if repaired is snapshot:
+            repaired = snapshot.model_copy(deep=True)
+            repaired.historical = True
+        getattr(repaired, phase).price = candidate.price.model_copy(deep=True)
+    return repaired
 
 
 def _read(path: Path) -> dict:
@@ -433,6 +472,17 @@ def _charge(job, snapshot, phase, session, model, usages, ledger) -> UsageCharge
     model = _canonical_model(model, component)
     identity = _identity(phase, session, model)
     previous = ledger.get(identity)
+    if previous is None and component.vendor == "deepseek" and _flash_name(model) == "deepseek-flash":
+        # Old unpriced records used the response model as their key; priced records
+        # use the configured [1m] alias. Reuse the original key to avoid double billing.
+        for prefix in ("", "deepseek/", "openai/", "anthropic/"):
+            for alias in ("deepseek-flash", "deepseek-flash[1m]"):
+                previous = ledger.get(_identity(phase, session, prefix + alias))
+                if previous:
+                    identity, model = previous.id, previous.model
+                    break
+            if previous:
+                break
     charge_job_id = previous.job_id if previous else job.id
     if not previous and phase == "agent" and job.harbor_action and job.harbor_action.mode == "regrade":
         source = store.jobs.get(job.harbor_action.source_job_id)
@@ -467,6 +517,9 @@ def _input_signature(job: Job) -> str:
     value = [_BILLING_VERSION, job.status.value, job.runtime.started_at, job.runtime.finished_at,
              job.runtime.output_dir, job.runtime.work_dir, job.verify.model if job.verify else "",
              job.harbor_action.model_dump(mode="json") if job.harbor_action else None]
+    if job.billing.snapshot and any(part.vendor == "deepseek" and _flash_name(part.model) == "deepseek-flash"
+                                    for part in (job.billing.snapshot.agent, job.billing.snapshot.judge)):
+        value.append("deepseek-flash-pricing-v1")
     return hashlib.sha256(json.dumps(value, default=str, sort_keys=True).encode()).hexdigest()
 
 
@@ -499,7 +552,7 @@ def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None
         if not force and not needs_refresh(job):
             return job
         signature = _input_signature(job)
-        snapshot = job.billing.snapshot or capture(job, historical=True)
+        snapshot = _repair_flash_snapshot(job.billing.snapshot or capture(job, historical=True), job)
         records, obsolete, warnings = [], set(), set()
         try:
             trials = list(_paths(job))
@@ -520,6 +573,23 @@ def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None
                 return current or job
             ledger = {row.id: row for row in store.usage_charges.all()}
             changes = {}
+            for identity, row in ledger.items():
+                if row.job_id != job.id:
+                    continue
+                old = getattr(row.snapshot, row.phase)
+                fixed = getattr(snapshot, row.phase)
+                if (old.price is not None or old.free or old.vendor != "deepseek"
+                        or _flash_name(old.model) != "deepseek-flash" or fixed.price is None
+                        or fixed.vendor != old.vendor or _flash_name(fixed.model) != _flash_name(old.model)):
+                    continue
+                updated_row = row.model_copy(deep=True)
+                # Preserve the original exchange rate and the other phase's tariff.
+                getattr(updated_row.snapshot, row.phase).price = fixed.price.model_copy(deep=True)
+                updated_row.snapshot.historical = True
+                updated_row.amount_cny, notes = estimate(row.tokens, getattr(updated_row.snapshot, row.phase),
+                                                       updated_row.snapshot, aggregate=True, model=row.model)
+                updated_row.warnings = sorted(set(note for note in row.warnings if not note.startswith("价格待配置：")) | set(notes))
+                ledger[identity] = changes[identity] = updated_row
             for record in records:
                 charge = _charge(job, snapshot, record.phase, record.session, record.model, record.usages, ledger)
                 charge.warnings.extend(record.warnings)
