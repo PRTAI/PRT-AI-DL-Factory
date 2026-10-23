@@ -210,6 +210,19 @@ dataset.zip
 
 **推荐流程**：`oracle`（应 ≈1.0）→ `nop`（应 =0）→ 真实 agent pass@1 → 需要统计显著性时上 pass@4。
 
+### 平台 Harbor 镜像与预构建
+
+- **使用平台现有 Harbor 镜像**：复用平台公共依赖镜像，只构建题目文件和初始化层，适合大批量题目。仅支持 Docker 环境及上传或服务器本地任务集。需先由管理员在「平台管理 → Harbor 镜像」构建，开启后无需单题预构建，预构建面板会隐藏。
+- **重跑任务**时该开关默认关闭（与原数据集相关），需要时再手动勾选。
+- 平台镜像的构建配方更新后（例如新增 Bridge 依赖预装），需在「平台管理 → Harbor 镜像」重新构建；状态显示“已就绪”只说明镜像存在，不代表是最新配方。
+
+### Claude Code + OpenAI Bridge
+
+Claude Code 默认只能接 Anthropic 协议。勾选 **OpenAI Bridge** 后，可用支持 OpenAI Responses 的模型（如 GPT 系列）驱动 Claude Code，原生工具与 MCP 保持不变；Bridge 在每个 trial 容器内自动启动和清理。
+
+- **依赖**：平台 Harbor 镜像已预装 Bridge 的独立 Python 环境，同时开启平台镜像时 trial 内不联网；其他镜像会在 setup 阶段从 PyPI 下载，网络慢时会报 `Bridge 依赖安装失败`，详情见 trial 的 `agent/setup/openai-bridge.txt`。此时产物缺失（`Could not find the file /app/output/...`）只是 Agent 未运行的连带结果。
+- **缓存**：Bridge 去掉 Claude Code 每次请求变化的归因首行，并按「模型 + 题目」固定上游 `prompt_cache_key`，同一题目的多个 trial（含 pass@k）共享前缀缓存；上游在 `prompt_tokens_details` 中返回的缓存命中也会计入缓存读取与费用统计。
+
 ### 评测自己训练出来的模型
 
 1. 用 vLLM 起一个 OpenAI 兼容服务：

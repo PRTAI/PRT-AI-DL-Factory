@@ -38,7 +38,7 @@ python3 "$PRT_API" schema --model VerifyConfig
 
 其他平台功能（账户、审核报告、系统设置等）通过 `schema --search` 找到真实路由，再用 `request` 调用。不要靠界面名称推测 HTTP 方法或字段。资源名称用于检索，变更必须使用服务器返回的 ID；重名时核实负责人、项目和创建时间。
 
-页面出现开关不代表后端已支持：使用 Bridge 前检查 `VerifyConfig` 和 `VerifyAgentConfig` 是否包含 `use_openai_bridge`；费用统计检查 `/system/pricing` 及 `/system/dashboard` 返回的 `billing`。缺失时报告前后端版本不一致，需要更新并重启后端，不将未知字段发给旧服务端（它可能静默忽略）。
+页面出现开关不代表后端已支持：使用 Bridge 前检查 `VerifyConfig` 和 `VerifyAgentConfig` 是否包含 `use_openai_bridge`；平台镜像检查 `VerifyConfig.use_platform_image` 与 `GET /system/harbor-image`；费用统计检查 `/system/pricing` 及 `/system/dashboard` 返回的 `billing`。缺失时报告前后端版本不一致，需要更新并重启后端，不将未知字段发给旧服务端（它可能静默忽略）。
 
 ## 执行与核验
 

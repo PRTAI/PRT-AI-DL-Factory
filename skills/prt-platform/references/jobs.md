@@ -63,7 +63,15 @@
 {"agent":"claude-code","use_openai_bridge":true,"agent_api_protocol":"openai","model_api_id":"mdl_GPT"}
 ```
 
-仅标准 `claude-code` 支持此开关；每条批量 Agent 独立设置。使用本地服务时传支持 Responses 的 `deployment_id`；手动配置时传实际 `model` 和 `agent_env.OPENAI_API_KEY`、`OPENAI_BASE_URL`。只支持 Chat Completions 的接口不能据此当作 Responses 使用。Bridge 在 trial 容器内自动启动，保留 Claude Code 工具与 MCP；不需要用户另建全局桥接服务，首次运行需联网安装依赖。重跑/恢复沿用开关。若仍提示必须使用 Anthropic，先核对实际提交的开关和在线 schema，不通过切换成原生 Anthropic 来掩盖版本问题。
+仅标准 `claude-code` 支持此开关；每条批量 Agent 独立设置。使用本地服务时传支持 Responses 的 `deployment_id`；手动配置时传实际 `model` 和 `agent_env.OPENAI_API_KEY`、`OPENAI_BASE_URL`。只支持 Chat Completions 的接口不能据此当作 Responses 使用。Bridge 在 trial 容器内自动启动，保留 Claude Code 工具与 MCP；不需要用户另建全局桥接服务。重跑/恢复沿用开关。若仍提示必须使用 Anthropic，先核对实际提交的开关和在线 schema，不通过切换成原生 Anthropic 来掩盖版本问题。
+
+- 依赖：平台 Harbor 镜像（较新版本）已预装 Bridge 独立环境，配合 `use_platform_image:true` 时 trial 内不联网；其他镜像在 setup 阶段从 PyPI 安装，网络慢会长时间停在 `setup_environment` 后失败。
+- 报 `Bridge 依赖安装失败`：读 `GET /jobs/{id}/trials/{trial}` 中 `agent_logs` 的 `setup/openai-bridge.txt`。`files.pythonhosted.org ... Read timed out` 属于容器网络问题，告知用户在「平台管理 → Harbor 镜像」重建镜像并启用平台镜像，或改善网络；不要反复重提任务。此时 `/app/output/... Could not find the file` 与 Artifact collision 只是 Agent 未运行的连带结果。
+- 缓存：Bridge 去掉 Claude Code 每次请求变化的归因首行，并按「模型 + 题目」固定 `prompt_cache_key`，同题的 trial（含 pass@k）共享上游前缀缓存；上游以 `prompt_tokens_details.cached_tokens` 返回命中时也计为缓存读取。命中率仍很低时先确认服务端已更新到包含这些修复的版本，再检查上游是否支持前缀缓存。
+
+### 平台 Harbor 镜像
+
+`VerifyConfig.use_platform_image:true` 复用平台公共依赖镜像，只构建题目文件与初始化层；仅支持 `environment_type:"docker"` 及上传/服务器本地任务集（不支持 registry 数据集）。提交前 `GET /system/harbor-image` 确认 `ready`；构建为 `POST /system/harbor-image/build`（管理员、占用服务器资源，需用户明确要求）。开启后不需要再对单题预构建。`ready` 只表示镜像存在，不代表是最新配方：镜像在服务端更新前构建时不含 Bridge 预装环境，Bridge 任务仍会联网安装，需要重建。
 
 ## SFT / 偏好训练
 
