@@ -81,3 +81,48 @@ def test_real_litellm_tool_use_roundtrip(monkeypatch, stream):
         assert calls[0]['tools'][0]['type'] == 'function'
         assert any(item.get('type') == 'function_call_output' and item.get('output') == 'tool-result-42' for item in calls[1]['input'])
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('variant', ['deltas', 'done_only', 'foreign_item_id'])
+def test_parallel_tool_calls_keep_their_arguments(monkeypatch, variant):
+    pytest.importorskip('litellm')
+    if version('litellm') != '1.105.1':
+        pytest.skip('协议验收需要用户 bridge 固定的 litellm==1.105.1')
+    monkeypatch.syspath_prepend(str(settings.resources_dir / 'cc-openai-bridge' / 'src'))
+    monkeypatch.setenv('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
+    from cc_openai_bridge.app import patch_tool_arguments
+    patch_tool_arguments()
+    from litellm.llms.anthropic.pass_through.responses_adapters.streaming_iterator import AnthropicResponsesStreamWrapper
+    calls = [('fc-1', 'call-1', '{"pattern":"*.py"}'), ('fc-2', 'call-2', '{"pattern":"*.md"}')]
+    events = [dict(type='response.created')]
+    for index, (item_id, call_id, arguments) in enumerate(calls):
+        item = dict(type='function_call', id=item_id, call_id=call_id, name='Glob', arguments='')
+        events.append(dict(type='response.output_item.added', output_index=index, item=item))
+    for index, (item_id, call_id, arguments) in enumerate(calls):
+        if variant != 'done_only':
+            delta_id = 'other-' + item_id if variant == 'foreign_item_id' else item_id
+            events.extend(dict(type='response.function_call_arguments.delta', output_index=index, item_id=delta_id, delta=part)
+                          for part in (arguments[:6], arguments[6:]))
+    for index, (item_id, call_id, arguments) in enumerate(calls):
+        item = dict(type='function_call', id=item_id, call_id=call_id, name='Glob',
+                    arguments='' if variant == 'foreign_item_id' else arguments)
+        events.append(dict(type='response.output_item.done', output_index=index, item=item))
+    events.append(dict(type='response.completed', response=dict(status='completed', output=[
+        dict(type='function_call', id=i, call_id=c, name='Glob', arguments=a) for i, c, a in calls])))
+
+    async def collect():
+        async def upstream():
+            for event in events:
+                yield event
+        return [chunk async for chunk in AnthropicResponsesStreamWrapper(upstream(), 'openai/gpt-6-astra-codex')]
+
+    chunks = asyncio.run(collect())
+    tools = {chunk['index']: chunk['content_block'] for chunk in chunks
+             if chunk['type'] == 'content_block_start' and chunk['content_block']['type'] == 'tool_use'}
+    arguments = {index: '' for index in tools}
+    for chunk in chunks:
+        if chunk['type'] == 'content_block_delta' and chunk['delta']['type'] == 'input_json_delta':
+            arguments[chunk['index']] += chunk['delta']['partial_json']
+    assert {tools[i]['id']: json.loads(arguments[i]) for i in tools} == {c: json.loads(a) for _, c, a in calls}
+    assert sum(chunk['type'] == 'content_block_stop' for chunk in chunks) == 2
+    assert chunks[-1]['type'] == 'message_stop'

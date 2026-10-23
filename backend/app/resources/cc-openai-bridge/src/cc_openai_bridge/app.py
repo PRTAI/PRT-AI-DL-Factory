@@ -34,9 +34,71 @@ FORWARDED_FIELDS = {
 }
 
 
+def patch_tool_arguments():
+    """Emit each tool_use input once, from the finished Responses item.
+
+    LiteLLM routes argument deltas by ``item_id``. Some OpenAI-compatible upstreams
+    send parallel calls whose deltas carry a different/missing ``item_id``, so every
+    delta lands on the last block and Claude Code receives ``{}`` for each tool.
+    The finished item (or ``arguments.done``) is authoritative per call.
+    """
+    from litellm.llms.anthropic.pass_through.responses_adapters import streaming_iterator
+
+    wrapper = streaming_iterator.AnthropicResponsesStreamWrapper
+    if getattr(wrapper, "_prt_tool_arguments", False):
+        return
+    original = wrapper._process_event
+
+    def process(self, event):
+        field = self._field
+        kind = field(event, "type")
+        state = self.__dict__.setdefault("_prt_tools", {"blocks": {}, "args": {}})
+        if kind == "response.output_item.added" and field(field(event, "item"), "type") == "function_call":
+            original(self, event)
+            state["blocks"][field(event, "output_index")] = self._current_block_index
+            return
+        # output_index identifies the call even when item_id differs between events.
+        if kind == "response.function_call_arguments.delta":
+            key = field(event, "output_index")
+            if key is None:
+                key = field(event, "item_id")
+            state["args"][key] = state["args"].get(key, "") + (field(event, "delta") or "")
+            return
+        if kind == "response.function_call_arguments.done":
+            key = field(event, "output_index")
+            if key is None:
+                key = field(event, "item_id")
+            state["args"][key] = field(event, "arguments") or ""
+            return
+        item = field(event, "item")
+        if kind == "response.output_item.done" and field(item, "type") == "function_call":
+            index, item_id = field(event, "output_index"), field(item, "id")
+            block = self._item_id_to_block_index.get(item_id) if item_id else None
+            if block is None:
+                block = state["blocks"].get(index)
+            if block is None:
+                original(self, {"type": "response.output_item.added", "item": item})
+                block = self._current_block_index
+            arguments = (field(item, "arguments") or state["args"].get(index)
+                         or state["args"].get(item_id) or "")
+            if arguments:
+                self._chunk_queue.append({
+                    "type": "content_block_delta", "index": block,
+                    "delta": {"type": "input_json_delta", "partial_json": arguments},
+                })
+            self._chunk_queue.append({"type": "content_block_stop", "index": block})
+            return
+        original(self, event)
+
+    wrapper._process_event = process
+    wrapper._prt_tool_arguments = True
+
+
 def create_app(settings: Settings, completion=None, token_counter=None):
     os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
     import litellm
+
+    patch_tool_arguments()
 
     invoke = completion or litellm.anthropic.messages.acreate
     count = token_counter or litellm.token_counter
