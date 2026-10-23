@@ -317,7 +317,78 @@ def test_flash_repair_respects_account_and_pricing_constraints(tmp_path, monkeyp
         api = ModelApiConfig(name='deepseek-flash[1m]', platform_id=platform.id, provider='anthropic')
         store.model_apis.put(api)
         item.verify.model_api_id = api.id
-    assert billing._repair_flash_snapshot(item.billing.snapshot, item).agent.price is None
+    assert billing._repair_missing_snapshot(item.billing.snapshot, item, billing.pricing()).agent.price is None
+
+
+def test_qwen_saved_wrong_region_and_missing_price_are_repaired(tmp_path):
+    item, root = job(tmp_path, snap=snapshot(agent=PriceSnapshot(
+        vendor='alibaba', model='qwen3.8-max', region='other', cache_mode='explicit')))
+    item.verify.agent = 'claude-code'
+    item.verify.model = 'qwen3.8-max'
+    item.verify.agent_env = {'ANTHROPIC_BASE_URL': 'https://llm-example.cn-beijing.maas.aliyuncs.com/apps/anthropic'}
+    store.jobs.put(item)
+    trajectory(root, model='qwen3.8-max', cache=0)
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.snapshot.agent.region == 'cn-beijing'
+    assert updated.billing.snapshot.agent.price.model == 'qwen3.8-max'
+    assert updated.billing.agent_cny == pytest.approx((.1 * 12 + .01 * 36) * .6)
+
+
+def test_actual_usage_model_overrides_display_name_and_configured_model(tmp_path, monkeypatch):
+    from backend.app.models.model_api import ModelApiConfig
+    monkeypatch.setattr(store, 'model_apis', JsonCollection(tmp_path / 'apis.json', ModelApiConfig))
+    api = ModelApiConfig(name='My expensive model', model='qwen3.8-max', base_url='https://dashscope.aliyuncs.com/compatible-mode/v1')
+    store.model_apis.put(api)
+    item, root = job(tmp_path, snap=snapshot(agent=PriceSnapshot(
+        vendor='alibaba', model='qwen3.8-max', region='cn-beijing', price=component('alibaba', 'qwen3.8-max').price)))
+    item.verify.model_api_id = api.id
+    item.verify.model = 'qwen3.8-max'
+    store.jobs.put(item)
+    trajectory(root, model='qwen3.8-flash', cache=0)
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.agent_cny == pytest.approx((.1 * .8 + .01 * 2.7) * .6)
+    charge = store.usage_charges.all()[0]
+    assert charge.model == 'qwen3.8-flash'
+    assert charge.snapshot.agent.price.model == 'qwen3.8-flash'
+    api.name = 'renamed as GPT'
+    api.model = 'qwen3.7-plus'
+    store.model_apis.put(api)
+    assert billing.capture(item).agent.model == 'qwen3.8-max'  # immutable submitted model
+    repeated = billing.refresh(updated, force=True)
+    assert repeated.billing.amount_cny == updated.billing.amount_cny
+    assert len(store.usage_charges.all()) == 1
+
+
+def test_unknown_usage_model_does_not_inherit_displayed_price(tmp_path):
+    item, root = job(tmp_path)
+    trajectory(root, model='unverified-model')
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.amount_cny is None
+    assert any('价格待配置' in warning for warning in updated.billing.warnings)
+
+
+def test_single_tier_aggregated_usage_can_exceed_per_request_context():
+    snap = snapshot(agent=component('alibaba', 'qwen3.8-max'))
+    amount, _ = billing.estimate({'input': 2000000, 'output': 100000}, snap.agent, snap, aggregate=True)
+    assert amount == pytest.approx((2 * 12 + .1 * 36) * .6)
+
+
+def test_new_server_model_rates_and_exact_aliases():
+    assert component('deepseek', 'deepseek-v4-pro[1m]').price.model == 'deepseek-v4-pro'
+    assert component('anthropic', 'claude-opus-4-8').price.tiers[0].input == 5
+    assert component('atlascloud', 'deepseek-ai/deepseek-v3.2').price.tiers[0].output == .38
+    terra = component('atlascloud', 'openai/gpt-5.6-terra').price
+    assert terra.tiers[0].input == 2 and terra.tiers[1].output == 18
+
+
+@pytest.mark.parametrize('model,discount', [('openai/gpt-6.1-sol', 1), ('openai/gpt-6.1-sol-codex', .15)])
+def test_exact_reseller_route_precedes_shared_official_model(tmp_path, model, discount):
+    item, _ = job(tmp_path)
+    item.verify.model = model
+    item.verify.agent_env = {'OPENAI_BASE_URL': 'https://api.atlascloud.ai/v1'}
+    captured = billing.capture(item)
+    assert captured.agent.price.model == model
+    assert captured.agent.price.discount == discount
 
 
 def test_flash_valid_historical_prices_are_not_repriced(tmp_path):

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 _LOCK = threading.RLock()
 _MAX_JSON = 64 * 1024 * 1024
 _JOB_LOCKS = [threading.RLock() for _ in range(64)]
-_BILLING_VERSION = 2
+_BILLING_VERSION = 3
 
 
 def price_catalog() -> list[ModelPrice]:
@@ -106,7 +106,7 @@ def _canonical_model(model: str, component: PriceSnapshot) -> str:
     return model
 
 
-def _component(job: Job, config: PricingSettings, phase: str) -> PriceSnapshot:
+def _component(job: Job, config: PricingSettings, phase: str, *, model_override: str | None = None) -> PriceSnapshot:
     v = job.verify
     if phase == "agent" and (v.agent in {"oracle", "nop"} or v.deployment_id):
         return PriceSnapshot(model=v.model or v.agent, free=True)
@@ -114,7 +114,7 @@ def _component(job: Job, config: PricingSettings, phase: str) -> PriceSnapshot:
         return PriceSnapshot(free=True)
     api_id = v.model_api_id if phase == "agent" else v.judge_model_api_id
     item = store.model_apis.get(api_id) if api_id else None
-    model = item.model_id if item else v.model if phase == "agent" else ""
+    model = (v.model or (item.model_id if item else "")) if phase == "agent" else (item.model_id if item else "")
     url = (item.base_url or str(PROVIDERS[item.provider]["default_base_url"])) if item else ""
     vendor = "custom"
     if item and item.platform_id:
@@ -131,14 +131,31 @@ def _component(job: Job, config: PricingSettings, phase: str) -> PriceSnapshot:
         vendor, _ = _vendor(url)
     if phase == "judge" and env.get("JUDGE_MODEL"):
         model = env["JUDGE_MODEL"]
+    if model_override is not None:
+        model = model_override
     detected, region = _vendor(url)
     if vendor == "custom":
         vendor = detected
     # A vendor label alone cannot establish the region or a subscription tariff.
     candidates = sorted(config.prices or [], key=lambda row: not row.vendor.startswith("platform:"))
-    price = next((row.model_copy(deep=True) for row in candidates
-                  if row.vendor in {vendor, f"platform:{item.platform_id}" if item else ""}
-                  and _matches(row, model) and (not row.region or row.region == region)), None)
+    eligible = [row for row in candidates
+                if row.vendor in {vendor, f"platform:{item.platform_id}" if item else ""}
+                and (not row.region or row.region == region)]
+    price = next((row for row in eligible if _matches(row, model)), None)
+    if price is None:
+        for prefix in ("openai/", "anthropic/", "dashscope/", "deepseek/", "gemini/"):
+            if model.startswith(prefix):
+                price = next((row for row in eligible if _matches(row, model[len(prefix):])), None)
+                if price:
+                    break
+    if price is None and model:
+        matches = [row for row in eligible if _price_matches_record(row, model)]
+        # An official response ID can refer to multiple reseller routes with
+        # different discounts. Never select the first/cheapest ambiguous route.
+        if len(matches) == 1:
+            price = matches[0]
+    if price:
+        price = price.model_copy(deep=True)
     if item and item.platform_id:
         platform = store.model_platforms.get(item.platform_id)
         if platform and platform.access_mode != "standard" and not (price and price.vendor.startswith("platform:")):
@@ -156,25 +173,41 @@ def capture(job: Job, *, historical: bool = False) -> BillingSnapshot | None:
                            agent=_component(job, config, "agent"), judge=_component(job, config, "judge"))
 
 
-def _repair_flash_snapshot(snapshot: BillingSnapshot, job: Job) -> BillingSnapshot:
-    """Fill only missing official Flash prices, without repricing valid snapshots."""
-    repaired = snapshot
-    config = None
+def _price_matches_record(price: ModelPrice, model: str) -> bool:
+    # Only known protocol prefixes and documented server aliases are equivalent.
+    if not model:
+        return False
+    if _matches(price, model) or model == price.official_model:
+        return True
+    return any(model.startswith(prefix) and (_matches(price, model[len(prefix):])
+               or model[len(prefix):] == price.official_model)
+               for prefix in ("openai/", "anthropic/", "dashscope/", "deepseek/", "gemini/"))
+
+
+def _record_snapshot(snapshot: BillingSnapshot, job: Job, phase: str, model: str,
+                     config: PricingSettings) -> BillingSnapshot:
+    old = getattr(snapshot, phase)
+    if old.free or not model or (old.price and _price_matches_record(old.price, model)):
+        return snapshot
+    candidate = _component(job, config, phase, model_override=model)
+    same_region = candidate.region == old.region or (old.vendor == "alibaba"
+                  and old.region == "other" and candidate.region == "cn-beijing")
+    if candidate.free or not candidate.price or candidate.vendor != old.vendor or not same_region:
+        return snapshot
+    updated = snapshot.model_copy(deep=True)
+    replacement = old.model_copy(deep=True)
+    replacement.model, replacement.region, replacement.price = model, candidate.region, candidate.price
+    setattr(updated, phase, replacement)
+    updated.historical = True
+    return updated
+
+
+def _repair_missing_snapshot(snapshot: BillingSnapshot, job: Job, config: PricingSettings) -> BillingSnapshot:
     for phase in ("agent", "judge"):
-        old = getattr(snapshot, phase)
-        if old.free or old.price or old.vendor != "deepseek" or _flash_name(old.model) != "deepseek-flash":
-            continue
-        config = config or pricing()
-        candidate = _component(job, config, phase)
-        # Reuse account/access-mode checks; changed providers must not rewrite history.
-        if (candidate.free or not candidate.price or candidate.vendor != old.vendor
-                or candidate.region != old.region or _flash_name(candidate.model) != _flash_name(old.model)):
-            continue
-        if repaired is snapshot:
-            repaired = snapshot.model_copy(deep=True)
-            repaired.historical = True
-        getattr(repaired, phase).price = candidate.price.model_copy(deep=True)
-    return repaired
+        component = getattr(snapshot, phase)
+        if component.price is None:
+            snapshot = _record_snapshot(snapshot, job, phase, component.model, config)
+    return snapshot
 
 
 def _read(path: Path) -> dict:
@@ -224,9 +257,10 @@ def estimate(tokens: dict[str, int], component: PriceSnapshot, snapshot: Billing
     if price.note and "按高峰价格上限估算" in price.note:
         warnings.append(price.note)
     total_input = sum(tokens.get(key, 0) for key in ("input", "cache_read", "cache_write", "cache_write_long"))
-    if aggregate and len(price.tiers) > 1:
+    if aggregate:
         tier = price.tiers[-1]
-        warnings.append("仅有汇总用量，无法还原单次上下文长度；按最高输入阶梯估算")
+        if len(price.tiers) > 1:
+            warnings.append("仅有汇总用量，无法还原单次上下文长度；按最高输入阶梯估算")
     else:
         tier = next((tier for tier in price.tiers if tier.max_input is None or total_input <= tier.max_input), None)
     if tier is None:
@@ -466,18 +500,18 @@ def _identity(phase, session, model):
     return hashlib.sha256(json.dumps([phase, session, model], ensure_ascii=False).encode()).hexdigest()
 
 
-def _charge(job, snapshot, phase, session, model, usages, ledger) -> UsageCharge:
+def _charge(job, snapshot, phase, session, model, usages, ledger, config: PricingSettings) -> UsageCharge:
     component = getattr(snapshot, phase)
     # Upstream may report the official model behind an Atlas alias.
     model = _canonical_model(model, component)
     identity = _identity(phase, session, model)
     previous = ledger.get(identity)
-    if previous is None and component.vendor == "deepseek" and _flash_name(model) == "deepseek-flash":
-        # Old unpriced records used the response model as their key; priced records
-        # use the configured [1m] alias. Reuse the original key to avoid double billing.
-        for prefix in ("", "deepseek/", "openai/", "anthropic/"):
-            for alias in ("deepseek-flash", "deepseek-flash[1m]"):
-                previous = ledger.get(_identity(phase, session, prefix + alias))
+    if previous is None and component.price and _price_matches_record(component.price, model):
+        # Fill missing rates without changing legacy session identities or charging copies twice.
+        names = {component.model, component.price.model, component.price.official_model, *component.price.aliases}
+        for name in sorted(names - {""}):
+            for prefix in ("", "deepseek/", "openai/", "anthropic/", "dashscope/", "gemini/"):
+                previous = ledger.get(_identity(phase, session, prefix + name))
                 if previous:
                     identity, model = previous.id, previous.model
                     break
@@ -493,6 +527,10 @@ def _charge(job, snapshot, phase, session, model, usages, ledger) -> UsageCharge
     # Copies from resume/regrade reuse the original session identity and tariff.
     if previous:
         snapshot = previous.snapshot
+        component = getattr(snapshot, phase)
+    owner = job if charge_job_id == job.id else store.jobs.get(charge_job_id)
+    if owner:
+        snapshot = _record_snapshot(snapshot, owner, phase, model, config)
         component = getattr(snapshot, phase)
     total = defaultdict(int)
     amount = Decimal(0)
@@ -552,7 +590,8 @@ def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None
         if not force and not needs_refresh(job):
             return job
         signature = _input_signature(job)
-        snapshot = _repair_flash_snapshot(job.billing.snapshot or capture(job, historical=True), job)
+        config = pricing()
+        snapshot = _repair_missing_snapshot(job.billing.snapshot or capture(job, historical=True), job, config)
         records, obsolete, warnings = [], set(), set()
         try:
             trials = list(_paths(job))
@@ -577,21 +616,19 @@ def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None
                 if row.job_id != job.id:
                     continue
                 old = getattr(row.snapshot, row.phase)
-                fixed = getattr(snapshot, row.phase)
-                if (old.price is not None or old.free or old.vendor != "deepseek"
-                        or _flash_name(old.model) != "deepseek-flash" or fixed.price is None
-                        or fixed.vendor != old.vendor or _flash_name(fixed.model) != _flash_name(old.model)):
+                if old.price is not None:
+                    continue
+                repaired = _record_snapshot(row.snapshot, job, row.phase, row.model, config)
+                if repaired is row.snapshot:
                     continue
                 updated_row = row.model_copy(deep=True)
-                # Preserve the original exchange rate and the other phase's tariff.
-                getattr(updated_row.snapshot, row.phase).price = fixed.price.model_copy(deep=True)
-                updated_row.snapshot.historical = True
+                updated_row.snapshot = repaired
                 updated_row.amount_cny, notes = estimate(row.tokens, getattr(updated_row.snapshot, row.phase),
                                                        updated_row.snapshot, aggregate=True, model=row.model)
                 updated_row.warnings = sorted(set(note for note in row.warnings if not note.startswith("价格待配置：")) | set(notes))
                 ledger[identity] = changes[identity] = updated_row
             for record in records:
-                charge = _charge(job, snapshot, record.phase, record.session, record.model, record.usages, ledger)
+                charge = _charge(job, snapshot, record.phase, record.session, record.model, record.usages, ledger, config)
                 charge.warnings.extend(record.warnings)
                 old = ledger.get(charge.id)
                 if old and sum(charge.tokens.values()) < sum(old.tokens.values()):
