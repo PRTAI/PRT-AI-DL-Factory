@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import hashlib
 import json
 import secrets
 import shlex
@@ -69,6 +70,11 @@ path.unlink(missing_ok=True)
 '''
 
 
+def cache_key(model, task):
+    # 同一模型 + 同一题目的 Trial 共用上游缓存分片；默认的按会话键会把每个 Trial 打散到不同分片
+    return 'prt-' + hashlib.sha256(f'{model}\n{task}'.encode()).hexdigest()[:32]
+
+
 def enabled(agent):
     return agent._get_env(PREFIX + 'ENABLED') == '1'
 
@@ -107,6 +113,8 @@ def bridge_auth(original):
         return {'ANTHROPIC_BASE_URL': url, 'ANTHROPIC_API_KEY': key,
                 'ANTHROPIC_AUTH_TOKEN': '', 'CLAUDE_CODE_OAUTH_TOKEN': '',
                 'ANTHROPIC_SMALL_FAST_MODEL': self.model_name,
+                # 首行归因头带每个提示的内容哈希，会让上游前缀缓存跨 Trial 全部失效
+                'CLAUDE_CODE_ATTRIBUTION_HEADER': '0',
                 'CLAUDE_CODE_USE_BEDROCK': '0', 'CLAUDE_CODE_USE_VERTEX': '0'}
     return auth
 
@@ -121,6 +129,7 @@ def bridge_run(original):
         env = {'UPSTREAM_BASE_URL': self._get_env(PREFIX + 'UPSTREAM_BASE_URL'),
                'UPSTREAM_API_KEY': self._get_env(PREFIX + 'UPSTREAM_API_KEY'),
                'BRIDGE_API_KEY': key, 'BRIDGE_ALLOWED_MODELS': self.model_name,
+               'BRIDGE_PROMPT_CACHE_KEY': cache_key(self.model_name, getattr(environment, 'environment_name', '')),
                'LITELLM_LOCAL_MODEL_COST_MAP': 'True'}
         logfile = str(self.environment_logs_dir / 'openai-bridge.txt')
         start = f'nohup {PYTHON} {ROOT}/source/prt_bridge_server.py {shlex.quote(state)} > {shlex.quote(logfile)} 2>&1 < /dev/null &'

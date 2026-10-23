@@ -25,6 +25,8 @@ class Settings:
     max_concurrency: int = 8
     upstream_timeout_seconds: int = 300
     max_request_bytes: int = 32 * 1024 * 1024
+    # Fixed upstream prompt_cache_key; empty keeps LiteLLM's per-session key.
+    prompt_cache_key: str = ""
 
     def __post_init__(self):
         url = urlsplit(self.upstream_base_url)
@@ -49,6 +51,8 @@ class Settings:
             raise ValueError("Invalid bridge port or concurrency")
         if self.upstream_timeout_seconds < 1 or self.max_request_bytes < 1:
             raise ValueError("Request limits must be positive")
+        if self.prompt_cache_key and re.fullmatch(r"[A-Za-z0-9._:-]{1,64}", self.prompt_cache_key) is None:
+            raise ValueError("BRIDGE_PROMPT_CACHE_KEY must be 1-64 safe characters")
 
     @classmethod
     def from_env(cls):
@@ -68,4 +72,5 @@ class Settings:
             max_request_bytes=int(
                 os.environ.get("BRIDGE_MAX_REQUEST_BYTES", str(32 * 1024 * 1024))
             ),
+            prompt_cache_key=os.environ.get("BRIDGE_PROMPT_CACHE_KEY", "").strip(),
         )

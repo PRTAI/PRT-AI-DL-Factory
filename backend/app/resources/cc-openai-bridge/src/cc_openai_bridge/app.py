@@ -33,6 +33,59 @@ FORWARDED_FIELDS = {
     "context_management",
 }
 
+BILLING_HEADER = "x-anthropic-billing-header:"
+
+
+def strip_billing_header(system):
+    """Drop Claude Code's per-prompt attribution line from ``system``.
+
+    It carries a content hash (``cc_version=X.Y.Z.<hash>``) and LiteLLM places it
+    at the very start of ``instructions``, so every distinct prompt starts with
+    different bytes and the upstream prefix cache cannot be shared across trials.
+    """
+    if isinstance(system, str):
+        if system.startswith(BILLING_HEADER):
+            return system.partition("\n")[2].lstrip("\n")
+        return system
+    if isinstance(system, list):
+        return [
+            block for block in system
+            if not (isinstance(block, dict) and str(block.get("text", "")).startswith(BILLING_HEADER))
+        ]
+    return system
+
+
+def patch_cached_usage():
+    """Read cache hits reported in Chat Completions shape as well.
+
+    LiteLLM only reads ``input_tokens_details.cached_tokens``; OpenAI-compatible
+    relays often return ``prompt_tokens_details.cached_tokens`` on /responses, which
+    would otherwise be reported to Claude Code (and billing) as zero cache reads.
+    """
+    from litellm.llms.anthropic.pass_through.responses_adapters.transformation import (
+        LiteLLMAnthropicToResponsesAPIAdapter as adapter,
+    )
+
+    if getattr(adapter, "_prt_cached_usage", False):
+        return
+    original = adapter.translate_responses_api_usage_to_anthropic_usage
+
+    def translate(raw_usage):
+        result = original(raw_usage)
+        if raw_usage is None or result.get("cache_read_input_tokens"):
+            return result
+        details = getattr(raw_usage, "prompt_tokens_details", None)
+        if not isinstance(details, dict):
+            details = getattr(details, "__dict__", {}) if details is not None else {}
+        cached = details.get("cached_tokens")
+        if isinstance(cached, int) and 0 < cached <= result.get("input_tokens", 0):
+            result["input_tokens"] -= cached
+            result["cache_read_input_tokens"] = cached
+        return result
+
+    adapter.translate_responses_api_usage_to_anthropic_usage = staticmethod(translate)
+    adapter._prt_cached_usage = True
+
 
 def patch_tool_arguments():
     """Emit each tool_use input once, from the finished Responses item.
@@ -99,10 +152,14 @@ def create_app(settings: Settings, completion=None, token_counter=None):
     import litellm
 
     patch_tool_arguments()
+    patch_cached_usage()
 
     invoke = completion or litellm.anthropic.messages.acreate
     count = token_counter or litellm.token_counter
     capacity = asyncio.Semaphore(settings.max_concurrency)
+    # LiteLLM derives prompt_cache_key from Claude Code's per-session id, which routes
+    # every trial to a different cache shard. An explicit kwarg takes precedence.
+    cache_key = {"prompt_cache_key": settings.prompt_cache_key} if settings.prompt_cache_key else {}
     app = FastAPI(
         title="Claude Code OpenAI Bridge", docs_url=None, redoc_url=None, openapi_url=None
     )
@@ -138,7 +195,10 @@ def create_app(settings: Settings, completion=None, token_counter=None):
             raise HTTPException(400, "A valid model ID is required")
         if model not in settings.allowed_models:
             raise HTTPException(400, "Model is not enabled in BRIDGE_ALLOWED_MODELS")
-        return model, {k: v for k, v in body.items() if k in FORWARDED_FIELDS}
+        body = {k: v for k, v in body.items() if k in FORWARDED_FIELDS}
+        if "system" in body:
+            body["system"] = strip_billing_header(body["system"])
+        return model, body
 
     @app.get("/health")
     async def health():
@@ -168,6 +228,7 @@ def create_app(settings: Settings, completion=None, token_counter=None):
                 api_base=settings.upstream_base_url,
                 api_key=settings.upstream_api_key,
                 timeout=settings.upstream_timeout_seconds,
+                **cache_key,
                 **body,
             )
         except Exception as exc:

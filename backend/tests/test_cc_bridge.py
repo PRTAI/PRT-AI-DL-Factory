@@ -228,6 +228,7 @@ def test_bridge_auth_wins_over_placeholder_agent_env():
     asyncio.run(runtime.bridge_run(original)(agent, 'task', env, None))
     assert seen['ANTHROPIC_BASE_URL'] == 'http://127.0.0.1:23123'
     assert seen['ANTHROPIC_API_KEY'] not in {'prt-managed-bridge', 'sk-upstream-secret'}
+    assert seen['CLAUDE_CODE_ATTRIBUTION_HEADER'] == '0'
     assert len(env.overlays) == 1
 
 
@@ -275,3 +276,21 @@ def test_resume_build_keeps_bridge_routing_and_bundled_runtime(tmp_path):
     assert 'PRT_CC_BRIDGE_UPSTREAM_API_KEY' in refs['agent']
     assert 'PRT_CC_BRIDGE_UPSTREAM_API_KEY' not in refs['verifier']
     assert 'sk-manual-bridge-secret' not in json.dumps(built.masked_env())
+
+
+def test_runtime_prompt_cache_key_is_stable_per_model_and_task():
+    runtime = runtime_module()
+    keys = []
+    for model, task in [('gpt-6-astra', 'task-a'), ('gpt-6-astra', 'task-a'), ('gpt-6-astra', 'task-b'), ('other', 'task-a')]:
+        agent = SimpleNamespace(_get_env=lambda key: {'PRT_CC_BRIDGE_ENABLED': '1',
+            'PRT_CC_BRIDGE_UPSTREAM_BASE_URL': 'https://upstream.invalid/v1',
+            'PRT_CC_BRIDGE_UPSTREAM_API_KEY': 'sk-upstream-secret'}.get(key),
+            model_name=model, environment_logs_dir=Path('/logs/agent'), logger=logging.getLogger('bridge-test'))
+        env = Environment(runtime)
+        env.environment_name = task
+        async def original(*_): return None
+        asyncio.run(runtime.bridge_run(original)(agent, 'task', env, None))
+        keys.append(env.calls[0][1]['env']['BRIDGE_PROMPT_CACHE_KEY'])
+    assert keys[0] == keys[1]
+    assert len({keys[0], keys[2], keys[3]}) == 3
+    assert all(len(key) <= 64 for key in keys)

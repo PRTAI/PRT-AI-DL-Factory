@@ -126,3 +126,111 @@ def test_parallel_tool_calls_keep_their_arguments(monkeypatch, variant):
     assert {tools[i]['id']: json.loads(arguments[i]) for i in tools} == {c: json.loads(a) for _, c, a in calls}
     assert sum(chunk['type'] == 'content_block_stop' for chunk in chunks) == 2
     assert chunks[-1]['type'] == 'message_stop'
+
+
+@pytest.mark.parametrize('system', [
+    [{'type': 'text', 'text': 'x-anthropic-billing-header: cc_version=2.1.268.e0e; cc_entrypoint=sdk-cli;'},
+     {'type': 'text', 'text': 'You are Claude Code.', 'cache_control': {'type': 'ephemeral'}}],
+    'x-anthropic-billing-header: cc_version=2.1.268.759; cc_entrypoint=cli;\nYou are Claude Code.',
+])
+def test_bridge_strips_per_prompt_attribution_header(monkeypatch, system):
+    """首行带内容哈希，留着会让每个提示的 instructions 前缀都不同，上游缓存无法跨 Trial 复用。"""
+    pytest.importorskip('litellm')
+    monkeypatch.syspath_prepend(str(settings.resources_dir / 'cc-openai-bridge' / 'src'))
+    monkeypatch.setenv('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
+    from cc_openai_bridge.app import create_app
+    from cc_openai_bridge.settings import Settings
+    seen = []
+
+    async def completion(**kwargs):
+        seen.append(kwargs)
+        return {'type': 'message', 'content': []}
+
+    async def scenario():
+        app = create_app(Settings(upstream_base_url='https://bridge-upstream.invalid/v1', upstream_api_key='fake-key',
+                                  bridge_api_key='fake-client'), completion=completion)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://bridge',
+                                     headers={'x-api-key': 'fake-client'}) as client:
+            response = await client.post('/v1/messages', json={'model': 'gpt-6-astra', 'max_tokens': 10, 'system': system,
+                                                               'messages': [{'role': 'user', 'content': 'hi'}]})
+            assert response.status_code == 200, response.text
+    asyncio.run(scenario())
+    forwarded = seen[0]['system']
+    text = forwarded if isinstance(forwarded, str) else ''.join(block['text'] for block in forwarded)
+    assert text == 'You are Claude Code.'
+    assert 'x-anthropic-billing-header' not in json.dumps(forwarded)
+
+
+@pytest.mark.parametrize('usage, cached', [
+    ({'input_tokens_details': {'cached_tokens': 8000}}, 8000),
+    ({'prompt_tokens_details': {'cached_tokens': 8000}}, 8000),
+    ({}, 0),
+])
+def test_bridge_reports_cache_hits_in_either_usage_shape(monkeypatch, usage, cached):
+    pytest.importorskip('litellm')
+    if version('litellm') != '1.105.1':
+        pytest.skip('协议验收需要用户 bridge 固定的 litellm==1.105.1')
+    monkeypatch.syspath_prepend(str(settings.resources_dir / 'cc-openai-bridge' / 'src'))
+    monkeypatch.setenv('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
+    from cc_openai_bridge.app import patch_cached_usage
+    patch_cached_usage()
+    from litellm.llms.anthropic.pass_through.responses_adapters.transformation import LiteLLMAnthropicToResponsesAPIAdapter
+    from litellm.types.llms.openai import ResponseAPIUsage
+    result = LiteLLMAnthropicToResponsesAPIAdapter.translate_responses_api_usage_to_anthropic_usage(
+        ResponseAPIUsage(input_tokens=10000, output_tokens=100, total_tokens=10100, **usage))
+    assert result.get('cache_read_input_tokens', 0) == cached
+    assert result['input_tokens'] == 10000 - cached
+
+
+@pytest.mark.parametrize('fixed', ['prt-fixed-key', ''])
+def test_bridge_sends_fixed_prompt_cache_key_upstream(monkeypatch, fixed):
+    """LiteLLM 默认按 metadata.user_id 里的会话 id 生成 prompt_cache_key，每个 Trial 都不同。"""
+    pytest.importorskip('litellm')
+    monkeypatch.syspath_prepend(str(settings.resources_dir / 'cc-openai-bridge' / 'src'))
+    monkeypatch.setenv('LITELLM_LOCAL_MODEL_COST_MAP', 'True')
+    from cc_openai_bridge.app import create_app
+    from cc_openai_bridge.settings import Settings
+    bodies = []
+    original = httpx.AsyncClient.send
+
+    async def send(client, request, **kwargs):
+        if request.url.host != 'bridge-upstream.invalid':
+            return await original(client, request, **kwargs)
+        body = json.loads(request.content)
+        bodies.append(body)
+        return httpx.Response(200, request=request, json=dict(
+            id='resp-1', object='response', created_at=1700000000, model=body['model'], status='completed',
+            output=[dict(type='message', id='msg-1', role='assistant', status='completed',
+                         content=[dict(type='output_text', text='ok', annotations=[])])],
+            error=None, incomplete_details=None, parallel_tool_calls=True,
+            usage=dict(input_tokens=10, output_tokens=1, total_tokens=11)))
+
+    monkeypatch.setattr(httpx.AsyncClient, 'send', send)
+
+    async def scenario():
+        app = create_app(Settings(upstream_base_url='https://bridge-upstream.invalid/v1', upstream_api_key='fake-key',
+                                  bridge_api_key='fake-client', prompt_cache_key=fixed))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://bridge',
+                                     headers={'x-api-key': 'fake-client'}) as client:
+            for session in ('session-a', 'session-b'):
+                response = await client.post('/v1/messages', json={
+                    'model': 'gpt-6-astra', 'max_tokens': 10, 'messages': [{'role': 'user', 'content': 'hi'}],
+                    'metadata': {'user_id': json.dumps({'device_id': 'd', 'session_id': session})}})
+                assert response.status_code == 200, response.text
+    asyncio.run(scenario())
+    keys = [body.get('prompt_cache_key') for body in bodies]
+    if fixed:
+        assert keys == [fixed, fixed]
+    else:
+        assert keys[0] != keys[1]
+
+
+def test_bridge_rejects_unsafe_prompt_cache_key():
+    import sys
+    sys.path.insert(0, str(settings.resources_dir / 'cc-openai-bridge' / 'src'))
+    try:
+        from cc_openai_bridge.settings import Settings
+    finally:
+        sys.path.pop(0)
+    with pytest.raises(ValueError):
+        Settings(upstream_base_url='https://u.invalid/v1', upstream_api_key='k', bridge_api_key='b', prompt_cache_key='a\nb')
