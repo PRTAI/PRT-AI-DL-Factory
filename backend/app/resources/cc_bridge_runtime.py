@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import json
 import secrets
@@ -127,7 +128,11 @@ def bridge_run(original):
             await checked(environment, start, env=env, timeout_sec=10)
             ready = await checked(environment, f'{PYTHON} -c {shlex.quote(READY)} {shlex.quote(state)}', timeout_sec=45)
             self._prt_bridge_connection = (json.loads(ready.stdout)['url'], key)
-            return await original(self, instruction, environment, context)
+            # --agent-env 里的占位 ANTHROPIC_* 是 Trial 的 scoped env，优先级高于每次 exec 的 env；
+            # 不再叠一层 scoped env，Claude Code 会连到占位端口（ConnectionRefused）。
+            scoped = getattr(environment, 'scoped_exec_env', None)
+            with scoped(bridge_auth(lambda _: {})(self)) if scoped else contextlib.nullcontext():
+                return await original(self, instruction, environment, context)
         finally:
             cleanup = asyncio.create_task(environment.exec(
                 command=f'{PYTHON} -c {shlex.quote(STOP)} {shlex.quote(state)}', user='root', timeout_sec=8))

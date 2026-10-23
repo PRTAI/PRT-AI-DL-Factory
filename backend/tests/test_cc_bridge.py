@@ -193,6 +193,44 @@ def test_runtime_auth_tool_harness_and_cleanup_on_success_failure_cancel():
         asyncio.run(scenario())
 
 
+def test_bridge_auth_wins_over_placeholder_agent_env():
+    """Harbor 合并顺序：persistent < 每次 exec 的 env < Trial 的 scoped env（--agent-env）。"""
+    import contextlib
+    runtime = runtime_module()
+
+    class ScopedEnvironment(Environment):
+        def __init__(self, runtime):
+            super().__init__(runtime)
+            # Trial 把 --agent-env 作为 scoped env 包住 agent.run
+            self.overlays = [{'ANTHROPIC_BASE_URL': 'http://127.0.0.1:18876', 'ANTHROPIC_API_KEY': 'prt-managed-bridge'}]
+        @contextlib.contextmanager
+        def scoped_exec_env(self, env):
+            self.overlays.append(dict(env))
+            try:
+                yield
+            finally:
+                self.overlays.pop()
+        def merged(self, env):
+            result = dict(env or {})
+            for overlay in self.overlays:
+                result.update(overlay)
+            return result
+
+    agent = SimpleNamespace(_get_env=lambda key: {'PRT_CC_BRIDGE_ENABLED': '1',
+        'PRT_CC_BRIDGE_UPSTREAM_BASE_URL': 'https://upstream.invalid/v1',
+        'PRT_CC_BRIDGE_UPSTREAM_API_KEY': 'sk-upstream-secret'}.get(key),
+        model_name='openai/gpt-6-astra', environment_logs_dir=Path('/logs/agent'), logger=logging.getLogger('bridge-test'))
+    env = ScopedEnvironment(runtime)
+    seen = {}
+    async def original(self, instruction, environment, context):
+        # Claude Code 原生 run：auth env 作为每次 exec 的 env，再被 scoped env 覆盖
+        seen.update(environment.merged(runtime.bridge_auth(lambda _: {})(self)))
+    asyncio.run(runtime.bridge_run(original)(agent, 'task', env, None))
+    assert seen['ANTHROPIC_BASE_URL'] == 'http://127.0.0.1:23123'
+    assert seen['ANTHROPIC_API_KEY'] not in {'prt-managed-bridge', 'sk-upstream-secret'}
+    assert len(env.overlays) == 1
+
+
 def test_normal_claude_does_not_start_bridge():
     runtime = runtime_module()
     async def original(*_): return 'unchanged'
