@@ -190,6 +190,7 @@ def test_runtime_auth_tool_harness_and_cleanup_on_success_failure_cancel():
             assert any(shlex.quote(runtime.STOP) in command for command, _ in env.calls)
             assert all('sk-upstream-secret' not in command for command, _ in env.calls)
             assert env.calls[0][1]['env']['BRIDGE_ALLOWED_MODELS'] == 'gpt-6-astra'
+            assert env.calls[0][1]['env']['PYTHONPATH'] == runtime.SOURCE
         asyncio.run(scenario())
 
 
@@ -239,6 +240,19 @@ def test_normal_claude_does_not_start_bridge():
     env = Environment(runtime)
     assert asyncio.run(runtime.bridge_run(original)(agent, 'task', env, None)) == 'unchanged'
     assert not env.calls
+
+
+def test_platform_image_preinstalls_bridge_dependencies_with_same_pins():
+    import tomllib
+    pins = tomllib.loads((settings.resources_dir / 'cc-openai-bridge' / 'pyproject.toml').read_text())['project']['dependencies']
+    dockerfile = (settings.resources_dir / 'harbor-eval.Dockerfile').read_text()
+    assert '/opt/prt-cc-openai-bridge/venv' in dockerfile
+    for pin in pins:
+        assert f'"{pin}"' in dockerfile
+    runtime = runtime_module()
+    # 预装环境命中时不联网：源码经 PYTHONPATH 加载，Bridge 进程同样带上
+    assert 'PYTHONPATH=' + runtime.SOURCE in runtime.INSTALL
+    assert runtime.INSTALL.index('exit 0') < runtime.INSTALL.index('pip install')
 
 
 def test_bridge_bundle_scripts_compile():

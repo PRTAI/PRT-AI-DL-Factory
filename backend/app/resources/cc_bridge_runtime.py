@@ -15,10 +15,14 @@ PREFIX = 'PRT_CC_BRIDGE_'
 ROOT = '/opt/prt-cc-openai-bridge'
 PYTHON = ROOT + '/venv/bin/python'
 
+SOURCE = ROOT + '/source/src'
+
 INSTALL = r'''
 set -eu
-export LITELLM_LOCAL_MODEL_COST_MAP=True
-if [ -x /opt/prt-cc-openai-bridge/venv/bin/python ] && /opt/prt-cc-openai-bridge/venv/bin/python -c 'from importlib.metadata import version; assert version("cc-openai-bridge") == "1.0.0"; assert version("litellm") == "1.105.1"' >/dev/null 2>&1; then exit 0; fi
+export LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONPATH=/opt/prt-cc-openai-bridge/source/src
+# 平台镜像已预装依赖：源码经 PYTHONPATH 加载，无需联网
+if [ -x /opt/prt-cc-openai-bridge/venv/bin/python ] && /opt/prt-cc-openai-bridge/venv/bin/python -c 'import cc_openai_bridge.app, uvicorn; from importlib.metadata import version; assert version("litellm") == "1.105.1"' >/dev/null 2>&1; then exit 0; fi
+export PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=8 UV_HTTP_TIMEOUT=300
 if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; assert (3,12) <= sys.version_info[:2] < (3,14)' >/dev/null 2>&1 && python3 -m venv /opt/prt-cc-openai-bridge/venv; then
   /opt/prt-cc-openai-bridge/venv/bin/python -m pip install --no-cache-dir /opt/prt-cc-openai-bridge/source
 else
@@ -99,7 +103,7 @@ def bridge_setup(original):
         (self.logs_dir / 'setup' / 'openai-bridge.txt').write_text(
             (result.stdout or '') + (result.stderr or ''), encoding='utf-8')
         if result.return_code != 0:
-            raise RuntimeError('Bridge 依赖安装失败，请查看 Agent setup/openai-bridge.txt；需要联网安装独立的 Python 3.12 环境')
+            raise RuntimeError('Bridge 依赖安装失败，请查看 Agent setup/openai-bridge.txt；容器需联网安装独立的 Python 3.12 环境，或重建平台 Harbor 镜像以预装依赖')
     setup._prt_cc_bridge = True
     return setup
 
@@ -130,7 +134,7 @@ def bridge_run(original):
                'UPSTREAM_API_KEY': self._get_env(PREFIX + 'UPSTREAM_API_KEY'),
                'BRIDGE_API_KEY': key, 'BRIDGE_ALLOWED_MODELS': self.model_name,
                'BRIDGE_PROMPT_CACHE_KEY': cache_key(self.model_name, getattr(environment, 'environment_name', '')),
-               'LITELLM_LOCAL_MODEL_COST_MAP': 'True'}
+               'LITELLM_LOCAL_MODEL_COST_MAP': 'True', 'PYTHONPATH': SOURCE}
         logfile = str(self.environment_logs_dir / 'openai-bridge.txt')
         start = f'nohup {PYTHON} {ROOT}/source/prt_bridge_server.py {shlex.quote(state)} > {shlex.quote(logfile)} 2>&1 < /dev/null &'
         try:

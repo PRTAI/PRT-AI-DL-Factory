@@ -502,7 +502,8 @@ export default function SubmitVerify() {
     setTags(job.tags.join(','))
     setNGpus(job.resources.n_gpus)
     setTaskEnv(job.resources.env ?? {})
-    setConfig({ ...DEFAULT_VERIFY, ...verify })
+    // 平台镜像与原任务的数据集强相关；重跑时默认关闭，避免隐藏预构建面板
+    setConfig({ ...DEFAULT_VERIFY, ...verify, use_platform_image: false })
     setSource(verify.registry_dataset ? 'registry' : verify.tasks_path && !verify.dataset_id ? 'path' : 'uploaded')
     setTaskFilter((verify.task_names ?? []).join(','))
     setExcludeFilter((verify.exclude_task_names ?? []).join(','))

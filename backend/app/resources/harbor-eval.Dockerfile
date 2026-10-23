@@ -22,4 +22,11 @@ RUN python -m pip check \
     && python -c "import litellm, rewardkit; from rewardkit.judges import arun_agent, arun_llm; from importlib.metadata import version; assert litellm.model_cost; print('litellm=' + version('litellm')); print('harbor-rewardkit=' + version('harbor-rewardkit'))" \
     && rewardkit --help
 
+# Claude Code OpenAI Bridge 的独立依赖环境（litellm 版本与 Judge 不同，必须隔离）；
+# 运行时只上传源码并经 PYTHONPATH 加载，Trial 内不再从 PyPI 下载。版本与 cc-openai-bridge/pyproject.toml 一致。
+RUN python -m venv /opt/prt-cc-openai-bridge/venv \
+    && /opt/prt-cc-openai-bridge/venv/bin/python -m pip install --no-cache-dir \
+    "litellm==1.105.1" "fastapi==0.143.1" "uvicorn==0.54.0" "httpx==0.28.1" "openai==2.54.0" "pydantic==2.14.1" \
+    && /opt/prt-cc-openai-bridge/venv/bin/python -c "import fastapi, uvicorn, litellm"
+
 WORKDIR /app
