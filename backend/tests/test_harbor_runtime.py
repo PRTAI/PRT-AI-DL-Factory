@@ -391,3 +391,59 @@ def test_permission_repair_failure_does_not_mask_verifier_error(tmp_path, caplog
             await runtime.guarded_exec(original)(_mounted_log_environment(tmp_path), 'verify')
     asyncio.run(scenario())
     assert '日志目录权限修复失败' in caplog.text
+
+
+@pytest.mark.parametrize('case', ['platform', 'force', 'docker_image', 'other_base', 'compose'])
+def test_platform_task_image_skips_compose_build(tmp_path, monkeypatch, case):
+    env_dir = tmp_path / 'environment'
+    env_dir.mkdir()
+    base = 'ubuntu:24.04' if case == 'other_base' else runtime.PLATFORM_BASE + 'abc123'
+    (env_dir / 'Dockerfile').write_text(f'FROM {base}\nCOPY input_files /app\n')
+    if case == 'compose':
+        (env_dir / 'docker-compose.yaml').write_text('services: {}\n')
+    built = []
+    async def fake_build(directory, dockerfile, logger):
+        built.append(directory)
+        return 'prt-platform-task:hash'
+    monkeypatch.setattr(runtime, 'build_task_image', fake_build)
+    seen = {}
+    async def original(self, force_build):
+        seen.update(image=self.task_env_config.docker_image, prebuilt=self._env_vars.prebuilt_image_name)
+    env = SimpleNamespace(environment_dir=env_dir, logger=logging.getLogger('test.image'),
+                          task_env_config=SimpleNamespace(docker_image='given:tag' if case == 'docker_image' else None),
+                          _env_vars=SimpleNamespace(prebuilt_image_name=None))
+    asyncio.run(runtime.reuse_task_image(original)(env, case == 'force'))
+    if case == 'platform':
+        assert built == [env_dir]
+        assert seen == {'image': 'prt-platform-task:hash', 'prebuilt': 'prt-platform-task:hash'}
+    else:
+        assert not built
+        assert seen['prebuilt'] is None
+
+
+def test_platform_task_image_tag_is_content_addressed_and_reused(tmp_path, monkeypatch):
+    pytest.importorskip('harbor')
+    pytest.importorskip('filelock')
+    env_dir = tmp_path / 'environment'
+    env_dir.mkdir()
+    dockerfile = env_dir / 'Dockerfile'
+    dockerfile.write_text(f'FROM {runtime.PLATFORM_BASE}abc\n')
+    commands = []
+    present = set()
+    async def fake_exists(image): return image in present
+    class Process:
+        returncode = 0
+        async def communicate(self): return b'', None
+    async def fake_exec(*argv, **kwargs):
+        commands.append(argv)
+        present.add(argv[3])
+        return Process()
+    monkeypatch.setattr(runtime, 'image_exists', fake_exists)
+    monkeypatch.setattr(runtime.asyncio, 'create_subprocess_exec', fake_exec)
+    log = logging.getLogger('test.image')
+    first = asyncio.run(runtime.build_task_image(env_dir, dockerfile, log))
+    again = asyncio.run(runtime.build_task_image(env_dir, dockerfile, log))
+    assert first == again and first.startswith('prt-platform-task:')
+    assert len(commands) == 1 and commands[0][:2] == ('docker', 'build')
+    dockerfile.write_text(f'FROM {runtime.PLATFORM_BASE}def\n')
+    assert asyncio.run(runtime.build_task_image(env_dir, dockerfile, log)) != first

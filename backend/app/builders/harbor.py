@@ -209,7 +209,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         except (OSError, ValueError) as exc:
             raise BuildError(str(exc)) from exc
         command[command.index("--path") + 1] = str(local_root)
-        notes.append("使用平台 Harbor 镜像；只构建题目文件与初始化层，原数据集保持不变")
+        notes.append("使用平台 Harbor 镜像；题目层按内容首次构建一次并打标签，之后的 trial 与评测直接复用，不再 compose build；原数据集保持不变")
     if local_root is not None:
         try:
             adapted = harbor_compat.prepare_rewardkit_tasks(local_root)

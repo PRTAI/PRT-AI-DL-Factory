@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import tempfile
 import time
 import uuid
 
@@ -269,6 +270,75 @@ def wait_for_codex_mcp(original):
     return build_config
 
 
+PLATFORM_BASE = "prt-ai-factory-harbor-eval-base-image:sha-"
+TASK_IMAGE_NAME = "prt-platform-task"
+
+
+def uses_platform_base(dockerfile: Path) -> bool:
+    try:
+        first = dockerfile.read_text(encoding="utf-8").lstrip().split("\n", 1)[0]
+    except OSError:
+        return False
+    return first.startswith("FROM " + PLATFORM_BASE)
+
+
+async def image_exists(image: str) -> bool:
+    process = await asyncio.create_subprocess_exec(
+        "docker", "image", "inspect", image,
+        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+    return await process.wait() == 0
+
+
+async def build_task_image(env_dir: Path, dockerfile: Path, logger) -> str:
+    from filelock import AsyncFileLock
+    from harbor.utils.container_cache import docker_build_context_hash
+    # Plain `docker build` (not buildx) so FROM resolves the locally pinned platform image.
+    image = f"{TASK_IMAGE_NAME}:{docker_build_context_hash(context=env_dir, dockerfile_path=dockerfile)}"
+    if await image_exists(image):
+        return image
+    lock_dir = Path(tempfile.gettempdir()) / "prt-platform-task-images"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    async with AsyncFileLock(str(lock_dir / (image.split(":", 1)[1] + ".lock"))):
+        if await image_exists(image):
+            return image
+        logger.info("PRT: 首次构建平台题目镜像 %s（之后的评测直接复用）", image)
+        process = await asyncio.create_subprocess_exec(
+            "docker", "build", "-t", image, "-f", str(dockerfile), str(env_dir),
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        try:
+            output, _ = await process.communicate()
+        except asyncio.CancelledError:
+            if process.returncode is None:
+                process.kill()
+            raise
+        if process.returncode:
+            raise RuntimeError(f"平台题目镜像构建失败: {output.decode(errors='replace')[-4000:]}")
+    return image
+
+
+def reuse_task_image(original):
+    """Platform-image tasks: build each task's thin layer once, then run it as a prebuilt image.
+
+    The tag is content-addressed (Dockerfile incl. pinned base + context), so later
+    trials and jobs skip `compose build`, and `down --rmi local` leaves it alone.
+    Resume/rerun reuse the recorded task dirs, so detection is by the Dockerfile.
+    """
+    @functools.wraps(original)
+    async def start(self, force_build):
+        env_dir = Path(self.environment_dir)
+        dockerfile = env_dir / "Dockerfile"
+        if (not force_build and not self.task_env_config.docker_image and uses_platform_base(dockerfile)
+                and not (env_dir / "docker-compose.yaml").exists()
+                and not getattr(self, "_is_windows_container", False)):
+            image = await build_task_image(env_dir, dockerfile, self.logger)
+            self.task_env_config.docker_image = image
+            self._env_vars.prebuilt_image_name = image
+            self.logger.info("PRT: 使用平台题目镜像 %s，跳过 compose build", image)
+        return await original(self, force_build)
+    start._prt_task_image = True
+    return start
+
+
 def install_guards() -> None:
     if Path(__file__).with_name("prt_cc_bridge_runtime.py").is_file():
         from prt_cc_bridge_runtime import install
@@ -286,6 +356,9 @@ def install_guards() -> None:
         if original is not None:
             setattr(DockerEnvironment, name, staticmethod(reap_on_cancel(original)))
     DockerEnvironment.exec = guarded_exec(DockerEnvironment.exec)
+    original = getattr(DockerEnvironment, "start", None)
+    if original is not None and not getattr(original, "_prt_task_image", False):
+        DockerEnvironment.start = reuse_task_image(original)
 
 
 def main() -> None:
