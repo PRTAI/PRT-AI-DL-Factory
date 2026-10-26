@@ -702,3 +702,76 @@ def test_regrade_adapts_rewardkit_entry_of_selected_grading_set(client, member_h
     assert f"python3 /tests/{RUNNER_NAME}" in script.read_text()
     assert (script.parent / RUNNER_NAME).is_file()
     assert any("reward-kit" in note for note in built.notes)
+
+
+def test_regrade_uses_recorded_task_snapshot(client, member_headers, recorded_job, tmp_path):
+    """A replaced/deleted dataset must not break regrade: the source job's own
+    task tree (platform-image or Batch Judge snapshot) is authoritative."""
+    import shutil
+    source, root = recorded_job
+    recorded = tmp_path / "recorded" / Path(source.verify.tasks_path).name
+    shutil.copytree(source.verify.tasks_path, recorded)
+    native = json.loads((root / "config.json").read_text())
+    native["tasks"][0]["path"] = str(recorded)
+    (root / "config.json").write_text(json.dumps(native, ensure_ascii=False))
+    source.verify.tasks_path = str(tmp_path / "deleted-upload")
+    store.jobs.put(source)
+
+    response = _submit(client, member_headers, source, "regrade")
+    assert response.status_code == 201, response.text
+    child = store.jobs.get(response.json()["id"])
+    assert child.verify.tasks_path == str(recorded)
+    built, _, _ = runner.prepare(child)
+    assert built.command[built.command.index("--task-path") + 1] == str(recorded)
+
+
+def test_recovery_never_requires_the_source_dataset(client, member_headers, recorded_job):
+    """The original dataset may be gone after the run; resume/regrade still use
+    the recorded configuration and task tree."""
+    source, _ = recorded_job
+    source.verify.dataset_id = "ds_removed"
+    source.verify.tasks_path = ""
+    store.jobs.put(source)
+    for mode in ("resume", "regrade"):
+        response = _submit(client, member_headers, source, mode)
+        assert response.status_code == 201, (mode, response.text)
+        child = store.jobs.get(response.json()["id"])
+        assert child.verify.dataset_id == ("" if mode == "regrade" else "ds_removed")
+        runner.prepare(child)
+
+
+def test_whole_resume_rebuilds_stale_lock_after_task_change(client, member_headers, recorded_job):
+    """Editing/re-importing the task pack changes its digest; Harbor rejects the
+    old lock. Resume must drop the stale lock instead of failing the task."""
+    from harbor.cli import jobs as native_cli
+    from harbor.job import Job as NativeJob
+    from harbor.models.job.config import JobConfig
+    from unittest.mock import patch
+
+    source, root = recorded_job
+    original = asyncio.run(NativeJob.create(JobConfig.model_validate_json((root / "config.json").read_text())))
+    original._init_job_lock()
+    original._write_job_lock()
+    original._close_logger_handlers()
+    (Path(source.verify.tasks_path) / "instruction.md").write_text("Updated instructions")
+
+    response = _submit(client, member_headers, source)
+    assert response.status_code == 201, response.text
+    child = store.jobs.get(response.json()["id"])
+    assert child.harbor_action.lock_stale is True
+    built, _, output = runner.prepare(child)
+    target = output / child.id
+    assert not (target / "lock.json").exists()
+    seen = []
+
+    async def fake_run(job):
+        job._init_job_lock()
+        job._write_job_lock()
+        seen.append(job)
+        return None
+
+    with patch.object(NativeJob, "run", fake_run), patch.object(native_cli, "print_job_results_tables"), \
+            patch("harbor.environments.docker.docker.DockerEnvironment.preflight"):
+        native_cli.resume(job_path=target, filter_error_types=["CancelledError"])
+    assert [result.trial_name for result in seen[0]._existing_trial_results] == ["demo__done"]
+    assert (target / "lock.json").exists()

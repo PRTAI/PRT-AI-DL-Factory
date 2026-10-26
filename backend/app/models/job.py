@@ -366,6 +366,9 @@ class HarborAction(Base):
     trial_name: str | None = None
     selected_job_config: dict[str, Any] | None = None
     filter_error_types: list[str] = Field(default_factory=lambda: ["CancelledError"], max_length=50)
+    # The recorded lock no longer matches the task tree (the dataset was edited
+    # or re-imported). Harbor would refuse to resume; let it rebuild the lock.
+    lock_stale: bool = False
 
 
 class HarborRerun(Base):

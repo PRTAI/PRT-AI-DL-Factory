@@ -9,7 +9,23 @@ from pathlib import Path
 import shutil
 import signal
 import sys
+import tempfile
 from uuid import uuid4
+
+
+def _preflight_agent(factory, config) -> None:
+    """Validate an agent before old results are moved.
+
+    Older Harbor exposed ``AgentFactory.run_preflight``; current releases
+    resolve agents in ``Trial.create`` only, so build the agent instance here
+    instead (same class/env resolution, no container or run).
+    """
+    run_preflight = getattr(factory, "run_preflight", None)
+    if callable(run_preflight):
+        run_preflight(config)
+        return
+    logs_dir = Path(tempfile.gettempdir()) / "prt-agent-preflight"
+    factory.create_agent_from_config(config, logs_dir=logs_dir)
 
 
 def write_json(path: Path, value: str) -> None:
@@ -79,7 +95,7 @@ async def run(plan: dict) -> None:
         raise ValueError("This rerun operation already started; select the records again to retry")
     # All preflight and metric resolution happen before any old result is moved.
     for trial in trials:
-        AgentFactory.run_preflight(trial.agent)
+        _preflight_agent(AgentFactory, trial.agent)
         EnvironmentFactory.validate_resource_policies(trial.environment)
     records = read_results(root)
     metrics = await Job._resolve_metrics(config, [r.config.task for r in records] + [t.task for t in trials])

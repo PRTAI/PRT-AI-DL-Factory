@@ -71,7 +71,33 @@ def selected_job_configs(source: Path, trial_names: list[str]) -> list[dict]:
     return rows
 
 
-def inspect_source(source: Path, trial_names: list[str] | None = None) -> dict:
+def lock_stale(source: Path) -> bool:
+    """Recorded task digests no longer match the task tree resume would use."""
+    lock_path = source / "lock.json"
+    if not lock_path.is_file():
+        return False
+    try:
+        from harbor.publisher.packager import Packager
+        trials = (json.loads(lock_path.read_text()) or {}).get("trials") or []
+    except (OSError, ValueError, ImportError):
+        return False
+    checked: dict[str, str] = {}
+    for trial in trials:
+        task = trial.get("task") if isinstance(trial, dict) else None
+        if not isinstance(task, dict) or not task.get("path") or not task.get("digest"):
+            continue
+        key = str(task["path"])
+        if key not in checked:
+            try:
+                checked[key] = "sha256:" + Packager.compute_content_hash(Path(key))[0]
+            except Exception:
+                checked[key] = ""
+        if checked[key] != task["digest"]:
+            return True
+    return False
+
+
+def inspect_source(source: Path, trial_names: list[str] | None = None, *, check_lock: bool = False) -> dict:
     from harbor.cli import jobs
     from harbor.models.job.config import JobConfig
     from harbor.models.trial.result import TrialResult
@@ -113,7 +139,8 @@ def inspect_source(source: Path, trial_names: list[str] | None = None) -> dict:
     if not recorded and not regrade_error:
         regrade_error = "未找到有效的 trial result.json，只有产物文件不能直接重新判分"
     return {"recorded_trials": recorded, "unfinished_trials": unfinished,
-            "error_types": errors, "regrade_error": regrade_error}
+            "error_types": errors, "regrade_error": regrade_error,
+            "lock_stale": lock_stale(source) if check_lock and trial_names is None else False}
 
 
 def check_regrade(source: Path, task_path: Path, trial_names: list[str] | None = None) -> None:
@@ -171,7 +198,7 @@ def main() -> None:
         request = json.load(sys.stdin)
         source = Path(request["source"])
         names = request.get("trial_names")
-        result = inspect_source(source, names)
+        result = inspect_source(source, names, check_lock=bool(request.get("check_lock")))
         if names is not None:
             result["selected"] = selected_job_configs(source, names)
         if request.get("task_path"):
