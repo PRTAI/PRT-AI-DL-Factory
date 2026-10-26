@@ -63,6 +63,7 @@ from .model_api import (
     UserApiKeyPublic,
     UserApiKeySet,
 )
+from .issue import Issue, IssueCreate, IssueStatus
 from .model_registry import ModelDownload, ModelDownloadRequest, ModelEntry
 from .project import (
     Project,
@@ -126,6 +127,9 @@ __all__ = [
     "DownloadStatus",
     "Framework",
     "HarborEnvSpec",
+    "Issue",
+    "IssueCreate",
+    "IssueStatus",
     "Job",
     "JobActionResponse",
     "JobCreate",

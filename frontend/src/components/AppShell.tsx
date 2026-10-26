@@ -13,6 +13,7 @@ import {
   GraduationCap,
   ListChecks,
   LogOut,
+  MessageSquareWarning,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,6 +28,7 @@ import { api } from '@/lib/api'
 import { useAuth, useProject, useUi } from '@/lib/store'
 import { cn, formatRelative } from '@/lib/utils'
 import { ProjectSwitcher } from './ProjectSwitcher'
+import { NewIssueDialog } from '@/pages/Issues'
 import { Button, Tooltip, TooltipProvider } from './ui'
 
 interface NavItem {
@@ -65,6 +67,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   {
     section: '管理',
     items: [
+      { to: '/issues', label: '问题反馈', Icon: MessageSquareWarning },
       { to: '/admin', label: '平台管理', Icon: ShieldCheck, adminOnly: true },
       { to: '/settings', label: '个人设置', Icon: Settings },
     ],
@@ -98,6 +101,7 @@ export function AppShell() {
 
   const unread = (notifications.data ?? []).filter((item) => !item.read)
   const [showNotifications, setShowNotifications] = React.useState(false)
+  const [showFeedback, setShowFeedback] = React.useState(false)
 
   if (!user) return null
 
@@ -132,6 +136,12 @@ export function AppShell() {
           </div>
 
           <div className="flex shrink-0 items-center gap-1">
+            <Tooltip label="反馈问题">
+              <Button variant="ghost" size="icon" onClick={() => setShowFeedback(true)} aria-label="反馈问题">
+                <MessageSquareWarning className="h-4 w-4" aria-hidden />
+              </Button>
+            </Tooltip>
+            <NewIssueDialog open={showFeedback} onOpenChange={setShowFeedback} />
             <Tooltip label={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}>
               <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label="切换主题">
                 {theme === 'dark' ? <Sun className="h-4 w-4" aria-hidden /> : <Moon className="h-4 w-4" aria-hidden />}

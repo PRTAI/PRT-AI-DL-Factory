@@ -25,6 +25,7 @@ from .services import (
     dataset_service,
     deployment_service,
     export_service,
+    issue_service,
     model_api_service,
     project_service,
     review_service,
@@ -73,6 +74,8 @@ async def lifespan(app: FastAPI):
     export_service.reconcile()
     # 审核的编排状态不能接管；清理旧 Agent 后将中断任务标记失败。
     await review_service.reconcile()
+    # 托管修复的 Claude Code 是独立会话，平台重启后继续等它；合并中断的退回申请合并。
+    issue_service.reconcile()
     logger.info("%s %s ready", settings.app_name, settings.app_version)
     try:
         yield

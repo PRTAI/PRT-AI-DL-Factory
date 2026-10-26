@@ -87,6 +87,29 @@ class Settings(BaseSettings):
     review_agent_image: str = "prt-ai-factory-harbor-eval-base-image:latest"
     review_max_doc_chars: int = 120_000   # 需求文档送进 prompt 的上限
 
+    # ------------------------------------------------- 问题反馈（托管修复） ---
+    # Agent 只在仓库副本里改代码，副本目录必须在仓库之外，不影响正在运行的平台。
+    issue_repo_root: Path = REPO_ROOT
+    issue_workspace_root: Path = Path("~/prt-agent-workspaces")
+    issue_agent_bin: str = "claude"
+    issue_agent_model: str = ""           # 空 = 本机 Claude Code 的默认模型
+    issue_agent_permission_mode: str = "acceptEdits"
+    # acceptEdits 下 Bash 需要白名单；git push 一律禁止，推送只由平台在合并时做
+    issue_agent_allowed_tools: str = (
+        "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(python:*),Bash(python3:*),Bash(pytest:*),"
+        "Bash(npm run:*),Bash(npm test:*),Bash(node:*),Bash(ls:*),Bash(cd:*)"
+    )
+    issue_agent_disallowed_tools: str = (
+        "Bash(git push:*),Bash(git remote:*),Bash(git checkout main:*),Bash(git switch main:*),"
+        "Bash(git reset --hard:*),Bash(npm install:*),Bash(npm i:*),Bash(pip:*),Bash(python -m pip:*),WebFetch,WebSearch"
+    )
+    issue_agent_timeout_seconds: float = 3600.0
+    issue_main_branch: str = "main"
+    issue_push_remote: str = "origin"
+    issue_auto_restart: bool = True
+    # 非空时用这条 shell 命令重启（例如 systemctl restart prt）；空则平台自己重新拉起 uvicorn
+    issue_restart_command: str = ""
+
     @field_validator(
         "data_root",
         "models_root",
@@ -94,6 +117,8 @@ class Settings(BaseSettings):
         "verl_root",
         "trl_root",
         "harbor_root",
+        "issue_repo_root",
+        "issue_workspace_root",
         mode="before",
     )
     @classmethod
@@ -152,6 +177,10 @@ class Settings(BaseSettings):
         return self.data_root / "prebuilds"
 
     @property
+    def issues_dir(self) -> Path:
+        return self.data_root / "issues"
+
+    @property
     def resources_dir(self) -> Path:
         return Path(__file__).resolve().parent / "resources"
 
@@ -169,6 +198,7 @@ class Settings(BaseSettings):
             self.exports_dir,
             self.reviews_dir,
             self.prebuilds_dir,
+            self.issues_dir,
         ):
             path.mkdir(parents=True, exist_ok=True)
 

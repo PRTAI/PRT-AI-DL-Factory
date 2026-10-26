@@ -10,6 +10,7 @@ import type {
   Deployment,
   DeploymentEndpoint,
   ExportCandidates,
+  Issue,
   ExportTask,
   GpuSnapshot,
   HarborAgentInfo,
@@ -464,6 +465,16 @@ export const api = {
   cancelReview: (id: string) => request<ReviewTask>(`/api/reviews/${id}/cancel`, { method: 'POST' }),
   deleteReview: (id: string, purgeFiles = false) =>
     request<void>(`/api/reviews/${id}${qs({ purge_files: purgeFiles })}`, { method: 'DELETE' }),
+
+  // -------------------------------------------------------------- issues ----
+  issues: (status = '') => request<Issue[]>(`/api/issues${qs({ status })}`),
+  issue: (id: string) => request<Issue>(`/api/issues/${id}`),
+  issueAgentLog: (id: string) => request<{ text: string; running: boolean }>(`/api/issues/${id}/log`),
+  createIssue: (payload: { title: string; description?: string; page?: string }) =>
+    request<Issue>('/api/issues', { method: 'POST', body: JSON.stringify(payload) }),
+  closeIssue: (id: string) => request<Issue>(`/api/issues/${id}/close`, { method: 'POST' }),
+  startFix: (id: string) => request<Issue>(`/api/issues/${id}/fix`, { method: 'POST' }),
+  mergeIssue: (id: string) => request<Issue>(`/api/issues/${id}/merge`, { method: 'POST' }),
 
   // ------------------------------------------------------------ system ----
   systemMetrics: () => request<SystemMetrics>('/api/system/metrics'),

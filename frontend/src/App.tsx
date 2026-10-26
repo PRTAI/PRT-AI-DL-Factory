@@ -20,6 +20,8 @@ import ReviewDetail from '@/pages/ReviewDetail'
 import Admin from '@/pages/Admin'
 import ProfileSettings from '@/pages/ProfileSettings'
 import Docs from '@/pages/Docs'
+import Issues from '@/pages/Issues'
+import IssueDetail from '@/pages/IssueDetail'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -106,6 +108,8 @@ export default function App() {
         {/* 审核在提交窗口必选项目；列表保留跨项目及已归档项目的历史查询 */}
         <Route path="/review" element={<Review />} />
         <Route path="/review/:reviewId" element={<ReviewDetail />} />
+        <Route path="/issues" element={<Issues />} />
+        <Route path="/issues/:issueId" element={<IssueDetail />} />
         <Route
           path="/admin"
           element={

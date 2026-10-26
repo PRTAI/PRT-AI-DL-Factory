@@ -918,6 +918,35 @@ export interface TrialDetail {
 
 // ------------------------------------------------------------ 样例审核 ----
 export type ReviewStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+export type IssueStatus = 'open' | 'fixing' | 'pending_merge' | 'merging' | 'merged' | 'failed' | 'closed'
+
+export interface Issue {
+  id: string
+  title: string
+  description: string
+  page: string
+  reporter_id: string
+  reporter_email: string
+  status: IssueStatus
+  created_at: string
+  updated_at: string
+  fix_requested_by: string
+  fix_started_at: string | null
+  fix_finished_at: string | null
+  workspace: string
+  base_commit: string
+  branch: string
+  head_commit: string
+  pid: number | null
+  report: string
+  diff_stat: string
+  error: string
+  merged_by: string
+  merged_at: string | null
+  merge_commit: string
+  restart_scheduled: boolean
+}
 export type ReviewAgent = 'claude-code' | 'codex'
 export type ReasoningEffort = VerifyConfig['reasoning_effort']
 export type ReviewStage = 'pending' | 'collecting' | 'planning' | 'checking' | 'reporting' | 'done'
