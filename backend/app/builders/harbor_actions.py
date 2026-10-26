@@ -86,7 +86,7 @@ def build_action(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         command=[resolve_harbor_python(binary), "-u", str(work_dir / runtime), *argv],
         cwd=str(work_dir), output_dir=str(output_dir), env={"PYTHONUNBUFFERED": "1", **env},
         files={runtime: (settings.resources_dir / runtime).read_text(encoding="utf-8"), **extra_files,
-               **cc_bridge_service.runtime_files(config)},
+               **cc_bridge_service.runtime_files(config), **harbor_compat.judge_meter_files(verifier_env)},
         notes=notes, secrets=secrets,
     )
 
@@ -97,7 +97,7 @@ def build_inplace_rerun(job: Job, work_dir: Path, output_dir: Path) -> BuildResu
 
     root = source_dir(job)
     operation = job.harbor_rerun
-    trials, recorded, env, secrets = [], {}, {}, []
+    trials, recorded, env, secrets, meter = [], {}, {}, [], {}
     for row in operation.selections:
         action = HarborAction(mode="rerun", source_job_id=job.id,
                               trial_name=row["trial_name"], selected_job_config=row["job_config"])
@@ -116,6 +116,7 @@ def build_inplace_rerun(job: Job, work_dir: Path, output_dir: Path) -> BuildResu
         trials.append(trial)
         env.update(built.env)
         secrets.extend(built.secrets)
+        meter.update({name: content for name, content in built.files.items() if name == "prt_judge_meter.py"})
     plan = {"root": str(root), "trials": trials, "recorded_configs": recorded,
             "backup": str(work_dir / "rerun-history" / operation.operation_id)}
     script = "harbor_inplace_rerun.py"
@@ -126,7 +127,7 @@ def build_inplace_rerun(job: Job, work_dir: Path, output_dir: Path) -> BuildResu
         files={script: (settings.resources_dir / script).read_text(encoding="utf-8"),
                "harbor_runtime.py": (settings.resources_dir / "harbor_runtime.py").read_text(encoding="utf-8"),
                "inplace-rerun.json": json.dumps(plan, ensure_ascii=False),
-               **cc_bridge_service.runtime_files(job.verify)},
+               **cc_bridge_service.runtime_files(job.verify), **meter},
         notes=[f"在原任务内重跑选中的 {len(trials)} 条数据，保留 trial 名称和未选中记录",
                "执行前备份选中记录；完成后重算原任务评分汇总"],
     )

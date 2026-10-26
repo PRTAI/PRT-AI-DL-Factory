@@ -749,9 +749,10 @@
         "max_input": 1000000,
         "input": 12,
         "output": 36,
-        "cache_read": null,
+        "cache_read": 1.2,
         "cache_write": 15.0,
-        "cache_write_long": null
+        "cache_write_long": null,
+        "explicit_cache_read": 1.2
       }
     ],
     "verified_on": "2026-10-22",
@@ -761,7 +762,7 @@
     "aliases": [
       "qwen3.8-max-0902"
     ],
-    "note": "隐式/显式缓存单价来源：https://help.aliyun.com/zh/model-studio/context-cache；该型号的缓存命中单价需在百炼控制台核验。"
+    "note": "隐式/显式缓存单价来源：https://help.aliyun.com/zh/model-studio/context-cache；该型号的隐式与显式缓存命中均按输入单价 10% 计（用户确认）。"
   },
   {
     "vendor": "alibaba",
@@ -772,9 +773,10 @@
         "max_input": 1000000,
         "input": 0.8,
         "output": 2.7,
-        "cache_read": null,
+        "cache_read": 0.08,
         "cache_write": null,
-        "cache_write_long": null
+        "cache_write_long": null,
+        "explicit_cache_read": 0.08
       }
     ],
     "verified_on": "2026-10-22",
@@ -782,7 +784,7 @@
     "region": "cn-beijing",
     "source": "https://help.aliyun.com/zh/model-studio/model-pricing",
     "aliases": [],
-    "note": "隐式/显式缓存单价来源：https://help.aliyun.com/zh/model-studio/context-cache；该型号的缓存命中单价需在百炼控制台核验。"
+    "note": "隐式/显式缓存单价来源：https://help.aliyun.com/zh/model-studio/context-cache；该型号的隐式与显式缓存命中均按输入单价 10% 计（用户确认）。"
   },
   {
     "vendor": "alibaba",
@@ -1083,13 +1085,15 @@
     ],
     "verified_on": "2026-10-22",
     "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-    "note": "按高峰价格上限估算；未核对请求接收时间及中国法定节假日。空闲时段输入/输出/缓存读为 1/4/0.02 元/百万 Token。[1m] 为官方 Claude Code 配置：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/",
+    "note": "高峰时段价格；北京时间周一至周五（不含法定节假日）9:00-12:00、14:00-18:00 为高峰，其余时段（含周末、法定节假日全天）为一半。节假日见 cn_holidays.json。[1m] 为官方 Claude Code 配置：https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/",
     "official_model": "DeepSeek-V4.1-Flash-1017",
     "aliases": [
       "deepseek-flash[1m]",
       "deepseek-v4-flash",
       "deepseek-v4-flash-vision-exp"
-    ]
+    ],
+    "peak_schedule": "cn-workday",
+    "off_peak_factor": 0.5
   },
   {
     "vendor": "deepseek",
@@ -1106,11 +1110,13 @@
     ],
     "verified_on": "2026-10-22",
     "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
-    "note": "按高峰价格上限估算；未核对请求接收时间及中国法定节假日。空闲时段输入/输出/缓存读为 4.5/13.5/0.15 元/百万 Token。",
+    "note": "高峰时段价格；北京时间周一至周五（不含法定节假日）9:00-12:00、14:00-18:00 为高峰，其余时段（含周末、法定节假日全天）为一半。节假日见 cn_holidays.json。",
     "official_model": "DeepSeek-V4-Pro-0813",
     "aliases": [
       "deepseek-v4-pro[1m]"
-    ]
+    ],
+    "peak_schedule": "cn-workday",
+    "off_peak_factor": 0.5
   },
   {
     "vendor": "atlascloud",

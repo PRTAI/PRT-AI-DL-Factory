@@ -229,9 +229,10 @@ def test_deepseek_claude_context_alias_is_billable(tmp_path):
     assert item.billing.snapshot.agent.price.model == 'deepseek-flash'
     trajectory(root, model='deepseek-flash', prompt=100000, output=10000, cache=20000)
     updated = billing.refresh(item, force=True)
-    assert updated.billing.agent_cny == pytest.approx(.08 * 2 + .01 * 8 + .02 * .04)
+    # 10:00Z is 18:00 Beijing time, an off-peak half-price request.
+    assert updated.billing.agent_cny == pytest.approx((.08 * 2 + .01 * 8 + .02 * .04) / 2)
     assert not any('价格待配置' in note for note in updated.billing.warnings)
-    assert any('高峰价格上限' in note for note in updated.billing.warnings)
+    assert updated.billing.status == 'estimated'
     assert not billing._matches(item.billing.snapshot.agent.price, 'deepseek-flash-unknown')
 
 
@@ -274,7 +275,8 @@ def test_flash_missing_historical_prices_repaired_without_duplicate_charges(tmp_
     store.jobs.update(item.id, lambda value: setattr(value.billing, 'input_signature', 'old-signature'))
     assert billing.needs_refresh(store.jobs.get(item.id))
     updated = billing.refresh(store.jobs.get(item.id))
-    expected = .08 * 2 + .01 * 8 + .02 * .04
+    # Logs carry the 18:00 Beijing request time (off-peak); ledger-only repair has totals only, so peak.
+    expected = (.08 * 2 + .01 * 8 + .02 * .04) / (2 if keep_logs else 1)
     assert updated.billing.agent_cny == pytest.approx(expected)
     assert updated.billing.judge_cny == pytest.approx(expected)
     assert updated.billing.amount_cny == pytest.approx(expected * 2)
@@ -400,7 +402,7 @@ def test_flash_valid_historical_prices_are_not_repriced(tmp_path):
     store.jobs.put(item)
     trajectory(root, model='deepseek-flash')
     updated = billing.refresh(item, force=True)
-    assert updated.billing.agent_cny == pytest.approx(.08 * 7 + .01 * 8 + .02 * .04)
+    assert updated.billing.agent_cny == pytest.approx((.08 * 7 + .01 * 8 + .02 * .04) / 2)  # off-peak request
     assert updated.billing.snapshot.agent.price.tiers[0].input == 7
 
 
@@ -474,12 +476,20 @@ def test_haiku_threshold_includes_cache():
 
 
 def test_unknown_cache_is_partial_amount_not_free():
-    snap = snapshot(agent=component('alibaba', 'qwen3.8-max'))
+    snap = snapshot(agent=component('alibaba', 'deepseek-v4-pro'))
     value, notes = billing.estimate(dict(input=1000, cache_read=1000, output=100), snap.agent, snap)
-    assert value == pytest.approx((.001*12+.0001*36)*.6)
+    assert value == pytest.approx((.001*12+.0001*24)*.6)
     assert any('cache_read' in note for note in notes)
     value, notes = billing.estimate(dict(cache_read=1000), snap.agent, snap)
     assert value is None
+
+
+@pytest.mark.parametrize('model,unit', [('qwen3.8-max', 12), ('qwen3.8-flash', .8)])
+def test_qwen38_cache_hit_is_tenth_of_input(model, unit):
+    snap = snapshot(agent=component('alibaba', model))
+    value, notes = billing.estimate(dict(input=1000, cache_read=1000), snap.agent, snap)
+    assert value == pytest.approx((.001*unit + .001*unit*.1)*.6)
+    assert not any('cache_read' in note for note in notes)
 
 
 def test_missing_and_expired_prices():
@@ -766,3 +776,95 @@ def test_claude_subagent_session_is_not_billed_twice_after_atif(tmp_path):
     second = billing.refresh(first, force=True)
     assert second.billing.amount_cny == first.billing.amount_cny
     assert len(store.usage_charges.all()) == 1
+
+
+def claude_session(root, *messages, name='main.jsonl'):
+    path = root / 'task__a' / 'agent' / 'sessions' / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('\n'.join(json.dumps(dict(type='assistant', sessionId='s1', timestamp=time,
+                    message=dict(id=msg, model=model, usage=dict(input_tokens=1000, output_tokens=100))))
+                    for msg, model, time in messages))
+    return path
+
+
+def test_zero_usage_trajectory_falls_back_to_session_logs(tmp_path):
+    item, root = job(tmp_path, snap=snapshot(agent=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax')))
+    claude_session(root, ('m1', 'claude-opus-4.8', '2026-10-22T00:00:00Z'), ('m2', '<synthetic>', '2026-10-22T00:01:00Z'))
+    trajectory(root, session='s1', model='claude-opus-4.8', prompt=0, output=0, cache=0)
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.amount_cny > 0
+    assert updated.billing.requests == 1  # <synthetic> messages are local and never billed
+    assert not any('价格待配置' in note or '用量缺失' in note for note in updated.billing.warnings)
+
+
+def test_trajectory_with_usage_still_wins_over_sessions(tmp_path):
+    item, root = job(tmp_path, snap=snapshot(agent=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax')))
+    claude_session(root, ('m1', 'claude-opus-4.8', '2026-10-22T00:00:00Z'), ('m2', 'claude-opus-4.8', '2026-10-22T00:01:00Z'))
+    trajectory(root, session='s1', model='claude-opus-4.8', prompt=1000, output=100, cache=0)
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.requests == 1
+
+
+def test_synthetic_rows_already_in_ledger_are_removed(tmp_path):
+    snap = snapshot(agent=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax'))
+    item, root = job(tmp_path, snap=snap)
+    store.usage_charges.put(UsageCharge(id='old', job_id=item.id, phase='agent', model='<synthetic>', vendor='atlascloud',
+                                        tokens=dict(input=0, output=0), requests=1, snapshot=snap))
+    claude_session(root, ('m1', 'claude-opus-4.8', '2026-10-22T00:00:00Z'))
+    updated = billing.refresh(item, force=True)
+    assert [row.model for row in store.usage_charges.all()] == ['anthropic/claude-opus-4.8-ccmax']
+    assert updated.billing.status == 'estimated'
+
+
+def test_unreadable_session_keeps_other_usage_and_explains(tmp_path, monkeypatch):
+    item, root = job(tmp_path, snap=snapshot(agent=component('atlascloud', 'anthropic/claude-opus-4.8-ccmax')))
+    claude_session(root, ('m1', 'claude-opus-4.8', '2026-10-22T00:00:00Z'))
+    locked = claude_session(root, ('m2', 'claude-opus-4.8', '2026-10-22T00:01:00Z'), name='locked.jsonl')
+    original = Path.read_text
+
+    def read_text(self, *args, **kwargs):
+        if self == locked:
+            raise PermissionError(13, 'Permission denied', str(self))
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'read_text', read_text)
+    updated = billing.refresh(item, force=True)
+    assert updated.billing.amount_cny > 0
+    assert updated.billing.status == 'partial'
+    assert any('无读取权限' in note for note in updated.billing.warnings)
+
+
+@pytest.mark.parametrize('timestamp,factor', [
+    ('2026-10-22T02:00:00Z', 1),      # Thu 10:00 Beijing: peak
+    ('2026-10-22T04:30:00Z', 0.5),    # Thu 12:30 Beijing: lunch break
+    ('2026-10-22T10:00:00Z', 0.5),    # Thu 18:00 Beijing: evening
+    ('2026-10-24T02:00:00Z', 0.5),    # Saturday
+    ('2026-10-02T02:00:00Z', 0.5),    # National Day holiday
+    ('2026-10-22T10:00:00+08:00', 1), # explicit offset
+])
+def test_deepseek_off_peak_by_beijing_time(timestamp, factor):
+    snap = snapshot(agent=component('deepseek', 'deepseek-flash'))
+    peak, _ = billing.estimate(dict(input=1_000_000, output=1_000_000), snap.agent, snap, timestamp='2026-10-22T02:00:00Z')
+    assert peak == pytest.approx(10)
+    value, notes = billing.estimate(dict(input=1_000_000, output=1_000_000), snap.agent, snap, timestamp=timestamp)
+    assert value == pytest.approx(10 * factor)
+    assert not notes
+
+
+def test_deepseek_unknown_time_or_year_uses_peak_and_old_snapshots_upgrade():
+    snap = snapshot(agent=component('deepseek', 'deepseek-v4-pro'))
+    for kwargs in (dict(timestamp=''), dict(timestamp='2027-01-02T02:00:00Z'), dict(aggregate=True, timestamp='2026-10-24T02:00:00Z')):
+        value, notes = billing.estimate(dict(input=1_000_000), snap.agent, snap, **kwargs)
+        assert value == pytest.approx(9)
+        assert any('高峰时段价格上限' in note for note in notes)
+    legacy = snap.model_copy(deep=True)
+    legacy.agent.price = legacy.agent.price.model_copy(update={'peak_schedule': '', 'off_peak_factor': None})
+    assert billing.estimate(dict(input=1_000_000), legacy.agent, legacy, timestamp='2026-10-24T02:00:00Z')[0] == pytest.approx(4.5)
+    custom = legacy.model_copy(deep=True)
+    custom.agent.price.tiers[0].input = 8
+    assert billing.estimate(dict(input=1_000_000), custom.agent, custom, timestamp='2026-10-24T02:00:00Z')[0] == pytest.approx(8)
+
+
+def test_peak_schedule_requires_factor():
+    with pytest.raises(ValidationError):
+        ModelPrice(vendor='x', model='y', source='s', tiers=[RateTier(input=1, output=1)], peak_schedule='cn-workday')

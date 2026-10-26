@@ -339,6 +339,137 @@ def reuse_task_image(original):
     return start
 
 
+JUDGE_METER = "prt_judge_meter.py"
+JUDGE_METER_READY = r"""
+import json, sys, time, urllib.request
+for _ in range(75):
+    try:
+        port = json.load(open(sys.argv[1]))['port']
+        urllib.request.build_opener(urllib.request.ProxyHandler({})).open(
+            'http://127.0.0.1:%d/__prt_judge_meter_health' % port, timeout=1).read()
+        print(port); raise SystemExit(0)
+    except (OSError, ValueError, KeyError):
+        time.sleep(.2)
+raise SystemExit(1)
+"""
+JUDGE_METER_STOP = r"""
+import json, os, signal, sys, time
+try:
+    state = json.load(open(sys.argv[1])); pid = int(state['pid']); start = str(state['start'])
+except (OSError, ValueError, KeyError):
+    raise SystemExit(0)
+def same():
+    try: return pid > 1 and open('/proc/%d/stat' % pid).read().rsplit(')', 1)[1].split()[19] == start
+    except (OSError, IndexError): return False
+for sig in (signal.SIGTERM, signal.SIGKILL):
+    if not same(): break
+    try: os.kill(pid, sig)
+    except ProcessLookupError: break
+    if sig == signal.SIGTERM: time.sleep(1)
+for path in (sys.argv[1], sys.argv[2]):
+    try: os.unlink(path)
+    except OSError: pass
+"""
+
+
+def judge_upstream(verifier) -> str:
+    from harbor.utils.env import resolve_env_vars
+    merged = {**verifier.task.config.verifier.env, **(verifier.verifier_env or {}), **verifier.override_env}
+    if not merged.get("JUDGE_BASE_URL"):
+        return ""
+    try:
+        return resolve_env_vars({"JUDGE_BASE_URL": merged["JUDGE_BASE_URL"]})["JUDGE_BASE_URL"].strip()
+    except ValueError:
+        return ""
+
+
+def local_judge_url(upstream: str, port: int) -> str:
+    from urllib.parse import urlsplit
+    parts = urlsplit(upstream)
+    return f"http://127.0.0.1:{port}{parts.path}" + (f"?{parts.query}" if parts.query else "")
+
+
+async def start_judge_meter(verifier, upstream: str):
+    """Start the in-container proxy; return (local URL, cleanup args) or None to call the Judge directly."""
+    from harbor.models.trial.paths import EnvironmentPaths
+    environment = verifier.environment
+    token = uuid.uuid4().hex
+    script, state = f"/tmp/prt-judge-meter-{token}.py", f"/tmp/prt-judge-meter-{token}.json"
+    usage = str(EnvironmentPaths.for_os(environment.os).verifier_dir / "prt-model-usage.jsonl")
+    logfile = str(EnvironmentPaths.for_os(environment.os).verifier_dir / "prt-judge-meter.txt")
+    try:
+        await environment.upload_file(Path(__file__).with_name(JUDGE_METER), script)
+        # Runs as the verifier user, so the usage file has the same owner as before.
+        started = await environment.exec(
+            command="command -v python3 >/dev/null 2>&1 || exit 127; "
+                    f"nohup python3 {shlex.quote(script)} {shlex.quote(state)} {shlex.quote(usage)} "
+                    f"> {shlex.quote(logfile)} 2>&1 < /dev/null &",
+            env={"PRT_JUDGE_METER_UPSTREAM": upstream}, timeout_sec=10)
+        if started.return_code == 127:
+            verifier.logger.warning("PRT: 容器内没有 python3，Judge 直连模型，test.sh 自行调用的用量不会计入费用")
+            return None
+        ready = None
+        if started.return_code == 0:
+            ready = await environment.exec(command=shlex.join(["python3", "-c", JUDGE_METER_READY, state]), timeout_sec=20)
+        if ready is None or ready.return_code != 0:
+            await stop_judge_meter(verifier, (state, script))
+            verifier.logger.warning("PRT: Judge 计量代理启动失败，Judge 直连模型；详见 verifier/prt-judge-meter.txt")
+            return None
+        return local_judge_url(upstream, int((ready.stdout or "").strip().splitlines()[-1])), (state, script)
+    except Exception:
+        verifier.logger.warning("PRT: Judge 计量代理启动失败，Judge 直连模型", exc_info=True)
+        await stop_judge_meter(verifier, (state, script))
+        return None
+
+
+async def stop_judge_meter(verifier, paths):
+    environment = verifier.environment
+    task = asyncio.create_task(environment.exec(
+        command=shlex.join(["python3", "-c", JUDGE_METER_STOP, *paths]), user="root", timeout_sec=8))
+    done, _ = await asyncio.wait({task}, timeout=10)
+    if task in done:
+        consume(task)
+    else:
+        task.cancel()
+        task.add_done_callback(consume)
+        verifier.logger.warning("PRT: Judge 计量代理清理超时，将随容器一起回收")
+
+
+def metered_verify(original):
+    """Route JUDGE_BASE_URL through a loopback proxy that records token usage.
+
+    Custom test.sh Judges call the model without the RewardKit entrypoint, so
+    their usage was never recorded. The proxy only forwards to the configured
+    origin; the client still sends its own key, which the proxy never stores.
+    """
+    @functools.wraps(original)
+    async def verify(self):
+        environment = self.environment
+        upstream = judge_upstream(self)
+        if (not upstream or not Path(__file__).with_name(JUDGE_METER).is_file()
+                or getattr(environment, "_is_windows_container", False)
+                or "windows" in str(getattr(environment, "os", "")).lower()):
+            return await original(self)
+        meter = await start_judge_meter(self, upstream)
+        if meter is None:
+            return await original(self)
+        url, paths = meter
+        previous = self.override_env
+        # PRT_JUDGE_METERED tells the RewardKit entrypoint not to record the same calls again.
+        self.override_env = {**previous, "JUDGE_BASE_URL": url, "PRT_JUDGE_METERED": "1"}
+        self.logger.info("PRT: Judge 请求经容器内计量代理转发，用于统计 Token 用量")
+        try:
+            return await original(self)
+        finally:
+            self.override_env = previous
+            try:
+                await asyncio.shield(stop_judge_meter(self, paths))
+            except (Exception, asyncio.CancelledError):
+                self.logger.warning("PRT: Judge 计量代理清理未完成，将随容器一起回收")
+    verify._prt_judge_meter = True
+    return verify
+
+
 def install_guards() -> None:
     if Path(__file__).with_name("prt_cc_bridge_runtime.py").is_file():
         from prt_cc_bridge_runtime import install
@@ -359,6 +490,9 @@ def install_guards() -> None:
     original = getattr(DockerEnvironment, "start", None)
     if original is not None and not getattr(original, "_prt_task_image", False):
         DockerEnvironment.start = reuse_task_image(original)
+    from harbor.verifier.verifier import Verifier
+    if not getattr(Verifier.verify, "_prt_judge_meter", False):
+        Verifier.verify = metered_verify(Verifier.verify)
 
 
 def main() -> None:

@@ -1064,6 +1064,8 @@ export interface ModelPrice {
   verified_on: string
   valid_until: string
   note: string
+  peak_schedule?: '' | 'cn-workday'
+  off_peak_factor?: number | null
 }
 
 export interface PricingSettings {

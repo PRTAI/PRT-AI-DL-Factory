@@ -205,6 +205,7 @@ def test_runtime_preserves_native_phase_timeouts(monkeypatch):
     monkeypatch.setitem(sys.modules, 'harbor.agents.installed.codex', SimpleNamespace(Codex=type('Codex', (), {})))
     monkeypatch.setitem(sys.modules, 'harbor.trial.trial', SimpleNamespace(Trial=Trial))
     monkeypatch.setitem(sys.modules, 'harbor.environments.docker.docker', SimpleNamespace(DockerEnvironment=DockerEnvironment))
+    monkeypatch.setitem(sys.modules, 'harbor.verifier.verifier', SimpleNamespace(Verifier=type('Verifier', (), {'verify': lambda self: None})))
     runtime.install_guards()
     assert all(getattr(Trial, name) is method for name, method in originals.items())
     assert Trial()._compute_agent_timeout_sec() is None
@@ -255,6 +256,7 @@ def test_codex_runtime_guard_installation_is_idempotent(monkeypatch):
     monkeypatch.setitem(sys.modules, 'harbor.agents.installed.codex', SimpleNamespace(Codex=Codex))
     monkeypatch.setitem(sys.modules, 'harbor.trial.trial', SimpleNamespace(Trial=type('Trial', (), {})))
     monkeypatch.setitem(sys.modules, 'harbor.environments.docker.docker', SimpleNamespace(DockerEnvironment=DockerEnvironment))
+    monkeypatch.setitem(sys.modules, 'harbor.verifier.verifier', SimpleNamespace(Verifier=type('Verifier', (), {'verify': lambda self: None})))
     runtime.install_guards()
     installed = Codex._build_effective_config
     runtime.install_guards()

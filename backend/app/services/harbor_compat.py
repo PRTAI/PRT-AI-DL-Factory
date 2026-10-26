@@ -79,3 +79,10 @@ def prepare_rewardkit_tasks(root: Path) -> int:
         if patched != content:
             script.write_text(patched, encoding="utf-8")
     return changed
+
+
+def judge_meter_files(verifier_env: dict[str, str]) -> dict[str, str]:
+    """Ship the in-container usage proxy when the verifier gets a Judge endpoint."""
+    if not verifier_env.get("JUDGE_BASE_URL"):
+        return {}
+    return {"prt_judge_meter.py": (settings.resources_dir / "judge_meter_proxy.py").read_text(encoding="utf-8")}

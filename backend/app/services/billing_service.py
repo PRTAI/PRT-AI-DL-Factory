@@ -15,7 +15,9 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -31,7 +33,13 @@ logger = logging.getLogger(__name__)
 _LOCK = threading.RLock()
 _MAX_JSON = 64 * 1024 * 1024
 _JOB_LOCKS = [threading.RLock() for _ in range(64)]
-_BILLING_VERSION = 3
+_BILLING_VERSION = 4
+_UNREADABLE = "部分用量记录无法读取，当前费用不完整"
+_NO_PERMISSION = "部分日志文件无读取权限（Harbor 容器以 root 写入，任务正常结束后才改回属主），当前费用不完整"
+# Claude Code writes this model name for locally generated messages (errors, interrupts); never sent to a model.
+_SYNTHETIC_MODEL = "<synthetic>"
+_BEIJING = timezone(timedelta(hours=8))
+_PEAK_HOURS = ((9, 12), (14, 18))
 
 
 def price_catalog() -> list[ModelPrice]:
@@ -210,14 +218,26 @@ def _repair_missing_snapshot(snapshot: BillingSnapshot, job: Job, config: Pricin
     return snapshot
 
 
-def _read(path: Path) -> dict:
+def _read(path: Path, denied: list[Path] | None = None) -> dict:
     try:
         if path.is_symlink() or not path.is_file() or path.stat().st_size > _MAX_JSON:
             return {}
         result = json.loads(path.read_text(encoding="utf-8"))
         return result if isinstance(result, dict) else {}
+    except PermissionError:
+        if denied is not None:
+            denied.append(path)
+        return {}
     except (OSError, ValueError, UnicodeError):
         return {}
+
+
+def _walk(root: Path, denied: list[Path]):
+    # Unlistable directories are reported instead of silently looking like "no usage".
+    def failed(error: OSError) -> None:
+        if isinstance(error, PermissionError):
+            denied.append(Path(error.filename or root))
+    return os.walk(root, followlinks=False, onerror=failed)
 
 
 def _count(value) -> int:
@@ -254,8 +274,14 @@ def estimate(tokens: dict[str, int], component: PriceSnapshot, snapshot: Billing
     if price.valid_until and date > price.valid_until:
         return None, [f"价格已过有效期（{price.valid_until}）：{price.model}"]
     warnings = []
-    if price.note and "按高峰价格上限估算" in price.note:
-        warnings.append(price.note)
+    factor = Decimal(1)
+    price = _with_schedule(price)
+    if price.peak_schedule:
+        peak = None if aggregate else _is_peak(price.peak_schedule, timestamp)
+        if peak is None:
+            warnings.append("缺少单次请求时间或该年节假日安排，按高峰时段价格上限估算")
+        elif not peak:
+            factor = Decimal(str(price.off_peak_factor))
     total_input = sum(tokens.get(key, 0) for key in ("input", "cache_read", "cache_write", "cache_write_long"))
     if aggregate:
         tier = price.tiers[-1]
@@ -265,6 +291,8 @@ def estimate(tokens: dict[str, int], component: PriceSnapshot, snapshot: Billing
         tier = next((tier for tier in price.tiers if tier.max_input is None or total_input <= tier.max_input), None)
     if tier is None:
         return None, ["单次上下文超出已核验的计价区间"]
+    if not any(count > 0 for count in tokens.values()):
+        return 0.0, warnings
     amount = Decimal(0)
     known = False
     for key, count in tokens.items():
@@ -283,8 +311,47 @@ def estimate(tokens: dict[str, int], component: PriceSnapshot, snapshot: Billing
         amount += Decimal(count) * Decimal(str(rate)) / Decimal(1_000_000)
     if price.currency == "USD":
         amount *= Decimal(str(snapshot.usd_cny))
-    amount *= Decimal(str(price.discount))
+    amount *= Decimal(str(price.discount)) * factor
     return float(amount) if known else None, warnings
+
+
+@lru_cache(maxsize=1)
+def _catalog_schedules() -> dict[tuple, tuple[str, float | None]]:
+    return {(row.vendor, row.model, json.dumps([tier.model_dump() for tier in row.tiers], sort_keys=True)):
+            (row.peak_schedule, row.off_peak_factor) for row in price_catalog() if row.peak_schedule}
+
+
+def _with_schedule(price: ModelPrice) -> ModelPrice:
+    # Snapshots and saved catalogs from before time-of-day pricing carry the identical peak rates
+    # without the rule; adopt the bundled rule only when the rates still match exactly.
+    if price.peak_schedule:
+        return price
+    key = (price.vendor, price.model, json.dumps([tier.model_dump() for tier in price.tiers], sort_keys=True))
+    rule = _catalog_schedules().get(key)
+    return price.model_copy(update={"peak_schedule": rule[0], "off_peak_factor": rule[1]}) if rule else price
+
+
+@lru_cache(maxsize=1)
+def _holidays() -> dict[str, frozenset[str]]:
+    data = json.loads((settings.resources_dir / "cn_holidays.json").read_text(encoding="utf-8"))
+    return {year: frozenset(days) for year, days in data.items() if not year.startswith("_")}
+
+
+def _is_peak(schedule: str, timestamp: str) -> bool | None:
+    """True/False for a known request time; None when the time or holiday calendar is unknown."""
+    if schedule != "cn-workday" or not timestamp:
+        return None
+    try:
+        moment = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    local = (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).astimezone(_BEIJING)
+    holidays = _holidays().get(str(local.year))
+    if holidays is None:
+        return None
+    if local.weekday() >= 5 or local.date().isoformat() in holidays:
+        return False
+    return any(start <= local.hour < end for start, end in _PEAK_HOURS)
 
 
 def _paths(job: Job):
@@ -305,12 +372,12 @@ def _paths(job: Job):
             yield trial
 
 
-def _trajectories(trial: Path):
+def _trajectories(trial: Path, denied: list[Path]):
     # Restrict traversal to native log areas; workspace/task output is untrusted.
     for area in (trial / "agent", trial / "verifier", trial / "steps"):
         if not area.is_dir() or area.is_symlink():
             continue
-        for directory, dirs, files in os.walk(area, followlinks=False):
+        for directory, dirs, files in _walk(area, denied):
             dirs[:] = [name for name in dirs if name not in {"workspace", "artifacts", ".git", "sessions", "node_modules"}
                        and not (Path(directory) / name).is_symlink()]
             if "trajectory.json" in files:
@@ -320,20 +387,20 @@ def _trajectories(trial: Path):
                 yield path, phase
 
 
-def _raw_sessions(trial: Path, snapshot: BillingSnapshot):
-    """Read live Claude/Codex logs before Harbor publishes an ATIF trajectory.
+def _raw_sessions(trial: Path, snapshot: BillingSnapshot, denied: list[Path], skip: set[str]):
+    """Read Claude/Codex logs when Harbor has not published usable ATIF usage.
 
     Use message IDs or cumulative token counters to deduplicate streaming events.
     Never add both Codex last_token_usage and total_token_usage.
     """
     for phase in ("agent", "judge"):
         area = trial / ("agent" if phase == "agent" else "verifier")
-        if not area.is_dir() or area.is_symlink() or (area / "trajectory.json").is_file():
+        if phase in skip or not area.is_dir() or area.is_symlink():
             continue
         groups = defaultdict(dict)
         claude_messages = {}
         claude_session = None
-        for directory, dirs, files in os.walk(area, followlinks=False):
+        for directory, dirs, files in _walk(area, denied):
             dirs[:] = [name for name in dirs if name not in {"workspace", ".git", "node_modules", "artifacts", "setup"}
                        and not (Path(directory) / name).is_symlink()]
             for name in files:
@@ -344,48 +411,52 @@ def _raw_sessions(trial: Path, snapshot: BillingSnapshot):
                     continue
                 session, model = "", getattr(snapshot, phase).model
                 seen_totals = set()
-                with path.open(encoding="utf-8", errors="replace") as handle:
-                    for line in handle:
-                        try:
-                            event = json.loads(line)
-                        except ValueError:
+                try:
+                    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                except PermissionError:
+                    denied.append(path)
+                    continue
+                for line in lines:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    if isinstance(event.get("sessionId"), str):
+                        candidate = (str(event.get("timestamp") or ""), event["sessionId"])
+                        if claude_session is None or candidate[0] < claude_session[0]:
+                            claude_session = candidate
+                    payload = event.get("payload") or {}
+                    if event.get("type") == "session_meta" and isinstance(payload, dict):
+                        session = payload.get("id") or session
+                    if event.get("type") == "turn_context" and isinstance(payload, dict):
+                        model = payload.get("model") or model
+                    message = event.get("message")
+                    if event.get("type") == "assistant" and isinstance(message, dict):
+                        usage = message.get("usage")
+                        session = event.get("sessionId") or session
+                        if not isinstance(usage, dict) or not message.get("id") or not session:
                             continue
-                        if not isinstance(event, dict):
+                        if usage.get("input_tokens") is None or usage.get("output_tokens") is None:
                             continue
-                        if isinstance(event.get("sessionId"), str):
-                            candidate = (str(event.get("timestamp") or ""), event["sessionId"])
-                            if claude_session is None or candidate[0] < claude_session[0]:
-                                claude_session = candidate
-                        payload = event.get("payload") or {}
-                        if event.get("type") == "session_meta" and isinstance(payload, dict):
-                            session = payload.get("id") or session
-                        if event.get("type") == "turn_context" and isinstance(payload, dict):
-                            model = payload.get("model") or model
-                        message = event.get("message")
-                        if event.get("type") == "assistant" and isinstance(message, dict):
-                            usage = message.get("usage")
-                            session = event.get("sessionId") or session
-                            if not isinstance(usage, dict) or not message.get("id") or not session:
-                                continue
-                            if usage.get("input_tokens") is None or usage.get("output_tokens") is None:
-                                continue
-                            read, write = _count(usage.get("cache_read_input_tokens")), _count(usage.get("cache_creation_input_tokens"))
-                            metrics = {"prompt_tokens": _count(usage.get("input_tokens")) + read + write,
-                                       "completion_tokens": usage.get("output_tokens"), "cached_tokens": read, "extra": usage}
-                            claude_messages[message["id"]] = (message.get("model") or model, normalized_usage(metrics), event.get("timestamp") or "")
-                        elif event.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "token_count":
-                            info = payload.get("info") or {}
-                            total, usage = info.get("total_token_usage"), info.get("last_token_usage")
-                            if not session or not isinstance(total, dict) or not isinstance(usage, dict):
-                                continue
-                            identity = json.dumps(total, sort_keys=True)
-                            if identity in seen_totals or usage.get("input_tokens") is None or usage.get("output_tokens") is None:
-                                continue
-                            seen_totals.add(identity)
-                            metrics = {"prompt_tokens": usage["input_tokens"], "completion_tokens": usage["output_tokens"],
-                                       "cached_tokens": usage.get("cached_input_tokens"),
-                                       "extra": {"cache_write_input_tokens": usage.get("cache_write_input_tokens")}}
-                            groups[(phase, session, model)][identity] = (normalized_usage(metrics), False, event.get("timestamp") or "")
+                        read, write = _count(usage.get("cache_read_input_tokens")), _count(usage.get("cache_creation_input_tokens"))
+                        metrics = {"prompt_tokens": _count(usage.get("input_tokens")) + read + write,
+                                   "completion_tokens": usage.get("output_tokens"), "cached_tokens": read, "extra": usage}
+                        claude_messages[message["id"]] = (message.get("model") or model, normalized_usage(metrics), event.get("timestamp") or "")
+                    elif event.get("type") == "event_msg" and isinstance(payload, dict) and payload.get("type") == "token_count":
+                        info = payload.get("info") or {}
+                        total, usage = info.get("total_token_usage"), info.get("last_token_usage")
+                        if not session or not isinstance(total, dict) or not isinstance(usage, dict):
+                            continue
+                        identity = json.dumps(total, sort_keys=True)
+                        if identity in seen_totals or usage.get("input_tokens") is None or usage.get("output_tokens") is None:
+                            continue
+                        seen_totals.add(identity)
+                        metrics = {"prompt_tokens": usage["input_tokens"], "completion_tokens": usage["output_tokens"],
+                                   "cached_tokens": usage.get("cached_input_tokens"),
+                                   "extra": {"cache_write_input_tokens": usage.get("cache_write_input_tokens")}}
+                        groups[(phase, session, model)][identity] = (normalized_usage(metrics), False, event.get("timestamp") or "")
         if claude_session:
             for message_id, (model, tokens, timestamp) in claude_messages.items():
                 groups[(phase, claude_session[1], model)][message_id] = (tokens, False, timestamp)
@@ -403,13 +474,13 @@ class UsageRecord:
     warnings: list[str] = field(default_factory=list)
 
 
-def _scan_trial(trial: Path, snapshot: BillingSnapshot) -> tuple[list[UsageRecord], set[str]]:
+def _scan_trial(trial: Path, snapshot: BillingSnapshot) -> tuple[list[UsageRecord], set[str], list[Path]]:
     # Only read logs here. Ledger ownership and writes are resolved at commit time.
     records: list[UsageRecord] = []
     obsolete: set[str] = set()
-    found_agent = False
+    denied: list[Path] = []
     # New LLM Judges record counters through the platform RewardKit entrypoint.
-    for directory, dirs, files in os.walk(trial, followlinks=False):
+    for directory, dirs, files in _walk(trial, denied):
         dirs[:] = [name for name in dirs if name in {"verifier", "steps", "graded"} or
                    ("steps" in Path(directory).relative_to(trial).parts and name not in {"workspace", "artifacts", ".git", "agent"})]
         dirs[:] = [name for name in dirs if not (Path(directory) / name).is_symlink()]
@@ -419,24 +490,31 @@ def _scan_trial(trial: Path, snapshot: BillingSnapshot) -> tuple[list[UsageRecor
         if path.is_symlink() or not path.is_file() or path.stat().st_size > _MAX_JSON:
             continue
         requests = {}
-        with path.open(encoding="utf-8", errors="replace") as handle:
-            for line in handle:
-                try:
-                    record = json.loads(line)
-                except ValueError:
-                    continue
-                if not isinstance(record, dict) or record.get("schema_version") != "prt-usage-v1" or not record.get("request_id"):
-                    continue
-                requests[record["request_id"]] = record
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except PermissionError:
+            denied.append(path)
+            continue
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(record, dict) or record.get("schema_version") != "prt-usage-v1" or not record.get("request_id"):
+                continue
+            requests[record["request_id"]] = record
         for request_id, record in requests.items():
             tokens = normalized_usage(record.get("metrics") or {})
             records.append(UsageRecord("judge", "llm:" + request_id, record.get("model") or snapshot.judge.model,
                                        [(tokens, False, record.get("timestamp") or "")]))
-    for phase, session, model, usages in _raw_sessions(trial, snapshot):
-        found_agent |= phase == "agent"
-        records.append(UsageRecord(phase, session, model, usages))
-    for path, phase in _trajectories(trial):
-        data = _read(path)
+    traced: list[UsageRecord] = []
+    # Raw sessions duplicate a published top-level trajectory, unless that trajectory has no usable usage at all
+    # (Harbor sometimes writes all-zero counters while the Claude/Codex session logs are complete).
+    published = {phase for phase in ("agent", "judge")
+                 if (trial / ("agent" if phase == "agent" else "verifier") / "trajectory.json").is_file()}
+    usable: set[str] = set()
+    for path, phase in _trajectories(trial, denied):
+        data = _read(path, denied)
         if not str(data.get("schema_version", "")).startswith("ATIF"):
             continue
         session = data.get("session_id")
@@ -470,30 +548,39 @@ def _scan_trial(trial: Path, snapshot: BillingSnapshot) -> tuple[list[UsageRecor
                 tokens = normalized_usage(metrics, final=True)
                 if any(tokens.values()):
                     groups[default_model].append((tokens, True, ""))
+        if groups and path.parent == trial / ("agent" if phase == "agent" else "verifier"):
+            usable.add(phase)
         for model, usages in groups.items():
-            found_agent |= phase == "agent"
             charge = UsageRecord(phase, session, model, usages)
             if missing_usage:
                 charge.warnings.append("轨迹中部分模型请求缺少用量，此部分未计入")
-            records.append(charge)
+            traced.append(charge)
+    from_sessions = [UsageRecord(phase, session, model, usages)
+                     for phase, session, model, usages in _raw_sessions(trial, snapshot, denied, usable)]
+    # Sessions standing in for an empty trajectory also cover its nested (subagent) trajectories.
+    replaced = {record.phase for record in from_sessions} & published
+    records.extend(from_sessions)
+    records.extend(record for record in traced if record.phase not in replaced)
+    records = [record for record in records if record.model != _SYNTHETIC_MODEL]
+    found_agent = any(record.phase == "agent" for record in records)
     if found_agent:
-        data = _read(trial / "result.json") or _read(trial / "results.json")
+        data = _read(trial / "result.json", denied) or _read(trial / "results.json", denied)
         if data.get("id"):
             fallback_id = _identity("agent", "trial:" + str(data["id"]), snapshot.agent.model)
             obsolete.add(fallback_id)
     if found_agent or snapshot.agent.free:
-        return records, obsolete
+        return records, obsolete, denied
     # Old native results have no cache-write split. Be explicit about the gap.
-    data = _read(trial / "result.json") or _read(trial / "results.json")
+    data = _read(trial / "result.json", denied) or _read(trial / "results.json", denied)
     metrics = data.get("agent_result") or {}
     if metrics.get("n_input_tokens") is None or metrics.get("n_output_tokens") is None or not data.get("id"):
-        return records, obsolete
+        return records, obsolete, denied
     tokens = normalized_usage({"prompt_tokens": metrics["n_input_tokens"], "completion_tokens": metrics["n_output_tokens"], "cached_tokens": metrics.get("n_cache_tokens")})
     if any(tokens.values()):
         result = UsageRecord("agent", "trial:" + str(data["id"]), snapshot.agent.model, [(tokens, True, data.get("started_at") or "")])
         result.warnings.append("仅有 Harbor 汇总用量，缺少缓存写入明细，费用可能不完整")
         records.append(result)
-    return records, obsolete
+    return records, obsolete, denied
 
 
 def _identity(phase, session, model):
@@ -595,22 +682,33 @@ def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None
         records, obsolete, warnings = [], set(), set()
         try:
             trials = list(_paths(job))
+        except PermissionError:
+            trials = []
+            warnings.add(_NO_PERMISSION)
         except (OSError, ValueError):
             trials = []
-            warnings.add("部分用量记录无法读取，当前费用不完整")
+            warnings.add(_UNREADABLE)
         for trial in trials:
             try:
-                collected, removed = _scan_trial(trial, snapshot)
+                collected, removed, denied = _scan_trial(trial, snapshot)
                 records.extend(collected)
                 obsolete.update(removed)
+                if denied:
+                    logger.warning("Billing logs not readable for %s: %s", job.id, ", ".join(map(str, denied[:3])))
+                    warnings.add(_NO_PERMISSION)
+            except PermissionError:
+                logger.warning("Billing logs not readable for %s", job.id, exc_info=True)
+                warnings.add(_NO_PERMISSION)
             except (OSError, ValueError, TypeError, AttributeError):
                 logger.warning("Could not read complete billing usage for %s", job.id, exc_info=True)
-                warnings.add("部分用量记录无法读取，当前费用不完整")
+                warnings.add(_UNREADABLE)
         with _LOCK:
             current = store.jobs.get(job.id)
             if current is None or _input_signature(current) != signature:
                 return current or job
             ledger = {row.id: row for row in store.usage_charges.all()}
+            obsolete.update(identity for identity, row in ledger.items()
+                            if row.job_id == job.id and row.model == _SYNTHETIC_MODEL)
             changes = {}
             for identity, row in ledger.items():
                 if row.job_id != job.id:
@@ -668,7 +766,7 @@ def refresh(job: Job, *, force: bool = False, _ancestors: set[str] | None = None
                 if row.amount_cny is not None:
                     group["amount_cny"] = (group["amount_cny"] or 0) + row.amount_cny
             amount = sum(amounts) if amounts else 0.0 if all(value == 0 for value in phases.values()) else None
-            incomplete = any(value is None for value in phases.values()) or any(row.amount_cny is None or row.warnings for row in entries) or "部分用量记录无法读取，当前费用不完整" in warnings
+            incomplete = any(value is None for value in phases.values()) or any(row.amount_cny is None or row.warnings for row in entries) or bool({_UNREADABLE, _NO_PERMISSION} & warnings)
             billing = BillingSummary(status="pending" if amount is None else "partial" if incomplete else "estimated",
                                      amount_cny=amount, agent_cny=phases["agent"], judge_cny=phases["judge"],
                                      snapshot=snapshot, requests=sum(row.requests for row in entries), warnings=sorted(warnings),

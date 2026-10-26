@@ -56,6 +56,9 @@ def record_usage(kwargs, response, start_time, end_time) -> None:
 
 
 def install_usage_recorder() -> None:
+    if os.environ.get("PRT_JUDGE_METERED") == "1":
+        logging.getLogger(__name__).info("Judge usage recorder disabled; the in-container proxy records directly")
+        return
     try:
         import litellm
         from litellm.integrations.custom_logger import CustomLogger

@@ -390,7 +390,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
         cwd=str(work_dir),
         env=env,
         files={runtime_file: (settings.resources_dir / runtime_file).read_text(encoding="utf-8"),
-               **cc_bridge_service.runtime_files(config)},
+               **cc_bridge_service.runtime_files(config), **harbor_compat.judge_meter_files(verifier_env)},
         output_dir=str(output_dir),
         notes=notes,
         secrets=secrets,

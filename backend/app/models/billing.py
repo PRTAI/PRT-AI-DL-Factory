@@ -33,6 +33,9 @@ class ModelPrice(Base):
     verified_on: str = "2026-10-22"
     valid_until: str = ""
     note: str = ""
+    # cn-workday: Beijing Mon-Fri 9-12/14-18 outside statutory holidays is peak; other times use off_peak_factor.
+    peak_schedule: Literal["", "cn-workday"] = ""
+    off_peak_factor: float | None = Field(default=None, ge=0, le=1)
 
     @model_validator(mode="after")
     def ordered_tiers(self):
@@ -42,6 +45,8 @@ class ModelPrice(Base):
         finite = [limit for limit in limits if limit is not None]
         if finite != sorted(set(finite)):
             raise ValueError("输入长度区间必须递增且不重复")
+        if bool(self.peak_schedule) != (self.off_peak_factor is not None):
+            raise ValueError("分时计价需要同时设置时段规则和空闲时段系数")
         return self
 
 
