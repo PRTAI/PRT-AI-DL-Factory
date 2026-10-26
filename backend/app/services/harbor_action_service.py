@@ -55,13 +55,15 @@ def _source(job_id: str, actor: User) -> Job:
     return job
 
 
-def _check(source: Path, task_path: Path | None = None, trial_names: list[str] | None = None) -> dict:
+def _check(source: Path, task_path: Path | None = None, trial_names: list[str] | None = None,
+           *, check_lock: bool = False) -> dict:
     from ..builders.harbor import resolve_harbor_bin, resolve_harbor_python
     binary = resolve_harbor_bin()
     try:
         result = subprocess.run(
             [resolve_harbor_python(binary), str(settings.resources_dir / "harbor_action_check.py")],
-            input=json.dumps({"source": str(source), "task_path": str(task_path) if task_path else None, "trial_names": trial_names}),
+            input=json.dumps({"source": str(source), "task_path": str(task_path) if task_path else None,
+                              "trial_names": trial_names, "check_lock": check_lock}),
             capture_output=True, text=True, timeout=45,
         )
         data = json.loads(result.stdout)
@@ -70,6 +72,27 @@ def _check(source: Path, task_path: Path | None = None, trial_names: list[str] |
     if result.returncode or not data.get("ok"):
         raise BuildError(data.get("error", "Harbor 恢复检查失败"))
     return data
+
+
+def recorded_task_root(source: Job) -> Path | None:
+    """The task tree the source job actually ran with.
+
+    Platform-image and Batch Judge runs execute a job-local task snapshot, and
+    Harbor records it in ``config.json``. Reusing that snapshot keeps trial task
+    names/content identical even when the original upload was a single task
+    directory or the dataset has since been replaced.
+    """
+    try:
+        config = json.loads((source_dir(source) / "config.json").read_text(encoding="utf-8"))
+    except (BuildError, OSError, ValueError):
+        return None
+    entries = (config.get("tasks") or []) + (config.get("datasets") or [])
+    paths = [Path(entry["path"]) for entry in entries
+             if isinstance(entry, dict) and entry.get("path")]
+    unique = list(dict.fromkeys(paths))
+    if len(unique) != 1 or not unique[0].is_dir():
+        return None
+    return unique[0]
 
 
 def verifier_path(config: VerifyConfig) -> Path:
@@ -121,6 +144,16 @@ def _create_action(job_id: str, request: HarborActionRequest, *, actor: User) ->
             config.dataset_id = request.dataset_id
             config.tasks_path = ""
             config.registry_dataset = ""
+        else:
+            # Reuse the exact task tree the source ran with (platform-image /
+            # Batch Judge snapshots included). A single-task dataset would
+            # otherwise be re-resolved under a different task name, and a
+            # replaced or deleted dataset would make regrade impossible.
+            recorded = recorded_task_root(source)
+            if recorded is not None:
+                config.dataset_id = ""
+                config.registry_dataset = ""
+                config.tasks_path = str(recorded)
         if request.judge_model_api_id is not None:
             config.judge_model_api_id = request.judge_model_api_id
             # An explicitly selected judge must win over old manual overrides.
@@ -128,10 +161,12 @@ def _create_action(job_id: str, request: HarborActionRequest, *, actor: User) ->
         if request.judge_api_protocol is not None:
             config.judge_api_protocol = request.judge_api_protocol
     try:
-        _check(source_dir(source), verifier_path(config) if request.mode == "regrade" else None)
+        checked = _check(source_dir(source), verifier_path(config) if request.mode == "regrade" else None,
+                         check_lock=request.mode == "resume")
     except BuildError as exc:
         raise HTTPException(400, str(exc)) from exc
-    action = HarborAction(mode=request.mode, source_job_id=source.id, filter_error_types=filters)
+    action = HarborAction(mode=request.mode, source_job_id=source.id, filter_error_types=filters,
+                          lock_stale=bool(checked.get("lock_stale")) and request.mode == "resume")
     label = "中断恢复" if action.mode == "resume" else "重新判分"
     payload = JobCreate(
         name=f"{source.name[:108]} ({label})", note=source.note, type=JobType.VERIFY,
@@ -159,7 +194,9 @@ def create_trial_actions(job_id: str, request: HarborTrialActionRequest, *, acto
                     raise BuildError(f"{state.trial_name} 已完成，请使用重新运行或直接评分")
                 if request.mode == "regrade" and not state.path:
                     raise BuildError(f"{state.trial_name} 尚未执行，没有可评分的产物")
-            checked = _check(root, verifier_path(source.verify) if request.mode == "regrade" else None, names)
+            regrade_root = recorded_task_root(source) if request.mode == "regrade" else None
+            checked = _check(root, (regrade_root or verifier_path(source.verify))
+                             if request.mode == "regrade" else None, names)
         except BuildError as exc:
             raise HTTPException(400, str(exc)) from exc
         if request.mode == "rerun":
@@ -176,6 +213,10 @@ def create_trial_actions(job_id: str, request: HarborTrialActionRequest, *, acto
             if request.mode == "regrade":
                 config.disable_verification = False
                 config.use_platform_image = False
+                if regrade_root is not None:
+                    config.dataset_id = ""
+                    config.registry_dataset = ""
+                    config.tasks_path = str(regrade_root)
             action = HarborAction(mode=request.mode, source_job_id=source.id,
                                   trial_name=row["trial_name"], selected_job_config=native)
             payload = JobCreate(
@@ -285,6 +326,11 @@ def prepare_snapshot(job: Job, work_dir: Path, output_dir: Path, *, selected_nat
             # with the resolved one before running; it must carry the same refs.
             if environment_refs:
                 _rebase_lock(staging / "lock.json", environment_refs)
+            if action.lock_stale:
+                # Harbor refuses to resume when the recorded task digest no
+                # longer matches; a rebuilt lock keeps completed trials while
+                # letting unfinished/failed ones run against the current tree.
+                (staging / "lock.json").unlink(missing_ok=True)
             # Existing TrialConfig equality includes trials_dir. Rebase every
             # recorded trial, so completed work is recognized in the new job.
             for trial in staging.iterdir():

@@ -314,22 +314,27 @@ def _validate_verify(payload: JobCreate, *, owner: User, harbor_action: HarborAc
             validate_secret_env(env_source)
     except BuildError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    if not (config.dataset_id or config.tasks_path or config.registry_dataset):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择要评测的 Harbor 任务集")
-    if config.dataset_id:
-        dataset = _dataset_or_400(config.dataset_id, label="任务集")
-        if dataset.kind != DatasetKind.HARBOR_TASKS:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail=f"评测需要 harbor_tasks 类型的数据集，当前为 {dataset.kind.value}",
-            )
-        if dataset.rewardkit and not config.disable_verification:
-            if not config.judge_model_api_id:
+    # Recovery runs use the recorded task tree (and, for resume, the recorded
+    # agent/env). The original dataset may have been deleted or replaced since
+    # the source job finished; it must not block opening a recovery task.
+    recovery = harbor_action is not None and harbor_action.mode in {"resume", "regrade"}
+    if not recovery:
+        if not (config.dataset_id or config.tasks_path or config.registry_dataset):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请选择要评测的 Harbor 任务集")
+        if config.dataset_id:
+            dataset = _dataset_or_400(config.dataset_id, label="任务集")
+            if dataset.kind != DatasetKind.HARBOR_TASKS:
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,
-                    detail="该任务集是 reward-kit 格式，请选择 judge 模型（用于注入 JUDGE_* 环境变量）",
+                    detail=f"评测需要 harbor_tasks 类型的数据集，当前为 {dataset.kind.value}",
                 )
-    if config.batch_judge and not config.disable_verification:
+            if dataset.rewardkit and not config.disable_verification:
+                if not config.judge_model_api_id:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        detail="该任务集是 reward-kit 格式，请选择 judge 模型（用于注入 JUDGE_* 环境变量）",
+                    )
+    if not recovery and config.batch_judge and not config.disable_verification:
         from .harbor_action_service import verifier_path
         from .harbor_judge_service import batch_judge_patches
         try:
