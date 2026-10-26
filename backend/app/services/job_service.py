@@ -28,7 +28,7 @@ from ..models import (
 from ..store import store
 from ..models.job import HarborAction, VerifyBatchCreate
 from . import audit_service, metrics_parser, model_service, project_service, runner
-from .scheduler import refresh_metrics, scheduler
+from .scheduler import effective_system_settings, refresh_metrics, scheduler
 
 # Which dataset kinds each algorithm can actually consume.
 _ALLOWED_DATASETS: dict[TrainStage, set[DatasetKind]] = {
@@ -125,8 +125,7 @@ def _prepare_job(
     else:
         _validate_verify(payload, owner=owner, harbor_action=harbor_action)
 
-    system = store.system_settings()
-    require_approval = system.require_approval if system.updated_by else settings.require_approval
+    require_approval = effective_system_settings().require_approval
     # 管理员就是审核人，自己提交的不必再给自己点通过
     admin_approved = require_approval and owner.is_admin
     require_approval = require_approval and not owner.is_admin

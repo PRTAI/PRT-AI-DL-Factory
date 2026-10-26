@@ -12,7 +12,7 @@ from ..models import JobStatus, SystemSettings, utcnow
 from ..models.job import JobPublic
 from ..models.billing import ModelPrice, PricingSettings
 from ..services import billing_service, monitor, resources_service, audit_service
-from ..services.scheduler import gpu_snapshot, scheduler
+from ..services.scheduler import effective_system_settings, gpu_snapshot, scheduler
 from ..store import store
 
 router = APIRouter(prefix="/system", tags=["system"])
@@ -81,11 +81,7 @@ def toolchain(_: CurrentUser) -> list[dict[str, Any]]:
 
 @router.get("/settings", response_model=SystemSettings, summary="系统设置")
 def read_settings(_: CurrentUser) -> SystemSettings:
-    current = store.settings_doc.read()
-    if not current.updated_by:
-        current.require_approval = settings.require_approval
-        current.max_concurrent_jobs = settings.max_concurrent_jobs
-    return current
+    return effective_system_settings()
 
 
 @router.get("/pricing", response_model=PricingSettings, summary="模型单价、折扣和人民币汇率")

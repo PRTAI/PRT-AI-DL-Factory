@@ -20,7 +20,7 @@ from pathlib import Path
 
 from ..builders import BuildError
 from ..config import settings
-from ..models import Job, JobStatus, utcnow
+from ..models import Job, JobStatus, SystemSettings, utcnow
 from ..store import store
 from . import audit_service, metrics_parser, runner
 from .resource_lock import RESOURCE_LOCK
@@ -29,6 +29,23 @@ logger = logging.getLogger("prt.scheduler")
 
 _DISPATCH_LOCK = threading.RLock()
 _PREPARING: set[str] = set()
+
+
+def effective_system_settings() -> SystemSettings:
+    """Resolve settings the way the settings page already shows them.
+
+    ``SystemSettings()`` doubles as the API response model, so when no admin has
+    ever saved ``settings.json`` the document still yields the model defaults
+    (``max_concurrent_jobs=2``). The settings page deliberately falls back to
+    ``PRT_REQUIRE_APPROVAL`` / ``PRT_MAX_CONCURRENT_JOBS`` in that case; the
+    scheduler must read the same values, otherwise the UI can display 8000 while
+    the queue still only dispatches two jobs at a time.
+    """
+    current = store.system_settings()
+    if not current.updated_by:
+        current.require_approval = settings.require_approval
+        current.max_concurrent_jobs = settings.max_concurrent_jobs
+    return current
 
 
 class Scheduler:
@@ -139,7 +156,7 @@ class Scheduler:
         with _DISPATCH_LOCK:
             launches: list[Job] = []
             with RESOURCE_LOCK:
-                system = store.system_settings()
+                system = effective_system_settings()
                 max_concurrent = system.max_concurrent_jobs or settings.max_concurrent_jobs
                 queued = store.jobs.find(lambda j: j.status == JobStatus.QUEUED)
                 if not queued:
