@@ -29,7 +29,7 @@ from fastapi import HTTPException, status
 from ..config import settings
 from ..models import Issue, IssueCreate, IssueStatus, User, utcnow
 from ..store import store
-from . import audit_service, github_service
+from . import audit_service, github_service, user_service
 
 logger = logging.getLogger("prt.issues")
 
@@ -341,10 +341,13 @@ def _run_merge(issue_id: str) -> None:
         _log(issue_id, f"合并 {item.branch} 到 {main}")
         account = github_service.account_of(item.merged_by)
         identity: list[str] = []
-        if account is not None:
-            name, email = github_service.git_identity(account)
+        name, email, source = user_service.git_identity(item.merged_by)
+        if email:
+            # 运行目录可能没有任何 git 身份，合并提交必须显式署名
             identity = ["-c", f"user.name={name}", "-c", f"user.email={email}"]
-            _log(issue_id, f"使用 {item.merged_by} 绑定的 GitHub 账号 {account.login} 署名并推送")
+            _log(issue_id, f"合并提交署名 {name} <{email}>（来自{source}）")
+        if account is not None:
+            _log(issue_id, f"使用 {item.merged_by} 绑定的 GitHub 账号 {account.login} 推送")
         _git(repo, "fetch", "--quiet", item.workspace, f"+{item.branch}:{item.branch}")
         try:
             _git(repo, *identity, "merge", "--no-ff", "--no-edit", "-m", f"Merge {item.branch}: {item.title}（{item.id}）", item.branch)

@@ -89,6 +89,7 @@ from .review import (
     new_review_id,
 )
 from .user import (
+    GitIdentityUpdate,
     LoginRequest,
     PasswordChange,
     PasswordReset,
@@ -190,6 +191,7 @@ __all__ = [
     "UserCreate",
     "UserPublic",
     "UserUpdate",
+    "GitIdentityUpdate",
     "VerifyConfig",
     "new_id",
     "utcnow",

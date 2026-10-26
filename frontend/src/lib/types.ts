@@ -52,6 +52,8 @@ export interface User {
   max_concurrent_jobs?: number | null
   max_gpus_per_job?: number | null
   note: string
+  git_name?: string
+  git_email?: string
 }
 
 export interface TokenResponse {

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, status
 
 from ..deps import CurrentUser
-from ..models import LoginRequest, PasswordChange, TokenResponse, UserPublic
+from ..models import GitIdentityUpdate, LoginRequest, PasswordChange, TokenResponse, UserPublic
 from ..security import create_access_token, verify_password
 from ..services import audit_service, user_service
 from ..deps import client_ip
@@ -50,6 +50,11 @@ def me(user: CurrentUser) -> UserPublic:
 def change_password(payload: PasswordChange, user: CurrentUser) -> UserPublic:
     updated = user_service.change_own_password(user, payload.current_password, payload.new_password)
     return UserPublic.of(updated)
+
+
+@router.put("/git-identity", response_model=UserPublic, summary="设置自己合并代码时的 git 署名")
+def set_git_identity(payload: GitIdentityUpdate, user: CurrentUser) -> UserPublic:
+    return UserPublic.of(user_service.update_git_identity(user, payload))
 
 
 @router.post("/logout", summary="登出（前端丢弃 token 即可）")

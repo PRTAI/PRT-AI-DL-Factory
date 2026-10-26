@@ -96,3 +96,49 @@ def test_merge_uses_merger_github_identity(repo):  # noqa: F811
         assert TOKEN not in log and "admin-gh" in log
     finally:
         store.github_accounts.delete(admin.id)
+
+
+def test_git_identity_api_validates_and_clears(client, member_headers):
+    assert client.put("/api/auth/git-identity", headers=member_headers,
+                      json={"git_name": "Dev", "git_email": ""}).status_code == 422
+    assert client.put("/api/auth/git-identity", headers=member_headers,
+                      json={"git_name": "Dev <x>", "git_email": "dev@example.com"}).status_code == 422
+    saved = client.put("/api/auth/git-identity", headers=member_headers,
+                       json={"git_name": " Dev Person ", "git_email": "Dev@Example.com"})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["git_name"] == "Dev Person" and saved.json()["git_email"] == "dev@example.com"
+    assert client.get("/api/auth/me", headers=member_headers).json()["git_email"] == "dev@example.com"
+    cleared = client.put("/api/auth/git-identity", headers=member_headers, json={"git_name": "", "git_email": ""})
+    assert cleared.json()["git_email"] == ""
+
+
+def test_merge_signs_with_profile_identity_when_platform_has_none(repo, monkeypatch, tmp_path):  # noqa: F811
+    # 运行目录没有 user.name / user.email，且全局配置也读不到（复现 Committer identity unknown）
+    _git(repo["work"], "config", "--unset", "user.name")
+    _git(repo["work"], "config", "--unset", "user.email")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "no-global"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("EMAIL", raising=False)
+    admin = _admin()
+    previous = (admin.git_name, admin.git_email)
+    store.users.update(admin.id, lambda u: (setattr(u, "git_name", "Han Lin"), setattr(u, "git_email", "han@example.com")))
+    store.github_accounts.put(GitHubAccount(id=admin.id, github_id=7, login="admin-gh", name="Admin GH",
+                                            email="admin-gh@example.com", token=TOKEN))
+    try:
+        issue = _new_issue("无身份")
+        issue_service.start_fix(issue.id, actor=admin)
+        _wait(issue.id, IssueStatus.PENDING_MERGE)
+        issue_service.merge_issue(issue.id, actor=admin)
+        merged = _wait(issue.id, IssueStatus.MERGED, IssueStatus.PENDING_MERGE)
+        assert merged.status == IssueStatus.MERGED, merged.error
+        line = _git(repo["work"], "log", "-1", "--format=%an <%ae>|%cn <%ce>", "main").strip()
+        assert line == "Han Lin <han@example.com>|Han Lin <han@example.com>"
+    finally:
+        store.github_accounts.delete(admin.id)
+        store.users.update(admin.id, lambda u: (setattr(u, "git_name", previous[0]), setattr(u, "git_email", previous[1])))
+
+
+def test_identity_falls_back_to_platform_account():
+    admin = _admin()
+    assert issue_service.user_service.git_identity(admin.id)[1:] == (admin.email, "平台账号")

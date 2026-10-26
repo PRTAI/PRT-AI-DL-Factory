@@ -479,6 +479,8 @@ export const api = {
 
   // -------------------------------------------------------------- github ----
   githubBinding: () => request<GitHubBinding>('/api/github/me'),
+  setGitIdentity: (git_name: string, git_email: string) =>
+    request<User>('/api/auth/git-identity', { method: 'PUT', body: JSON.stringify({ git_name, git_email }) }),
   bindGithubToken: (token: string) =>
     request<GitHubBinding>('/api/github/me/token', { method: 'PUT', body: JSON.stringify({ token }) }),
   unbindGithub: () => request<void>('/api/github/me', { method: 'DELETE' }),

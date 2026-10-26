@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import HTTPException, status
 
 from ..config import settings
-from ..models import Role, User, UserCreate, UserUpdate, utcnow
+from ..models import GitIdentityUpdate, Role, User, UserCreate, UserUpdate, utcnow
 from ..security import hash_password, verify_password
 from ..store import store
 from . import api_key_service, audit_service, github_service
@@ -127,6 +127,34 @@ def change_own_password(user: User, current_password: str, new_password: str) ->
         "user.change_password", actor=user, target_type="user", target_id=user.id, summary="修改自身密码"
     )
     return updated
+
+
+def update_git_identity(user: User, payload: GitIdentityUpdate) -> User:
+    def mutate(target: User) -> None:
+        target.git_name, target.git_email = payload.git_name, payload.git_email
+        target.updated_at = utcnow()
+
+    updated = store.users.update(user.id, mutate)
+    assert updated is not None
+    audit_service.record(
+        "user.git_identity", actor=user, target_type="user", target_id=user.id,
+        summary=f"设置 git 署名 {payload.git_name} <{payload.git_email}>" if payload.git_email else "清除 git 署名",
+    )
+    return updated
+
+
+def git_identity(user_id: str) -> tuple[str, str, str]:
+    """合并署名：个人设置 > 绑定的 GitHub 账号 > 平台账号。返回 (name, email, 来源)。"""
+    user = store.users.get(user_id)
+    if user is not None and user.git_email:
+        return user.git_name, user.git_email, "个人设置"
+    account = github_service.account_of(user_id)
+    if account is not None and account.email:
+        name, email = github_service.git_identity(account)
+        return name, email, f"GitHub 账号 {account.login}"
+    if user is not None:
+        return user.display_name or user.email.split("@")[0], user.email, "平台账号"
+    return "", "", ""
 
 
 def delete_user(user_id: str, *, actor: User) -> None:

@@ -1,7 +1,7 @@
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { Github, KeyRound, Moon, Sun, UserCircle2 } from 'lucide-react'
+import { GitCommitHorizontal, Github, KeyRound, Moon, Sun, UserCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth, useUi } from '@/lib/store'
@@ -132,6 +132,8 @@ export default function ProfileSettings() {
         </Card>
       </div>
 
+      <MyGitIdentity />
+
       <MyGitHub />
 
       <MyApiKeys />
@@ -185,6 +187,63 @@ export default function ProfileSettings() {
   )
 }
 
+function MyGitIdentity() {
+  const { user, setUser } = useAuth()
+  const [name, setName] = React.useState(user?.git_name ?? '')
+  const [email, setEmail] = React.useState(user?.git_email ?? '')
+  const save = useMutation({
+    mutationFn: (values: { name: string; email: string }) => api.setGitIdentity(values.name, values.email),
+    onSuccess: (updated) => {
+      setUser(updated)
+      setName(updated.git_name ?? '')
+      setEmail(updated.git_email ?? '')
+      toast.success(updated.git_email ? 'git 署名已保存' : '已清除 git 署名')
+    },
+    onError: (exception) => toast.error(exception instanceof ApiError ? exception.message : '保存失败'),
+  })
+  if (!user) return null
+  const trimmedName = name.trim()
+  const trimmedEmail = email.trim()
+  const partial = Boolean(trimmedName) !== Boolean(trimmedEmail)
+  const unchanged = trimmedName === (user.git_name ?? '') && trimmedEmail === (user.git_email ?? '')
+  return (
+    <Card>
+      <CardHeader
+        title="Git 署名"
+        icon={<GitCommitHorizontal className="h-4 w-4" aria-hidden />}
+        description="把问题修复合并到 main 时，合并提交用这里的 user.name / user.email；留空则用绑定的 GitHub 账号，再没有就用平台账号的名称和邮箱"
+      />
+      <CardBody>
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (!partial && !unchanged) save.mutate({ name: trimmedName, email: trimmedEmail })
+          }}
+        >
+          <Field label="user.name" htmlFor="git-name" className="min-w-[14rem] flex-1">
+            <Input id="git-name" autoComplete="name" placeholder={user.display_name} value={name}
+              onChange={(event) => setName(event.target.value)} />
+          </Field>
+          <Field label="user.email" htmlFor="git-email" className="min-w-[14rem] flex-1"
+            error={partial ? '名称和邮箱需要同时填写，或同时留空' : null}>
+            <Input id="git-email" type="email" autoComplete="email" placeholder={user.email} value={email}
+              onChange={(event) => setEmail(event.target.value)} />
+          </Field>
+          <Button type="submit" variant="primary" disabled={partial || unchanged} loading={save.isPending}>
+            保存
+          </Button>
+          {user.git_email && (
+            <Button type="button" variant="ghost" loading={save.isPending} onClick={() => save.mutate({ name: '', email: '' })}>
+              清除
+            </Button>
+          )}
+        </form>
+      </CardBody>
+    </Card>
+  )
+}
+
 function MyGitHub() {
   const qc = useQueryClient()
   const [params, setParams] = useSearchParams()
@@ -226,7 +285,7 @@ function MyGitHub() {
       <CardHeader
         title="GitHub 账号"
         icon={<Github className="h-4 w-4" aria-hidden />}
-        description="管理员把问题修复合并到 main 时，用合并人自己绑定的 GitHub 账号署名并推送；未绑定则用平台本机的 git 身份"
+        description="管理员把问题修复合并到 main 时，用合并人自己绑定的 GitHub 账号推送（未单独设置 Git 署名时也用它署名）；未绑定则用平台本机的 git 凭据推送"
       />
       <CardBody className="space-y-4">
         {binding.error && <ErrorBox message={binding.error instanceof ApiError ? binding.error.message : '加载失败'} />}

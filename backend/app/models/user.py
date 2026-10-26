@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import Field
+from pydantic import Field, field_validator, model_validator
 
 from .common import Base, Role, new_id, utcnow
-from .fields import EmailAddress
+from .fields import EmailAddress, _validate_email
 
 
 class User(Base):
@@ -26,6 +26,9 @@ class User(Base):
     max_concurrent_jobs: int | None = None
     max_gpus_per_job: int | None = None
     note: str = ""
+    # 合并问题修复时的 git 署名；留空则依次回退到绑定的 GitHub 账号、平台账号
+    git_name: str = ""
+    git_email: str = ""
 
     @property
     def is_admin(self) -> bool:
@@ -44,6 +47,8 @@ class UserPublic(Base):
     max_concurrent_jobs: int | None = None
     max_gpus_per_job: int | None = None
     note: str = ""
+    git_name: str = ""
+    git_email: str = ""
 
     @classmethod
     def of(cls, user: User) -> "UserPublic":
@@ -68,6 +73,32 @@ class UserUpdate(Base):
     max_concurrent_jobs: int | None = None
     max_gpus_per_job: int | None = None
     note: str | None = None
+
+
+class GitIdentityUpdate(Base):
+    """两项都留空表示清除，回退到 GitHub 账号或平台账号的署名。"""
+
+    git_name: str = Field(default="", max_length=100)
+    git_email: str = Field(default="", max_length=254)
+
+    @field_validator("git_name")
+    @classmethod
+    def _name(cls, value: str) -> str:
+        value = value.strip()
+        if any(char in value for char in "<>\n\r\0"):
+            raise ValueError("名称不能包含 < > 或换行")
+        return value
+
+    @field_validator("git_email")
+    @classmethod
+    def _email(cls, value: str) -> str:
+        return _validate_email(value) if value.strip() else ""
+
+    @model_validator(mode="after")
+    def _both(self) -> "GitIdentityUpdate":
+        if bool(self.git_name) != bool(self.git_email):
+            raise ValueError("git 名称和邮箱需要同时填写，或同时留空")
+        return self
 
 
 class PasswordReset(Base):
