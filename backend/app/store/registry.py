@@ -13,6 +13,7 @@ from ..models import (
     Dataset,
     Deployment,
     ExportTask,
+    GitHubAccount,
     Issue,
     Job,
     ModelApiConfig,
@@ -57,7 +58,11 @@ class Store:
         self.user_api_keys: JsonCollection[UserApiKey] = JsonCollection(
             db / "user_api_keys.json", UserApiKey, mode=0o600
         )
-        self.settings_doc: JsonDocument[SystemSettings] = JsonDocument(
+        # 账号绑定的 GitHub，含明文 token，同样 0600
+        self.github_accounts: JsonCollection[GitHubAccount] = JsonCollection(
+            db / "github_accounts.json", GitHubAccount, mode=0o600
+        )
+        self.settings_doc:JsonDocument[SystemSettings] = JsonDocument(
             db / "settings.json", SystemSettings
         )
         self.pricing_doc = JsonDocument(db / "pricing.json", PricingSettings)

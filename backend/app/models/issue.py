@@ -56,6 +56,7 @@ class Issue(Base):
 
     # ---- 合并 ----
     merged_by: str = ""
+    merged_github: str = ""  # 合并时使用的 GitHub 账号；空 = 本机 git 身份
     merged_at: datetime | None = None
     merge_commit: str = ""
     restart_scheduled: bool = False

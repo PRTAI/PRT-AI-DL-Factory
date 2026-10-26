@@ -8,7 +8,7 @@ from ..config import settings
 from ..models import Role, User, UserCreate, UserUpdate, utcnow
 from ..security import hash_password, verify_password
 from ..store import store
-from . import api_key_service, audit_service
+from . import api_key_service, audit_service, github_service
 
 
 def normalise_email(email: str) -> str:
@@ -144,6 +144,7 @@ def delete_user(user_id: str, *, actor: User) -> None:
         )
     store.users.delete(user_id)
     api_key_service.purge_user(user_id)
+    github_service.purge_user(user_id)
     audit_service.record(
         "user.delete",
         actor=actor,

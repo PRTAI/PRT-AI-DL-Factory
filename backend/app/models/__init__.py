@@ -63,6 +63,7 @@ from .model_api import (
     UserApiKeyPublic,
     UserApiKeySet,
 )
+from .github import GitHubAccount, GitHubAccountPublic, GitHubBinding, GitHubTokenSet
 from .issue import Issue, IssueCreate, IssueStatus
 from .model_registry import ModelDownload, ModelDownloadRequest, ModelEntry
 from .project import (
@@ -126,6 +127,10 @@ __all__ = [
     "DatasetUpdate",
     "DownloadStatus",
     "Framework",
+    "GitHubAccount",
+    "GitHubAccountPublic",
+    "GitHubBinding",
+    "GitHubTokenSet",
     "HarborEnvSpec",
     "Issue",
     "IssueCreate",

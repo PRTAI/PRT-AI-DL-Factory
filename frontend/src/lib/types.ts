@@ -943,9 +943,25 @@ export interface Issue {
   diff_stat: string
   error: string
   merged_by: string
+  merged_github: string
   merged_at: string | null
   merge_commit: string
   restart_scheduled: boolean
+}
+
+export interface GitHubBinding {
+  account: {
+    login: string
+    name: string
+    email: string
+    avatar_url: string
+    scopes: string
+    source: 'oauth' | 'token'
+    token_masked: string
+    created_at: string | null
+    updated_at: string | null
+  } | null
+  oauth_enabled: boolean
 }
 export type ReviewAgent = 'claude-code' | 'codex'
 export type ReasoningEffort = VerifyConfig['reasoning_effort']

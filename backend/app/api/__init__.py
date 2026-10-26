@@ -7,6 +7,7 @@ from . import (
     datasets,
     deployments,
     docs,
+    github,
     issues,
     jobs,
     model_apis,
@@ -31,6 +32,7 @@ api_router.include_router(deployments.router)
 api_router.include_router(deployments.exports_router)
 api_router.include_router(reviews.router)
 api_router.include_router(issues.router)
+api_router.include_router(github.router)
 api_router.include_router(system.router)
 api_router.include_router(resources.router)
 api_router.include_router(docs.router)

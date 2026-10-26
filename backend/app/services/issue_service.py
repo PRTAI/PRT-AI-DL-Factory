@@ -29,7 +29,7 @@ from fastapi import HTTPException, status
 from ..config import settings
 from ..models import Issue, IssueCreate, IssueStatus, User, utcnow
 from ..store import store
-from . import audit_service
+from . import audit_service, github_service
 
 logger = logging.getLogger("prt.issues")
 
@@ -339,9 +339,15 @@ def _run_merge(issue_id: str) -> None:
         repo = settings.issue_repo_root.resolve()
         main = settings.issue_main_branch
         _log(issue_id, f"合并 {item.branch} 到 {main}")
+        account = github_service.account_of(item.merged_by)
+        identity: list[str] = []
+        if account is not None:
+            name, email = github_service.git_identity(account)
+            identity = ["-c", f"user.name={name}", "-c", f"user.email={email}"]
+            _log(issue_id, f"使用 {item.merged_by} 绑定的 GitHub 账号 {account.login} 署名并推送")
         _git(repo, "fetch", "--quiet", item.workspace, f"+{item.branch}:{item.branch}")
         try:
-            _git(repo, "merge", "--no-edit", "-m", f"Merge {item.branch}: {item.title}（{item.id}）", item.branch)
+            _git(repo, *identity, "merge", "--no-ff", "--no-edit", "-m", f"Merge {item.branch}: {item.title}（{item.id}）", item.branch)
         except RuntimeError as exc:
             _git(repo, "merge", "--abort", check=False)
             _update(issue_id, status=IssueStatus.PENDING_MERGE, error=f"合并冲突，已放弃本次合并：{exc}")
@@ -349,8 +355,14 @@ def _run_merge(issue_id: str) -> None:
         merge_commit = _git(repo, "rev-parse", "HEAD").strip()
         warnings: list[str] = []
         _log(issue_id, f"推送 {main} 到 {settings.issue_push_remote}")
+        push_env: dict[str, str] = {}
+        if account is not None:
+            remote_url = _git(repo, "remote", "get-url", "--push", settings.issue_push_remote, check=False).strip()
+            push_env = github_service.push_env(account, remote_url)
+            if not push_env:
+                warnings.append(f"远端 {remote_url or settings.issue_push_remote} 不是 https 的 GitHub 地址，已用本机 git 凭据推送")
         try:
-            _git(repo, "-c", "http.version=HTTP/1.1", "push", settings.issue_push_remote, main, timeout=300)
+            _git(repo, "-c", "http.version=HTTP/1.1", "push", settings.issue_push_remote, main, timeout=300, env=push_env)
         except RuntimeError as exc:
             warnings.append(f"推送失败，请手动推送：{exc}")
         changed = _git(repo, "diff", "--name-only", f"{item.base_commit}..{merge_commit}", check=False)
@@ -359,6 +371,7 @@ def _run_merge(issue_id: str) -> None:
         restart = settings.issue_auto_restart
         updated = _update(
             issue_id, status=IssueStatus.MERGED, merged_at=utcnow(), merge_commit=merge_commit,
+            merged_github=account.login if account else "",
             error="；".join(warnings), restart_scheduled=restart,
         )
         _remove_workspace(updated)
@@ -468,13 +481,15 @@ def _kill_group(pid: int) -> None:
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
-def _git(cwd: Path, *args: str, check: bool = True, rc: bool = False, timeout: float = 120):
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
+def _git(cwd: Path, *args: str, check: bool = True, rc: bool = False, timeout: float = 120,
+         env: dict[str, str] | None = None):
+    full_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", **(env or {})}
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=timeout, env=full_env)
     if rc:
         return result.returncode
     if check and result.returncode:
-        raise RuntimeError(f"git {args[0]} 失败：{(result.stderr or result.stdout).strip()[-1500:]}")
+        command = next((a for a in args if not a.startswith("-") and "=" not in a), args[0])
+        raise RuntimeError(f"git {command} 失败：{(result.stderr or result.stdout).strip()[-1500:]}")
     return result.stdout
 
 

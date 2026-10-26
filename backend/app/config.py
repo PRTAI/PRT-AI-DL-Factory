@@ -110,6 +110,15 @@ class Settings(BaseSettings):
     # 非空时用这条 shell 命令重启（例如 systemctl restart prt）；空则平台自己重新拉起 uvicorn
     issue_restart_command: str = ""
 
+    # ------------------------------------------------------- GitHub 账号绑定 ---
+    # 配了 OAuth App 就走网页授权（回调地址填 <平台地址>/api/github/oauth/callback），
+    # 没配也能在个人设置里粘贴 Personal Access Token 绑定。
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    github_oauth_scopes: str = "repo read:user user:email"
+    github_web_url: str = "https://github.com"
+    github_api_url: str = "https://api.github.com"
+
     @field_validator(
         "data_root",
         "models_root",

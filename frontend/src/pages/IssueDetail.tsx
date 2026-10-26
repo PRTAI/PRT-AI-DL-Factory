@@ -28,6 +28,7 @@ export default function IssueDetail() {
     queryFn: () => api.issue(issueId),
     refetchInterval: (query) => (query.state.data && ISSUE_ACTIVE.includes(query.state.data.status) ? 3000 : false),
   })
+  const github = useQuery({ queryKey: ['github-binding'], queryFn: api.githubBinding, enabled: isAdmin && confirmMerge })
   const active = issue.data ? ISSUE_ACTIVE.includes(issue.data.status) : false
   const hasRun = Boolean(issue.data?.fix_started_at)
   const log = useQuery({
@@ -112,6 +113,7 @@ export default function IssueDetail() {
             <KeyValue label="开始修复">{formatDateTime(item.fix_started_at)}</KeyValue>
             <KeyValue label="修复完成">{formatDateTime(item.fix_finished_at)}</KeyValue>
             <KeyValue label="合并时间">{formatDateTime(item.merged_at)}</KeyValue>
+            {item.status === 'merged' && <KeyValue label="推送身份">{item.merged_github ? <Mono>@{item.merged_github}</Mono> : '本机 git 身份'}</KeyValue>}
             {isAdmin && item.workspace && <KeyValue label="副本目录"><Mono>{item.workspace}</Mono></KeyValue>}
           </CardBody>
         </Card>
@@ -157,6 +159,11 @@ export default function IssueDetail() {
       >
         <div className="space-y-2 text-sm text-fg">
           <p>将把 <Mono>{item.branch}</Mono> 合并进平台目录的 main，推送到远端，有前端改动时重新构建，然后重启本地平台。</p>
+          <p className="text-xs text-fg-muted">
+            {github.data?.account
+              ? <>合并提交署名并推送的身份：GitHub <Mono>@{github.data.account.login}</Mono></>
+              : <>你还没有绑定 GitHub，将使用平台本机的 git 身份推送；可在 <Link to="/settings" className="text-primary hover:underline">个人设置</Link> 绑定。</>}
+          </p>
           <WarnHint>推送后其他人会拉到这些改动；重启期间页面会短暂不可用，运行中的训练/评测子进程不受影响。请先确认上面的报告和改动。</WarnHint>
         </div>
       </Dialog>

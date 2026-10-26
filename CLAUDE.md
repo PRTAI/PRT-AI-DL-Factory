@@ -79,7 +79,7 @@ python scripts/manage.py list-users | create-user | reset-password | unlock-admi
 - `prebuild_service`（评测前预构建容器）：对选中的 Harbor 任务跑 `docker build` / `compose build` / `pull`，
   记录只在进程内存里、日志在 `data/prebuilds/`，重启即丢，不需要对账。
 
-- `issue_service`（问题反馈 / 托管修复）：管理员触发后把仓库 clone 到 `PRT_ISSUE_WORKSPACE_ROOT/<issue_id>`（仓库之外），在 `fix/issue-<id>` 分支上跑本机 `claude -p`（独立会话、禁止 push），完成后置 `pending_merge`；合并由管理员确认，平台在运行目录 merge → push → 有前端改动时 build → `os.execv` 自重启。`reconcile()` 对仍存活的 Agent 继续等待，已退出的按副本 git 状态收尾，合并中断的退回 `pending_merge`。
+- `issue_service`（问题反馈 / 托管修复）：管理员触发后把仓库 clone 到 `PRT_ISSUE_WORKSPACE_ROOT/<issue_id>`（仓库之外），在 `fix/issue-<id>` 分支上跑本机 `claude -p`（独立会话、禁止 push），完成后置 `pending_merge`；合并由管理员确认，平台在运行目录 merge → push → 有前端改动时 build → `os.execv` 自重启。合并时如果操作人绑定了 GitHub 账号，就用那个账号署名并推送（通过 git 配置环境变量传 token、不走命令行参数）；未绑定则用平台本机的 git 配置。`reconcile()` 对仍存活的 Agent 继续等待，已退出的按副本 git 状态收尾，合并中断的退回 `pending_merge`。
 
 前三者的进程都不归调度器管，所以 lifespan 里各自 `reconcile()` 一次，否则重启后会永远挂在 serving/running。
 

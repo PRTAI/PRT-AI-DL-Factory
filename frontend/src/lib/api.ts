@@ -10,6 +10,7 @@ import type {
   Deployment,
   DeploymentEndpoint,
   ExportCandidates,
+  GitHubBinding,
   Issue,
   ExportTask,
   GpuSnapshot,
@@ -475,6 +476,14 @@ export const api = {
   closeIssue: (id: string) => request<Issue>(`/api/issues/${id}/close`, { method: 'POST' }),
   startFix: (id: string) => request<Issue>(`/api/issues/${id}/fix`, { method: 'POST' }),
   mergeIssue: (id: string) => request<Issue>(`/api/issues/${id}/merge`, { method: 'POST' }),
+
+  // -------------------------------------------------------------- github ----
+  githubBinding: () => request<GitHubBinding>('/api/github/me'),
+  bindGithubToken: (token: string) =>
+    request<GitHubBinding>('/api/github/me/token', { method: 'PUT', body: JSON.stringify({ token }) }),
+  unbindGithub: () => request<void>('/api/github/me', { method: 'DELETE' }),
+  githubOauthStart: () =>
+    request<{ url: string }>(`/api/github/oauth/start${qs({ origin: window.location.origin })}`, { method: 'POST' }),
 
   // ------------------------------------------------------------ system ----
   systemMetrics: () => request<SystemMetrics>('/api/system/metrics'),

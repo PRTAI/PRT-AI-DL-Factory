@@ -1,6 +1,7 @@
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Moon, Sun, UserCircle2 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Github, KeyRound, Moon, Sun, UserCircle2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { useAuth, useUi } from '@/lib/store'
@@ -131,6 +132,8 @@ export default function ProfileSettings() {
         </Card>
       </div>
 
+      <MyGitHub />
+
       <MyApiKeys />
 
       <Card>
@@ -179,6 +182,102 @@ export default function ProfileSettings() {
         </Table>
       </Card>
     </div>
+  )
+}
+
+function MyGitHub() {
+  const qc = useQueryClient()
+  const [params, setParams] = useSearchParams()
+  const [token, setToken] = React.useState('')
+  const binding = useQuery({ queryKey: ['github-binding'], queryFn: api.githubBinding })
+  const onError = (exception: unknown) => toast.error(exception instanceof ApiError ? exception.message : '操作失败')
+  const refresh = () => qc.invalidateQueries({ queryKey: ['github-binding'] })
+
+  // OAuth 回调跳回本页时带 ?github=ok|error
+  React.useEffect(() => {
+    const result = params.get('github')
+    if (!result) return
+    if (result === 'ok') toast.success('GitHub 账号已绑定')
+    else toast.error(`GitHub 绑定失败：${params.get('message') ?? '未知错误'}`)
+    setParams({}, { replace: true })
+    refresh()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const bindToken = useMutation({
+    mutationFn: () => api.bindGithubToken(token.trim()),
+    onSuccess: () => { toast.success('GitHub 账号已绑定'); setToken(''); refresh() },
+    onError,
+  })
+  const oauth = useMutation({
+    mutationFn: api.githubOauthStart,
+    onSuccess: ({ url }) => { window.location.href = url },
+    onError,
+  })
+  const unbind = useMutation({
+    mutationFn: api.unbindGithub,
+    onSuccess: () => { toast.success('已解绑 GitHub'); refresh() },
+    onError,
+  })
+
+  const account = binding.data?.account
+  return (
+    <Card>
+      <CardHeader
+        title="GitHub 账号"
+        icon={<Github className="h-4 w-4" aria-hidden />}
+        description="管理员把问题修复合并到 main 时，用合并人自己绑定的 GitHub 账号署名并推送；未绑定则用平台本机的 git 身份"
+      />
+      <CardBody className="space-y-4">
+        {binding.error && <ErrorBox message={binding.error instanceof ApiError ? binding.error.message : '加载失败'} />}
+        {account ? (
+          <div className="flex flex-wrap items-center gap-3">
+            {account.avatar_url && <img src={account.avatar_url} alt="" className="h-9 w-9 rounded-full border border-border" />}
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-fg">
+                {account.name || account.login} <span className="text-fg-muted">@{account.login}</span>
+              </div>
+              <div className="text-[11px] text-fg-subtle">
+                {account.email} · {account.source === 'oauth' ? 'OAuth 授权' : `Token ${account.token_masked}`}
+                {account.scopes && ` · 权限 ${account.scopes}`} · 绑定于 {formatDateTime(account.updated_at)}
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" loading={unbind.isPending} onClick={() => unbind.mutate()}>
+              解绑
+            </Button>
+          </div>
+        ) : (
+          !binding.isLoading && <Badge tone="warning">未绑定</Badge>
+        )}
+        <div className="flex flex-wrap items-end gap-3">
+          {binding.data?.oauth_enabled && (
+            <Button variant={account ? 'outline' : 'primary'} loading={oauth.isPending} onClick={() => oauth.mutate()}>
+              <Github className="h-4 w-4" aria-hidden />
+              {account ? '重新授权' : '使用 GitHub 授权绑定'}
+            </Button>
+          )}
+          <form
+            className="flex min-w-[20rem] flex-1 items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault()
+              if (token.trim()) bindToken.mutate()
+            }}
+          >
+            <Input
+              type="password"
+              autoComplete="off"
+              className="h-8 flex-1 text-xs"
+              placeholder={account ? '粘贴新的 Personal Access Token 以替换' : '粘贴 Personal Access Token（需要 repo 写权限）'}
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+            />
+            <Button type="submit" size="sm" variant={binding.data?.oauth_enabled ? 'outline' : 'primary'} disabled={!token.trim()} loading={bindToken.isPending}>
+              用 Token 绑定
+            </Button>
+          </form>
+        </div>
+      </CardBody>
+    </Card>
   )
 }
 
