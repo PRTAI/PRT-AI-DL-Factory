@@ -44,6 +44,11 @@ def resolve_agent_model(job: Job) -> model_api_service.ResolvedModel | None:
         raise BuildError(str(exc.detail)) from exc
 
 
+def task_image_env() -> dict[str, str]:
+    """平台题目镜像的保留数量；harbor_runtime 在每次新建镜像后据此清理旧镜像。"""
+    return {"PRT_KEEP_TASK_IMAGES": str(store.system_settings().keep_recent_task_images)}
+
+
 def _codex_config(source: str, base_url: str) -> str:
     """合并 Harbor 支持的 JSON/原生 TOML 来源，并明确选择 Responses。"""
     try:
@@ -371,7 +376,7 @@ def build(job: Job, work_dir: Path, output_dir: Path) -> BuildResult:
 
     # Secrets also go through the child's environment so agents that re-exec
     # still see them; they are masked everywhere the platform renders them.
-    env = {"PYTHONUNBUFFERED": "1", **secrets_map}
+    env = {"PYTHONUNBUFFERED": "1", **secrets_map, **task_image_env()}
 
     if agent in _NO_MODEL_AGENTS:
         notes.append(

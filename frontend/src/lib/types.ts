@@ -434,6 +434,7 @@ export interface SystemSettings {
   max_concurrent_jobs: number
   default_max_gpus_per_job: number
   allow_self_service_verify: boolean
+  keep_recent_task_images: number
   banner: string
   updated_at: string
   updated_by: string
