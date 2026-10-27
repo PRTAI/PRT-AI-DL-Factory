@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 
 from ..config import settings
 from ..deps import AdminUser, CurrentUser
@@ -32,7 +33,9 @@ def metrics_history(_: CurrentUser, limit: int = Query(default=300, le=2000)) ->
 
 
 @router.get("/dashboard", summary="数据大屏聚合数据")
-def dashboard(user: CurrentUser, include_billing: bool = True) -> dict[str, Any]:
+def dashboard(user: CurrentUser, include_billing: bool = True,
+              start: date | None = Query(default=None, description="费用统计开始日期（含）"),
+              end: date | None = Query(default=None, description="费用统计结束日期（含）")) -> dict[str, Any]:
     jobs = store.jobs.all()
     visible = jobs if user.is_admin else [j for j in jobs if j.owner_id == user.id]
     active = [j for j in visible if j.status.is_active]
@@ -46,7 +49,7 @@ def dashboard(user: CurrentUser, include_billing: bool = True) -> dict[str, Any]
         "gpu": gpu_snapshot(),
         "active_jobs": [JobPublic.model_validate(job.model_dump()) for job in active[:20]],
         "recent_jobs": [JobPublic.model_validate(job.model_dump()) for job in recent],
-        **({"billing": _spend_summary(visible, user)} if include_billing else {}),
+        **({"billing": _spend_summary(visible, user, start, end)} if include_billing else {}),
         "counters": {
             "running": sum(1 for j in visible if j.status == JobStatus.RUNNING),
             "queued": sum(1 for j in visible if j.status == JobStatus.QUEUED),
@@ -60,18 +63,22 @@ def dashboard(user: CurrentUser, include_billing: bool = True) -> dict[str, Any]
     }
 
 
-def _spend_summary(jobs, user) -> dict[str, Any]:
+def _spend_summary(jobs, user, start: date | None = None, end: date | None = None) -> dict[str, Any]:
+    if start is not None and end is not None and start > end:
+        raise HTTPException(status_code=400, detail="开始日期不能晚于结束日期")
     pending = billing_service.worker.request(jobs)
-    result = billing_service.summary(jobs, actor=user)
+    result = billing_service.summary(jobs, actor=user, start=start, end=end)
     result["updating_jobs"] = len(pending)
     return result
 
 
 @router.get("/billing", summary="已保存的费用汇总；后台渐进更新")
-def billing_summary(user: CurrentUser) -> dict[str, Any]:
+def billing_summary(user: CurrentUser,
+                    start: date | None = Query(default=None, description="费用统计开始日期（含）"),
+                    end: date | None = Query(default=None, description="费用统计结束日期（含）")) -> dict[str, Any]:
     jobs = store.jobs.all()
     visible = jobs if user.is_admin else [job for job in jobs if job.owner_id == user.id]
-    return _spend_summary(visible, user)
+    return _spend_summary(visible, user, start, end)
 
 
 @router.get("/toolchain", summary="框架/工具链可用性")

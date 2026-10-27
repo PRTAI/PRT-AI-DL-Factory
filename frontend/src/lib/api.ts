@@ -494,7 +494,8 @@ export const api = {
       `/api/system/metrics/history${qs({ limit })}`,
     ),
   dashboard: () => request<DashboardPayload>('/api/system/dashboard?include_billing=false'),
-  spendSummary: () => request<SpendSummary>('/api/system/billing'),
+  spendSummary: (params: { start?: string; end?: string } = {}) =>
+    request<SpendSummary>(`/api/system/billing${qs(params)}`),
   toolchain: () => request<ToolchainRow[]>('/api/system/toolchain'),
   harborImage: () => request<{ image: string; ready: boolean; image_id: string; status: string; error: string; log: string }>('/api/system/harbor-image'),
   harborImageRecipe: () => request<{ dockerfile: string }>('/api/system/harbor-image/recipe'),

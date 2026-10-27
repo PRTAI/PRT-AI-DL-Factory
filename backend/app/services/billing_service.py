@@ -15,7 +15,7 @@ import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
@@ -843,10 +843,21 @@ def archive(job: Job) -> None:
     project = store.projects.get(job.project_id)
     store.billing_archives.put(BillingArchive(id=job.id, owner_id=job.owner_id, owner_email=job.owner_email,
         project_id=job.project_id, project_name=project.name if project else job.project_id,
-        billing=job.billing))
+        billing=job.billing, job_finished_at=job.runtime.finished_at or job.runtime.started_at or job.created_at))
 
 
-def summary(jobs: list[Job], *, actor=None) -> dict:
+def _spend_date(item) -> date:
+    """Beijing calendar day the evaluation ran, used by the dashboard date filter."""
+    if isinstance(item, Job):
+        moment = item.runtime.finished_at or item.runtime.started_at or item.created_at
+    else:
+        moment = item.job_finished_at or item.billing.updated_at or item.created_at
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(_BEIJING).date()
+
+
+def summary(jobs: list[Job], *, actor=None, start: date | None = None, end: date | None = None) -> dict:
     groups = {key: {} for key in ("projects", "people", "models")}
     project_names = {project.id: project.name for project in store.projects.all()}
 
@@ -865,6 +876,10 @@ def summary(jobs: list[Job], *, actor=None) -> dict:
         for row in archived:
             project_names.setdefault(row.project_id, row.project_name)
         evaluations.extend(archived)
+    if start is not None or end is not None:
+        evaluations = [item for item in evaluations
+                       if (start is None or _spend_date(item) >= start)
+                       and (end is None or _spend_date(item) <= end)]
     for job in evaluations:
         incomplete = job.billing.status in {"partial", "pending"}
         add("projects", job.project_id, project_names.get(job.project_id, job.project_id), job.billing.amount_cny, job.id, incomplete)

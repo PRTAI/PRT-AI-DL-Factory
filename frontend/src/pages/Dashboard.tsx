@@ -1,6 +1,6 @@
 import * as React from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   Activity,
   CircleCheck,
@@ -23,7 +23,8 @@ import { formatBytes, formatDuration, formatNumber, formatRate, elapsedSeconds }
 import { Badge, Button, Card, CardBody, CardHeader, EmptyState, Progress, Stat, Table, Td, Th, Tr } from '@/components/ui'
 import { JobTypeBadge, PageHeader, StatusBadge } from '@/components/common'
 import { ProjectTag } from '@/components/ProjectTag'
-import { JobCost, SpendDashboard } from '@/components/Billing'
+import { JobCost, SpendDashboard, type SpendRange } from '@/components/Billing'
+import { spendRangeError } from '@/lib/billing'
 import { Meter, UtilizationChart } from '@/components/charts'
 
 const timeLabel = (value: string | number) =>
@@ -37,9 +38,13 @@ export default function Dashboard() {
     queryFn: () => api.dashboard(),
     refetchInterval: 10_000,
   })
+  const [spendRange, setSpendRange] = React.useState<SpendRange>({ start: '', end: '' })
+  const spendRangeProblem = spendRangeError(spendRange.start, spendRange.end)
   const spend = useQuery({
-    queryKey: ['billing-summary'],
-    queryFn: api.spendSummary,
+    queryKey: ['billing-summary', spendRange.start, spendRange.end],
+    queryFn: () => api.spendSummary(spendRange),
+    enabled: !spendRangeProblem,
+    placeholderData: keepPreviousData,
     refetchInterval: query => query.state.data?.updating_jobs ? 2000 : 15_000,
   })
 
@@ -122,7 +127,14 @@ export default function Dashboard() {
         />
       </div>
 
-      <SpendDashboard data={spend.data} loading={spend.isPending} error={spend.isError} />
+      <SpendDashboard
+        data={spend.data}
+        loading={spend.isPending}
+        error={spend.isError && !spendRangeProblem}
+        range={spendRange}
+        onRangeChange={setSpendRange}
+        rangeError={spendRangeProblem}
+      />
       {/* ---------------------------------------------------- utilisation -- */}
       <div className="grid gap-3 xl:grid-cols-2">
         <Card>
