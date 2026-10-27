@@ -3,7 +3,7 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import { useAuth } from '@/lib/store'
 import type { Job, SpendRow, SpendSummary } from '@/lib/types'
 import { BILLING_UNAVAILABLE, jobCostState, money, spendChartRows } from '@/lib/billing'
-import { Card, CardBody, CardHeader, Table, Tabs, TabsContent, TabsList, TabsTrigger, Td, Th, Tr } from '@/components/ui'
+import { Button, Card, CardBody, CardHeader, Input, Table, Tabs, TabsContent, TabsList, TabsTrigger, Td, Th, Tr } from '@/components/ui'
 
 export function JobCost({ job, updating = false }: { job: Job; updating?: boolean }) {
   if (job.type !== 'verify') return null
@@ -79,17 +79,43 @@ function SpendChart({ rows, title, color }: { rows: SpendRow[]; title: string; c
   </div>
 }
 
-export function SpendDashboard({ data, loading = false, error = false }: { data?: SpendSummary; loading?: boolean; error?: boolean }) {
+export interface SpendRange {
+  start: string
+  end: string
+}
+
+function SpendRangePicker({ range, onChange }: { range: SpendRange; onChange: (range: SpendRange) => void }) {
+  return <div className="flex flex-wrap items-end gap-3">
+    <label className="flex items-center gap-1.5 text-xs text-fg-muted">开始日期
+      <Input type="date" aria-label="费用统计开始日期" className="h-8 w-36" value={range.start}
+        max={range.end || undefined} onChange={(e) => onChange({ ...range, start: e.target.value })} />
+    </label>
+    <label className="flex items-center gap-1.5 text-xs text-fg-muted">结束日期
+      <Input type="date" aria-label="费用统计结束日期" className="h-8 w-36" value={range.end}
+        min={range.start || undefined} onChange={(e) => onChange({ ...range, end: e.target.value })} />
+    </label>
+    {(range.start || range.end) && <Button variant="ghost" size="sm" onClick={() => onChange({ start: '', end: '' })}>清除</Button>}
+    <span className="pb-1 text-[11px] text-fg-subtle">按任务结束日期（北京时间）统计</span>
+  </div>
+}
+
+export function SpendDashboard({ data, loading = false, error = false, range, onRangeChange, rangeError = '' }: {
+  data?: SpendSummary; loading?: boolean; error?: boolean
+  range?: SpendRange; onRangeChange?: (range: SpendRange) => void; rangeError?: string
+}) {
   const { user } = useAuth()
+  const picker = range && onRangeChange ? <SpendRangePicker range={range} onChange={onRangeChange} /> : null
   if (!data) return <Card>
     <CardHeader title="API 费用统计" description="按项目、人员和模型汇总人民币费用" />
-    <CardBody><p role="status" className={`text-sm ${loading ? 'text-fg-muted' : 'text-warning'}`}>
-      {loading ? '正在加载费用统计…' : error ? '费用数据加载失败，请重试或检查后端连接。' : BILLING_UNAVAILABLE}
+    <CardBody className="space-y-3">{picker}<p role="status" className={`text-sm ${rangeError || (!loading && error) ? 'text-warning' : 'text-fg-muted'}`}>
+      {rangeError || (loading ? '正在加载费用统计…' : error ? '费用数据加载失败，请重试或检查后端连接。' : BILLING_UNAVAILABLE)}
     </p></CardBody>
   </Card>
   return <Card>
     <CardHeader title="API 费用统计" description={data.note} actions={user?.role === 'admin' && <Link className="link text-xs" to="/admin?tab=pricing">价格与折扣</Link>} />
     <CardBody className="space-y-3">
+      {picker}
+      {rangeError && <p role="status" className="text-xs text-warning">{rangeError}</p>}
       <div className="flex flex-wrap items-baseline gap-4">
         <strong className="num text-2xl">{money(data.amount_cny)}</strong>
         <span className="text-xs text-fg-muted">{data.jobs} 个评测任务 · {data.incomplete_jobs} 个费用不完整或待统计</span>

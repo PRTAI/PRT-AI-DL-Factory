@@ -124,4 +124,6 @@ class BillingArchive(Base):
     project_id: str
     project_name: str
     billing: BillingSummary
+    # When the original job finished; archived records otherwise lose their job date.
+    job_finished_at: datetime | None = None
     created_at: datetime = Field(default_factory=utcnow)

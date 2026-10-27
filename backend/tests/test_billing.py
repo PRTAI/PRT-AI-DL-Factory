@@ -4,6 +4,7 @@ import json
 import shutil
 import hashlib
 import threading
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -722,6 +723,52 @@ def test_litellm_transport_prefixes_resolve_only_exact_server_ids():
         value, _ = billing.estimate(dict(input=1000, output=100), snap.agent, snap, model=model)
         assert value == pytest.approx((.001*2+.0001*10)*.15*6.7195)
     assert billing.estimate(dict(input=1000), snap.agent, snap, model='openai/gpt-6.1-sol-codex-pro')[0] is None
+
+
+def test_summary_filters_spend_by_beijing_job_finish_date(tmp_path):
+    first, root = job(tmp_path)
+    trajectory(root)
+    first.runtime.finished_at = datetime(2026, 10, 21, 20, 0, tzinfo=timezone.utc)  # 10-22 04:00 Beijing
+    store.jobs.put(first)
+    second, root2 = job(tmp_path, name='two')
+    trajectory(root2, session='s2', prompt=200000)
+    second.runtime.finished_at = datetime(2026, 10, 22, 20, 0, tzinfo=timezone.utc)  # 10-23 04:00 Beijing
+    store.jobs.put(second)
+    first = billing.refresh(first, force=True)
+    second = billing.refresh(second, force=True)
+
+    day = billing.summary([first, second], start=date(2026, 10, 22), end=date(2026, 10, 22))
+    assert day['jobs'] == 1
+    assert day['amount_cny'] == pytest.approx(first.billing.amount_cny)
+    later = billing.summary([first, second], start=date(2026, 10, 23))
+    assert later['jobs'] == 1
+    assert later['amount_cny'] == pytest.approx(second.billing.amount_cny)
+    before = billing.summary([first, second], end=date(2026, 10, 21))
+    assert before['jobs'] == 0 and before['amount_cny'] is None
+    assert billing.summary([first, second])['jobs'] == 2
+
+
+def test_billing_endpoint_date_range_and_validation(client, member_headers):
+    response = client.get('/api/system/billing?start=2026-10-23&end=2026-10-22', headers=member_headers)
+    assert response.status_code == 400
+    empty = client.get('/api/system/billing?start=2026-10-22&end=2026-10-22', headers=member_headers)
+    assert empty.status_code == 200
+    assert empty.json()['jobs'] == 0
+
+
+def test_archived_spend_keeps_original_job_date(tmp_path):
+    item, root = job(tmp_path)
+    trajectory(root)
+    item.runtime.finished_at = datetime(2026, 10, 21, 20, 0, tzinfo=timezone.utc)
+    store.jobs.put(item)
+    first = billing.refresh(item, force=True)
+    billing.archive(first)
+    store.jobs.delete(item.id)
+    dev = store.users.get(item.owner_id)
+    day = billing.summary([], actor=dev, start=date(2026, 10, 22), end=date(2026, 10, 22))
+    assert day['jobs'] == 1
+    assert day['amount_cny'] == pytest.approx(first.billing.amount_cny)
+    assert billing.summary([], actor=dev, start=date(2026, 10, 23))['jobs'] == 0
 
 
 def test_delete_archives_spend_and_keeps_person_visibility(tmp_path):

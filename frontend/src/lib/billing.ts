@@ -21,6 +21,10 @@ export function jobCostState(job: Pick<Job, 'billing' | 'status'>) {
   return { label: ['pending_review', 'queued', 'preparing', 'running'].includes(job.status) ? '等待用量记录' : '未记录用量', hint }
 }
 
+export function spendRangeError(start?: string | null, end?: string | null) {
+  return start && end && start > end ? '开始日期不能晚于结束日期' : ''
+}
+
 export function spendChartRows(rows: SpendRow[], limit = 8) {
   // Missing amounts are unknown, not zero-cost usage.
   return rows.filter(row => row.amount_cny != null && row.amount_cny > 0)

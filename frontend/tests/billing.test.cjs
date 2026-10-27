@@ -7,7 +7,7 @@ const ts = require('typescript')
 const source = fs.readFileSync(path.join(__dirname, '../src/lib/billing.ts'), 'utf8')
 const context = { exports: {} }
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context)
-const { money, jobCostState, spendChartRows, supplementPrices } = context.exports
+const { money, jobCostState, spendRangeError, spendChartRows, supplementPrices } = context.exports
 
 test('missing server support differs from pending usage and missing tariffs', () => {
   assert.equal(jobCostState({ status: 'succeeded' }).label, '费用服务未启用')
@@ -25,6 +25,14 @@ test('known zero and small positive costs remain distinct from unknown amounts',
   assert.equal(money(0.00000001), '<¥0.000001')
   const state = jobCostState({ status: 'succeeded', billing: { amount_cny: 0, status: 'estimated', warnings: [] } })
   assert.equal(state.label, '¥0.00 · 预估')
+})
+
+test('date range accepts open ends and rejects a reversed range', () => {
+  assert.equal(spendRangeError('', ''), '')
+  assert.equal(spendRangeError('2026-10-01', ''), '')
+  assert.equal(spendRangeError('', '2026-10-31'), '')
+  assert.equal(spendRangeError('2026-10-01', '2026-10-01'), '')
+  assert.equal(spendRangeError('2026-10-02', '2026-10-01'), '开始日期不能晚于结束日期')
 })
 
 test('spend rankings exclude unknown costs, preserve partial estimates and do not mutate rows', () => {
