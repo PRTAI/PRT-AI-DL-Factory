@@ -41,6 +41,9 @@ class SystemSettings(Base):
     max_concurrent_jobs: int = 2
     default_max_gpus_per_job: int = 8
     allow_self_service_verify: bool = False
+    # 平台镜像模式下每道题构建的 prt-platform-task:<内容哈希> 镜像，只保留最近这么多个。
+    # 清理只在构建新镜像后触发（见 resources/harbor_runtime.py），不设定时任务。
+    keep_recent_task_images: int = 20
     banner: str = ""
     updated_at: datetime = Field(default_factory=utcnow)
     updated_by: str = ""

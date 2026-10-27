@@ -272,6 +272,17 @@ def wait_for_codex_mcp(original):
 
 PLATFORM_BASE = "prt-ai-factory-harbor-eval-base-image:sha-"
 TASK_IMAGE_NAME = "prt-platform-task"
+TASK_IMAGE_KEEP_ENV = "PRT_KEEP_TASK_IMAGES"
+DEFAULT_TASK_IMAGE_KEEP = 20
+
+
+def task_image_keep() -> int:
+    """How many task images to retain; at least one so the build we just made survives."""
+    raw = os.environ.get(TASK_IMAGE_KEEP_ENV, "")
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return DEFAULT_TASK_IMAGE_KEEP
 
 
 def uses_platform_base(dockerfile: Path) -> bool:
@@ -287,6 +298,44 @@ async def image_exists(image: str) -> bool:
         "docker", "image", "inspect", image,
         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
     return await process.wait() == 0
+
+
+async def prune_task_images(keep: int, logger) -> None:
+    """Drop all but the ``keep`` newest ``prt-platform-task`` images.
+
+    ``docker image ls`` lists newest first, so no timestamp parsing is needed.
+    Best-effort: a concurrent build/trial may still hold an image, and a prune
+    failure must never fail an evaluation. Runs only after a new image is built
+    — there is no timer or background sweep.
+    """
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "docker", "image", "ls", TASK_IMAGE_NAME, "--format", "{{.Repository}}:{{.Tag}}",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        output, _ = await process.communicate()
+    except OSError:
+        return
+    if process.returncode:
+        return
+    tags = list(dict.fromkeys(
+        line.strip() for line in output.decode(errors="replace").splitlines()
+        if line.strip() and not line.strip().endswith(":<none>")
+    ))
+    stale = tags[keep:]
+    if not stale:
+        return
+    try:
+        process = await asyncio.create_subprocess_exec(
+            "docker", "image", "rm", *stale,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+        output, _ = await process.communicate()
+    except OSError:
+        return
+    if process.returncode:
+        logger.warning("PRT: 清理旧平台题目镜像失败（可能有容器仍在使用）: %s",
+                       output.decode(errors="replace")[-1000:])
+    else:
+        logger.info("PRT: 已清理 %d 个旧的平台题目镜像，保留最近 %d 个", len(stale), keep)
 
 
 async def build_task_image(env_dir: Path, dockerfile: Path, logger) -> str:
@@ -313,6 +362,7 @@ async def build_task_image(env_dir: Path, dockerfile: Path, logger) -> str:
             raise
         if process.returncode:
             raise RuntimeError(f"平台题目镜像构建失败: {output.decode(errors='replace')[-4000:]}")
+    await prune_task_images(task_image_keep(), logger)
     return image
 
 

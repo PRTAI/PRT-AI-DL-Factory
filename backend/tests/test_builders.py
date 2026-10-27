@@ -26,6 +26,7 @@ from backend.app.models import (
     ResourceSpec,
     RLConfig,
     SFTConfig,
+    SystemSettings,
     TrainStage,
     VerifyConfig,
 )
@@ -51,6 +52,7 @@ def test_harbor_recovery_commands_and_secrets(tmp_path, monkeypatch, mode):
     result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
     assert result.command[3:5] == ["job", mode]
     assert result.env["JUDGE_API_KEY"] == "sensitive-test-key"
+    assert result.env["PRT_KEEP_TASK_IMAGES"].isdigit()
     assert "sensitive-test-key" not in result.masked_command_line()
     assert result.masked_env()["JUDGE_API_KEY"] == "***"
     assert "--agent" not in result.command
@@ -511,6 +513,18 @@ def test_harbor_agent_without_model_rejected(tmp_path, harbor_dataset, monkeypat
     )
     with pytest.raises(BuildError, match="需要指定模型"):
         harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+
+
+def test_harbor_passes_task_image_retention_to_runtime(tmp_path, harbor_dataset, monkeypatch):
+    _fake_harbor_bin(monkeypatch, tmp_path)
+    monkeypatch.setattr(harbor_builder, "resolve_harbor_python", lambda _: "/usr/bin/python")
+    monkeypatch.setattr(
+        harbor_builder.store, "system_settings",
+        lambda: SystemSettings(keep_recent_task_images=7),
+    )
+    job = _job(JobType.VERIFY, Framework.HARBOR, verify=VerifyConfig(dataset_id=harbor_dataset.id, agent="nop"))
+    result = harbor_builder.build(job, tmp_path / "w", tmp_path / "o")
+    assert result.env["PRT_KEEP_TASK_IMAGES"] == "7"
 
 
 def test_harbor_requires_task_source(tmp_path, monkeypatch):

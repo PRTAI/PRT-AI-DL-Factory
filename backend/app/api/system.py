@@ -109,6 +109,7 @@ def update_settings(payload: SystemSettings, admin: AdminUser) -> SystemSettings
         current.max_concurrent_jobs = payload.max_concurrent_jobs
         current.default_max_gpus_per_job = payload.default_max_gpus_per_job
         current.allow_self_service_verify = payload.allow_self_service_verify
+        current.keep_recent_task_images = payload.keep_recent_task_images
         current.banner = payload.banner
         current.updated_at = utcnow()
         current.updated_by = admin.email

@@ -449,3 +449,74 @@ def test_platform_task_image_tag_is_content_addressed_and_reused(tmp_path, monke
     assert len(commands) == 1 and commands[0][:2] == ('docker', 'build')
     dockerfile.write_text(f'FROM {runtime.PLATFORM_BASE}def\n')
     assert asyncio.run(runtime.build_task_image(env_dir, dockerfile, log)) != first
+
+
+def test_task_image_keep_clamps_and_defaults(monkeypatch):
+    monkeypatch.delenv(runtime.TASK_IMAGE_KEEP_ENV, raising=False)
+    assert runtime.task_image_keep() == runtime.DEFAULT_TASK_IMAGE_KEEP
+    monkeypatch.setenv(runtime.TASK_IMAGE_KEEP_ENV, '5')
+    assert runtime.task_image_keep() == 5
+    monkeypatch.setenv(runtime.TASK_IMAGE_KEEP_ENV, '0')
+    assert runtime.task_image_keep() == 1
+    monkeypatch.setenv(runtime.TASK_IMAGE_KEEP_ENV, 'not-a-number')
+    assert runtime.task_image_keep() == runtime.DEFAULT_TASK_IMAGE_KEEP
+
+
+def test_prune_task_images_removes_only_images_beyond_the_retention(monkeypatch):
+    calls = []
+    class Process:
+        def __init__(self, returncode=0, output=b''):
+            self.returncode = returncode
+            self.output = output
+        async def communicate(self): return self.output, None
+    async def fake_exec(*argv, **kwargs):
+        calls.append(argv)
+        if argv[1:3] == ('image', 'ls'):
+            # docker image ls lists newest first
+            return Process(output=b'prt-platform-task:new\nprt-platform-task:mid\nprt-platform-task:old\n')
+        return Process()
+    monkeypatch.setattr(runtime.asyncio, 'create_subprocess_exec', fake_exec)
+    asyncio.run(runtime.prune_task_images(2, logging.getLogger('test.prune')))
+    assert calls[-1] == ('docker', 'image', 'rm', 'prt-platform-task:old')
+
+
+def test_prune_task_images_is_best_effort(monkeypatch, caplog):
+    class Process:
+        def __init__(self, returncode=0, output=b''):
+            self.returncode = returncode
+            self.output = output
+        async def communicate(self): return self.output, None
+    async def fake_exec(*argv, **kwargs):
+        if argv[1:3] == ('image', 'ls'):
+            return Process(output=b'prt-platform-task:new\nprt-platform-task:old\n')
+        return Process(returncode=1, output=b'image is being used by a container')
+    monkeypatch.setattr(runtime.asyncio, 'create_subprocess_exec', fake_exec)
+    asyncio.run(runtime.prune_task_images(1, logging.getLogger('test.prune')))
+    assert '清理旧平台题目镜像失败' in caplog.text
+
+
+def test_build_task_image_prunes_only_after_a_real_build(tmp_path, monkeypatch):
+    pytest.importorskip('harbor')
+    pytest.importorskip('filelock')
+    env_dir = tmp_path / 'environment'
+    env_dir.mkdir()
+    dockerfile = env_dir / 'Dockerfile'
+    dockerfile.write_text(f'FROM {runtime.PLATFORM_BASE}abc\n')
+    present = set()
+    pruned = []
+    class Process:
+        returncode = 0
+        async def communicate(self): return b'', None
+    async def fake_exists(image): return image in present
+    async def fake_exec(*argv, **kwargs):
+        present.add(argv[3])
+        return Process()
+    async def fake_prune(keep, logger): pruned.append(keep)
+    monkeypatch.setattr(runtime, 'image_exists', fake_exists)
+    monkeypatch.setattr(runtime, 'prune_task_images', fake_prune)
+    monkeypatch.setattr(runtime.asyncio, 'create_subprocess_exec', fake_exec)
+    monkeypatch.setenv(runtime.TASK_IMAGE_KEEP_ENV, '4')
+    log = logging.getLogger('test.image')
+    first = asyncio.run(runtime.build_task_image(env_dir, dockerfile, log))
+    assert asyncio.run(runtime.build_task_image(env_dir, dockerfile, log)) == first
+    assert pruned == [4]

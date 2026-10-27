@@ -495,6 +495,13 @@ function SettingsPanel() {
               onChange={(next) => setDraft({ ...value, default_max_gpus_per_job: next ?? 1 })}
             />
           </Field>
+          <Field label="保留最近 N 个题目镜像" hint="平台镜像模式下每道题构建的镜像；新建镜像后清理更早的，不做定时清理">
+            <NumberInput
+              value={value.keep_recent_task_images}
+              min={1}
+              onChange={(next) => setDraft({ ...value, keep_recent_task_images: next ?? 1 })}
+            />
+          </Field>
         </div>
         <Field label="全局公告" hint="填写后会显示在所有页面顶部">
           <Textarea
