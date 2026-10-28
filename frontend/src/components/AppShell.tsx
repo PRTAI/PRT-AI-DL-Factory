@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Bell,
+  Bot,
   BookOpen,
   ClipboardCheck,
   Database,
@@ -307,6 +308,22 @@ export function AppShell() {
             </nav>
 
             <div className="border-t border-border p-2">
+              <NavLink
+                to="/agent"
+                className={({ isActive }) =>
+                  cn(
+                    'mb-1 flex items-center gap-2.5 rounded px-2.5 py-2 text-[13px] transition-colors',
+                    sidebarCollapsed && 'justify-center px-0',
+                    isActive
+                      ? 'bg-primary-soft font-medium text-primary'
+                      : 'text-fg-muted hover:bg-card-hover hover:text-fg',
+                  )
+                }
+                title="平台 Agent 助手"
+              >
+                <Bot className="h-4 w-4 shrink-0" aria-hidden />
+                {!sidebarCollapsed && <span className="truncate">Agent 助手</span>}
+              </NavLink>
               <a
                 href="/docs"
                 target="_blank"

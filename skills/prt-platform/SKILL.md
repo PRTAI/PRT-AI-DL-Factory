@@ -9,8 +9,15 @@ description: "使用平台地址及用户凭据，通过 PRT AI DL Factory HTTP 
 
 ## 连接与接口发现
 
+0. **平台内置 Agent（免登录）**：如果在平台内运行，环境变量 `PRT_PLATFORM_SESSION` 已由平台指向一个属于当前对话用户的会话文件，`PRT_PLATFORM_URL` 是平台地址。此时直接调用即可，不要重新登录、不要向用户索要密码：
+
+```bash
+python3 "$PRT_API" request GET /auth/me
+python3 "$PRT_API" request GET /projects
+```
+
 1. 确认用户要操作的对象及目标；提供凭据本身不代表要求创建任务。已有明确的创建、上传、提交或部署指令时直接执行，不重复索要授权。
-2. 为当前工作创建独立临时会话文件，设置 `PRT_PLATFORM_SESSION` 为其路径。将 `PRT_API` 设为本 Skill 下 `scripts/prt_api.py` 的实际绝对路径。
+2. 独立使用本 Skill 时，为当前工作创建独立临时会话文件，设置 `PRT_PLATFORM_SESSION` 为其路径。将 `PRT_API` 设为本 Skill 下 `scripts/prt_api.py` 的实际绝对路径。
 3. 用下述方式登录。用户已提供密码时，通过执行器的 stdin/input 传入，不要求再次输入；交互终端也可省略 `--password-stdin` 使用隐藏输入。
 
 ```bash
