@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Database, FlaskConical, GraduationCap, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
+import { ALL_PROJECTS, projectIdFromScope, projectScopeValue } from '@/lib/project-scope'
 import { useAuth, useProject } from '@/lib/store'
 import { useProjectNames } from '@/components/ProjectTag'
 import type { Dataset, DatasetKind, DatasetSpec } from '@/lib/types'
@@ -33,9 +34,11 @@ import { PageHeader } from '@/components/common'
 
 export default function Datasets() {
   const { user } = useAuth()
+  const { projectId, setProject } = useProject()
   const queryClient = useQueryClient()
   const projectNames = useProjectNames()
-  const [projectFilter, setProjectFilter] = React.useState('all')
+  // 默认只看顶部已选项目的数据集；「全部项目的数据」写回全局选择，其他地方读到的是同一个项目
+  const projectFilter = projectScopeValue(projectId)
   const [uploadOpen, setUploadOpen] = React.useState(false)
   const [previewId, setPreviewId] = React.useState<string | null>(null)
   const [editing, setEditing] = React.useState<Dataset | null>(null)
@@ -44,7 +47,9 @@ export default function Datasets() {
 
   const datasets = useQuery({ queryKey: ['datasets'], queryFn: () => api.datasets() })
   const isVerifyKind = (kind: DatasetKind) => kind === 'harbor_tasks'
-  const projectDatasets = (datasets.data ?? []).filter((d) => projectFilter === 'all' || d.project_id === projectFilter)
+  const projectDatasets = (datasets.data ?? []).filter(
+    (d) => projectFilter === ALL_PROJECTS || d.project_id === projectFilter,
+  )
   const visible = projectDatasets.filter((d) =>
     category === 'all' ? true : category === 'verify' ? isVerifyKind(d.kind) : !isVerifyKind(d.kind),
   )
@@ -104,9 +109,9 @@ export default function Datasets() {
       <div className="w-full sm:w-64">
         <Select
           value={projectFilter}
-          onValueChange={setProjectFilter}
+          onValueChange={(value) => setProject(projectIdFromScope(value))}
           options={[
-            { value: 'all', label: '全部项目的数据' },
+            { value: ALL_PROJECTS, label: '全部项目的数据' },
             ...Array.from(projectNames, ([id, name]) => ({ value: id, label: name })),
           ]}
         />
