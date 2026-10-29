@@ -163,23 +163,52 @@ def list_models(actor: User) -> list[AgentModelOption]:
     return rows
 
 
+def _match_platform_model(value: str):
+    """按 ID / 名称 / 模型标识（可带 ``anthropic/`` 前缀）找一条启用的 Anthropic 协议模型。"""
+    target = value.strip()
+    if not target:
+        return None
+    bare = target.removeprefix("anthropic/")
+    candidates = [item for item in store.model_apis.all() if item.enabled and _anthropic(item)]
+    for item in candidates:
+        if item.id == target:
+            return item
+    for item in candidates:
+        names = {item.name.strip(), item.model_id, item.model_id.removeprefix("anthropic/")}
+        if target in names or bare in names:
+            return item
+    return None
+
+
+def validate_platform_model(value: str) -> None:
+    """管理员保存系统设置时校验 Agent 模型；留空表示自动选择。"""
+    if value.strip() and _match_platform_model(value) is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=f"找不到已启用的 Anthropic 协议模型「{value.strip()}」，请先在模型配置里添加",
+        )
+
+
 def default_model_id(actor: User) -> str:
+    """管理员在系统设置里统一配置的 Agent 模型；未配置时取当前账号第一个可用的模型。"""
+    configured = store.system_settings().agent_model.strip()
+    if configured:
+        item = _match_platform_model(configured)
+        return item.id if item else ""
     ready = [row for row in list_models(actor) if row.ready]
     return ready[0].id if ready else ""
 
 
-def _validate_model(model_api_id: str, actor: User) -> str:
+def _platform_model_id(actor: User) -> str:
+    model_api_id = default_model_id(actor)
     if not model_api_id:
-        return ""
-    item = store.model_apis.get(model_api_id)
-    if item is None or not item.enabled:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="模型配置不存在或已停用")
-    if not _anthropic(item):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail=f"内置 Agent 使用 Claude Code 核心，只支持 Anthropic 协议模型；「{item.name}」不支持",
+        configured = store.system_settings().agent_model.strip()
+        detail = (
+            f"管理员配置的 Agent 模型「{configured}」不存在或已停用，请联系管理员在「系统设置」中调整"
+            if configured else "没有可用的 Anthropic 协议模型，请联系管理员在「系统设置」中配置 Agent 模型"
         )
-    return item.id
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=detail)
+    return model_api_id
 
 
 def resolve_model(model_api_id: str, actor: User) -> model_api_service.ResolvedModel:
@@ -239,7 +268,8 @@ def create_conversation(payload: AgentConversationCreate, *, actor: User) -> Age
     mine = store.agent_conversations.count(lambda i: i.owner_id == actor.id)
     if mine >= settings.agent_max_conversations:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="对话数量已达上限，请先删除一些历史对话")
-    model_api_id = _validate_model(payload.model_api_id, actor) or default_model_id(actor)
+    # 模型由管理员统一配置，payload.model_api_id 已废弃、不再采用
+    model_api_id = default_model_id(actor)
     item = AgentConversation(
         owner_id=actor.id,
         owner_email=actor.email,
@@ -269,8 +299,10 @@ def update_conversation(
         if not title:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="对话名称不能为空")
         changes["title"] = title[:100]
-    if payload.model_api_id is not None:
-        changes["model_api_id"] = _validate_model(payload.model_api_id, actor)
+    if payload.model_api_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Agent 模型由管理员在「系统设置」中统一配置，对话里不能单独切换"
+        )
     if not changes:
         return public(item)
     changes["updated_at"] = utcnow()
@@ -373,14 +405,14 @@ def send_message(conversation_id: str, content: str, *, actor: User) -> AgentCon
         item = _get(conversation_id, actor)
         if item.status == AgentStatus.RUNNING:
             raise HTTPException(status.HTTP_409_CONFLICT, detail="上一轮对话还在运行，请稍候或先停止")
-        if not item.model_api_id:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="请先为对话选择模型")
-        # 先解析模型，确保密钥缺失等问题在写入用户消息之前就返回
-        resolved = resolve_model(item.model_api_id, actor)
+        # 每轮都取管理员当前配置的模型；先解析，确保密钥缺失等问题在写入用户消息之前就返回
+        model_api_id = _platform_model_id(actor)
+        resolved = resolve_model(model_api_id, actor)
         _append_message(item.id, role="user", kind="text", content=text)
         count = item.message_count + 1
         changes: dict[str, Any] = {
             "status": AgentStatus.RUNNING,
+            "model_api_id": model_api_id,
             "last_error": "",
             "message_count": count,
             "updated_at": utcnow(),

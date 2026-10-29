@@ -12,7 +12,7 @@ from ..deps import AdminUser, CurrentUser
 from ..models import JobStatus, SystemSettings, utcnow
 from ..models.job import JobPublic
 from ..models.billing import ModelPrice, PricingSettings
-from ..services import billing_service, monitor, resources_service, audit_service
+from ..services import agent_service, billing_service, monitor, resources_service, audit_service
 from ..services.scheduler import effective_system_settings, gpu_snapshot, scheduler
 from ..store import store
 
@@ -111,12 +111,17 @@ def read_price_catalog(_: CurrentUser) -> list[ModelPrice]:
 
 @router.put("/settings", response_model=SystemSettings, summary="更新系统设置（管理员）")
 def update_settings(payload: SystemSettings, admin: AdminUser) -> SystemSettings:
+    agent_model = payload.agent_model.strip()
+    if agent_model != store.system_settings().agent_model:
+        agent_service.validate_platform_model(agent_model)
+
     def mutate(current: SystemSettings) -> None:
         current.require_approval = payload.require_approval
         current.max_concurrent_jobs = payload.max_concurrent_jobs
         current.default_max_gpus_per_job = payload.default_max_gpus_per_job
         current.allow_self_service_verify = payload.allow_self_service_verify
         current.keep_recent_task_images = payload.keep_recent_task_images
+        current.agent_model = agent_model
         current.banner = payload.banner
         current.updated_at = utcnow()
         current.updated_by = admin.email

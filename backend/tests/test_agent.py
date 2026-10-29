@@ -60,6 +60,22 @@ def _anthropic_model():
     return item
 
 
+def _set_agent_model(value: str) -> None:
+    def mutate(current) -> None:
+        current.agent_model = value
+
+    store.settings_doc.update(mutate)
+
+
+@pytest.fixture(autouse=True)
+def platform_agent_model():
+    """Agent 模型由系统设置统一配置；测试环境没有 ccmax，统一指到第一个 Anthropic 模型。"""
+    original = store.system_settings().agent_model
+    _set_agent_model(_anthropic_model().id)
+    yield
+    _set_agent_model(original)
+
+
 def _grant(model, key: str = "test-key") -> None:
     from backend.app.services import api_key_service
     from backend.tests.conftest import grant_key, user_id_of
@@ -277,3 +293,71 @@ def test_default_workspace_root_expands_home(client, member_headers, tmp_path, m
     assert workdir.is_dir()
     assert client.delete(f"/api/agent/conversations/{created['id']}", headers=member_headers).status_code == 204
     assert not workdir.exists()
+
+
+def test_agent_model_defaults_to_opus_ccmax():
+    from backend.app.models import SystemSettings
+
+    assert SystemSettings().agent_model == "claude-opus-5.5-ccmax"
+
+
+def test_conversation_uses_platform_model_and_cannot_switch(client, member_headers, fake_agent):
+    model = _anthropic_model()
+    other = next(
+        (i for i in store.model_apis.all() if i.id != model.id and i.enabled and i.provider == "anthropic"),
+        None,
+    )
+    # 管理员按名称（带 anthropic/ 前缀也行）配置；用户自己传的 model_api_id 被忽略
+    _set_agent_model(f"anthropic/{model.name}")
+    created = _create(client, member_headers, other.id if other else "")
+    assert created["model_api_id"] == model.id
+
+    switched = client.patch(
+        f"/api/agent/conversations/{created['id']}", headers=member_headers,
+        json={"model_api_id": other.id if other else model.id},
+    )
+    assert switched.status_code == 400
+    assert "系统设置" in switched.json()["detail"]
+
+    _grant(model)
+    sent = client.post(
+        f"/api/agent/conversations/{created['id']}/messages", headers=member_headers,
+        json={"content": "你好"},
+    )
+    assert sent.status_code == 200, sent.text
+    assert _wait(created["id"]).status == AgentStatus.IDLE
+
+
+def test_missing_platform_model_rejected_before_writing(client, member_headers, fake_agent):
+    created = _create(client, member_headers)
+    _set_agent_model("claude-opus-5.5-ccmax-not-configured")
+    response = client.post(
+        f"/api/agent/conversations/{created['id']}/messages", headers=member_headers,
+        json={"content": "你好"},
+    )
+    assert response.status_code == 400
+    assert "claude-opus-5.5-ccmax-not-configured" in response.json()["detail"]
+    assert client.get(
+        f"/api/agent/conversations/{created['id']}/messages", headers=member_headers
+    ).json() == []
+
+
+def test_admin_sets_agent_model_in_system_settings(client, admin_headers, member_headers):
+    model = _anthropic_model()
+    current = client.get("/api/system/settings", headers=admin_headers).json()
+    bad = client.put(
+        "/api/system/settings", headers=admin_headers, json={**current, "agent_model": "no-such-model"},
+    )
+    assert bad.status_code == 400
+    assert "no-such-model" in bad.json()["detail"]
+
+    ok = client.put(
+        "/api/system/settings", headers=admin_headers, json={**current, "agent_model": model.name},
+    )
+    assert ok.status_code == 200, ok.text
+    assert client.get("/api/system/settings", headers=member_headers).json()["agent_model"] == model.name
+
+    denied = client.put(
+        "/api/system/settings", headers=member_headers, json={**current, "agent_model": ""},
+    )
+    assert denied.status_code == 403

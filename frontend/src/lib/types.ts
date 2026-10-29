@@ -435,6 +435,8 @@ export interface SystemSettings {
   default_max_gpus_per_job: number
   allow_self_service_verify: boolean
   keep_recent_task_images: number
+  /** 内置 Agent 统一使用的模型（模型配置的 ID / 名称 / 模型标识），空 = 自动选择 */
+  agent_model: string
   banner: string
   updated_at: string
   updated_by: string
