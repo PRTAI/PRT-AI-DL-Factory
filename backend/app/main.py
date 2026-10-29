@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from .api import api_router, ws_router
 from .config import REPO_ROOT, settings
 from .services import (
+    agent_service,
     billing_service,
     dataset_service,
     deployment_service,
@@ -76,6 +77,10 @@ async def lifespan(app: FastAPI):
     await review_service.reconcile()
     # 托管修复的 Claude Code 是独立会话，平台重启后继续等它；合并中断的退回申请合并。
     issue_service.reconcile()
+    # Agent 的对话轮次也是独立子进程；重启后把仍停在 running 的标记失败。
+    interrupted = agent_service.reconcile()
+    if interrupted:
+        logger.info("marked %d interrupted agent conversation(s) as failed", interrupted)
     logger.info("%s %s ready", settings.app_name, settings.app_version)
     try:
         yield

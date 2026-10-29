@@ -9,6 +9,8 @@ from functools import lru_cache
 
 from ..config import settings
 from ..models import (
+    AgentConversation,
+    AgentMessage,
     AuditEvent,
     Dataset,
     Deployment,
@@ -47,6 +49,13 @@ class Store:
         self.exports: JsonCollection[ExportTask] = JsonCollection(db / "exports.json", ExportTask)
         self.reviews: JsonCollection[ReviewTask] = JsonCollection(db / "reviews.json", ReviewTask)
         self.issues: JsonCollection[Issue] = JsonCollection(db / "issues.json", Issue)
+        # 内置 Agent 的对话按 owner_id 隔离；消息单独存放，避免列表接口读整段历史
+        self.agent_conversations: JsonCollection[AgentConversation] = JsonCollection(
+            db / "agent_conversations.json", AgentConversation
+        )
+        self.agent_messages: JsonCollection[AgentMessage] = JsonCollection(
+            db / "agent_messages.json", AgentMessage
+        )
         # 里面有明文 API Key：文件是 0600（见 json_store 的写入），接口层永远只返回尾号
         self.model_apis: JsonCollection[ModelApiConfig] = JsonCollection(
             db / "model_apis.json", ModelApiConfig, mode=0o600

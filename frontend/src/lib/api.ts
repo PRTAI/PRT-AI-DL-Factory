@@ -1,4 +1,9 @@
 import type {
+  AgentConversation,
+  AgentMessage,
+  AgentModelOption,
+  AgentSkill,
+  AgentTool,
   AlgorithmInfo,
   AuditEvent,
   CommandPreview,
@@ -562,6 +567,46 @@ export const api = {
     request<ModelApi>(`/api/model-apis/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteModelApi: (id: string) => request<void>(`/api/model-apis/${id}`, { method: 'DELETE' }),
   frameworks: () => request<Record<string, Record<string, unknown>>>('/api/catalog/frameworks'),
+
+  // -------------------------------------------------------------- agent ----
+  agentConversations: () => request<AgentConversation[]>('/api/agent/conversations'),
+  agentConversation: (id: string) => request<AgentConversation>(`/api/agent/conversations/${id}`),
+  createAgentConversation: (payload: { title?: string; model_api_id?: string } = {}) =>
+    request<AgentConversation>('/api/agent/conversations', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  updateAgentConversation: (id: string, payload: { title?: string; model_api_id?: string }) =>
+    request<AgentConversation>(`/api/agent/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    }),
+  deleteAgentConversation: (id: string) =>
+    request<void>(`/api/agent/conversations/${id}`, { method: 'DELETE' }),
+  agentMessages: (id: string) =>
+    request<AgentMessage[]>(`/api/agent/conversations/${id}/messages`),
+  sendAgentMessage: (id: string, content: string) =>
+    request<AgentConversation>(`/api/agent/conversations/${id}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  stopAgentConversation: (id: string) =>
+    request<AgentConversation>(`/api/agent/conversations/${id}/stop`, { method: 'POST' }),
+  uploadAgentAttachment: (id: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<AgentConversation>(`/api/agent/conversations/${id}/attachments`, {
+      method: 'POST',
+      body: form,
+    })
+  },
+  deleteAgentAttachment: (id: string, attachmentId: string) =>
+    request<AgentConversation>(`/api/agent/conversations/${id}/attachments/${attachmentId}`, {
+      method: 'DELETE',
+    }),
+  agentModels: () => request<AgentModelOption[]>('/api/agent/models'),
+  agentSkills: () => request<AgentSkill[]>('/api/agent/skills'),
+  agentTools: () => request<AgentTool[]>('/api/agent/tools'),
 }
 
 export function wsUrl(path: string): string {

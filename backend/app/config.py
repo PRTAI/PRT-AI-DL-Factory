@@ -87,6 +87,22 @@ class Settings(BaseSettings):
     review_agent_image: str = "prt-ai-factory-harbor-eval-base-image:latest"
     review_max_doc_chars: int = 120_000   # 需求文档送进 prompt 的上限
 
+    # ------------------------------------------------------- 内置 Agent ---
+    # Agent 以本机 Claude Code 为核心，工作目录在平台仓库之外（与托管修复同一条思路）。
+    agent_bin: str = "claude"
+    agent_workspace_root: Path = Path("~/prt-agent-workspaces/agent")
+    agent_permission_mode: str = "acceptEdits"
+    agent_allowed_tools: str = "Read,Write,Edit,Glob,Grep,Bash(python:*),Bash(python3:*)"
+    # 平台代码、仓库写操作与联网一律禁止；Agent 只能通过 skill 的 HTTP 客户端操作平台
+    agent_disallowed_tools: str = (
+        "Bash(git:*),Bash(npm:*),Bash(pip:*),Bash(sudo:*),WebFetch,WebSearch"
+    )
+    agent_timeout_seconds: float = 1800.0
+    agent_max_upload_mb: int = 50
+    # 留空时用 http://127.0.0.1:<port>；反向代理部署时可填对外地址
+    agent_platform_url: str = ""
+    agent_max_conversations: int = 200
+
     # ------------------------------------------------- 问题反馈（托管修复） ---
     # Agent 只在仓库副本里改代码，副本目录必须在仓库之外，不影响正在运行的平台。
     issue_repo_root: Path = REPO_ROOT
@@ -128,6 +144,7 @@ class Settings(BaseSettings):
         "harbor_root",
         "issue_repo_root",
         "issue_workspace_root",
+        "agent_workspace_root",
         mode="before",
     )
     @classmethod
@@ -188,6 +205,15 @@ class Settings(BaseSettings):
     @property
     def issues_dir(self) -> Path:
         return self.data_root / "issues"
+
+    @property
+    def agent_api_url(self) -> str:
+        """Agent 子进程访问平台用的地址（默认本机回环）。"""
+        return self.agent_platform_url.strip().rstrip("/") or f"http://127.0.0.1:{self.port}"
+
+    @property
+    def skill_root(self) -> Path:
+        return REPO_ROOT / "skills"
 
     @property
     def resources_dir(self) -> Path:

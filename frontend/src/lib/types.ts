@@ -1127,3 +1127,60 @@ export interface SpendSummary {
   people: SpendRow[]
   models: SpendRow[]
 }
+
+// --------------------------------------------------------------------------- //
+// 内置 Agent
+// --------------------------------------------------------------------------- //
+export type AgentStatus = 'idle' | 'running' | 'failed'
+
+export interface AgentAttachment {
+  id: string
+  name: string
+  path: string
+  size_bytes: number
+  content_type: string
+  created_at: string
+}
+
+export interface AgentConversation {
+  id: string
+  title: string
+  model_api_id: string
+  model_name: string
+  status: AgentStatus
+  last_error: string
+  message_count: number
+  attachments: AgentAttachment[]
+  created_at: string
+  updated_at: string
+}
+
+export interface AgentMessage {
+  id: string
+  conversation_id: string
+  role: 'user' | 'assistant' | 'tool'
+  kind: 'text' | 'tool_call' | 'tool_result' | 'error'
+  content: string
+  name: string
+  created_at: string
+}
+
+export interface AgentModelOption {
+  id: string
+  name: string
+  provider: string
+  model_id: string
+  ready: boolean
+  note: string
+}
+
+export interface AgentSkill {
+  name: string
+  description: string
+  updated_at: string | null
+}
+
+export interface AgentTool {
+  name: string
+  description: string
+}

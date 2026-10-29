@@ -1,3 +1,16 @@
+from .agent import (
+    AgentAttachment,
+    AgentConversation,
+    AgentConversationCreate,
+    AgentConversationPublic,
+    AgentConversationUpdate,
+    AgentMessage,
+    AgentModelOption,
+    AgentSkill,
+    AgentStatus,
+    AgentTool,
+    AgentTurnRequest,
+)
 from .audit import AuditEvent, Notification, SystemSettings
 from .common import (
     Base,
@@ -101,6 +114,17 @@ from .user import (
 )
 
 __all__ = [
+    "AgentAttachment",
+    "AgentConversation",
+    "AgentConversationCreate",
+    "AgentConversationPublic",
+    "AgentConversationUpdate",
+    "AgentMessage",
+    "AgentModelOption",
+    "AgentSkill",
+    "AgentStatus",
+    "AgentTool",
+    "AgentTurnRequest",
     "AuditEvent",
     "Deployment",
     "DeploymentCreate",

@@ -22,6 +22,7 @@ import ProfileSettings from '@/pages/ProfileSettings'
 import Docs from '@/pages/Docs'
 import Issues from '@/pages/Issues'
 import IssueDetail from '@/pages/IssueDetail'
+import Agent from '@/pages/Agent'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -110,6 +111,7 @@ export default function App() {
         <Route path="/review/:reviewId" element={<ReviewDetail />} />
         <Route path="/issues" element={<Issues />} />
         <Route path="/issues/:issueId" element={<IssueDetail />} />
+        <Route path="/agent" element={<Agent />} />
         <Route
           path="/admin"
           element={
