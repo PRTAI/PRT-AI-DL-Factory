@@ -43,6 +43,11 @@ import type { AgentConversation, AgentMessage } from '@/lib/types'
 const MD_CLASS =
   'space-y-2 text-sm leading-6 text-fg [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[12px] [&_h1]:text-base [&_h1]:font-semibold [&_h2]:text-sm [&_h2]:font-semibold [&_h3]:text-sm [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_ol_li]:list-decimal [&_pre]:overflow-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-2 [&_pre]:text-xs [&_table]:w-full [&_table]:text-xs [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1'
 
+/** 加载失败时把后端给的原因带上，否则「接口不存在」和「服务挂了」看起来一模一样。 */
+function loadError(prefix: string, error: unknown): string {
+  return error instanceof ApiError && error.message ? `${prefix}：${error.message}` : prefix
+}
+
 function MessageView({ message }: { message: AgentMessage }) {
   if (message.kind === 'tool_call') {
     let pretty = message.content
@@ -343,7 +348,7 @@ export default function Agent() {
             {conversations.isLoading ? (
               <div className="flex justify-center py-8"><Spinner /></div>
             ) : conversations.isError ? (
-              <ErrorBox message="历史对话加载失败" />
+              <ErrorBox message={loadError('历史对话加载失败', conversations.error)} />
             ) : rows.length ? (
               <div className="space-y-0.5">
                 {rows.map((item) => (
@@ -446,7 +451,7 @@ export default function Agent() {
             ) : (
               <div className="mx-auto flex max-w-3xl flex-col gap-4">
                 {messages.isLoading && <div className="flex justify-center py-8"><Spinner /></div>}
-                {messages.isError && <ErrorBox message="消息加载失败" />}
+                {messages.isError && <ErrorBox message={loadError('消息加载失败', messages.error)} />}
                 {!messages.isLoading && !(messages.data ?? []).length && (
                   <div className="rounded-lg border border-dashed border-border p-6">
                     <p className="text-sm font-medium">可以试试：</p>

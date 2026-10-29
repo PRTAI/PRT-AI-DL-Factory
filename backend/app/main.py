@@ -129,6 +129,24 @@ def health() -> dict[str, object]:
     }
 
 
+# 必须注册在所有 /api 路由之后、SPA 兜底之前：否则前端已重新构建、后端还在跑旧代码时，
+# 不认识的 POST/PATCH/DELETE 会落到只接受 GET 的 SPA 兜底上，浏览器只看到一句
+# 「Method Not Allowed」，完全看不出是接口不存在（Agent 助手新建对话就是这么报的）。
+@app.api_route(
+    "/api/{rest:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+    include_in_schema=False,
+)
+async def api_not_found(rest: str, request: Request) -> JSONResponse:
+    return JSONResponse(
+        status_code=404,
+        content={
+            "detail": f"接口不存在：{request.method} /api/{rest}"
+            "（若刚合并过新功能，请确认平台后端已重启到最新版本）"
+        },
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Static SPA (only mounted when the frontend has been built)
 # --------------------------------------------------------------------------- #
