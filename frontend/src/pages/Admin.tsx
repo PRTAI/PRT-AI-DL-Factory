@@ -7,6 +7,7 @@ import { api, ApiError } from '@/lib/api'
 import { useAuth } from '@/lib/store'
 import type { SystemSettings, User } from '@/lib/types'
 import { formatDateTime, formatRelative } from '@/lib/utils'
+import { AUTO_AGENT_MODEL, agentModelOptions, agentModelSelectValue } from '@/lib/agentModel'
 import {
   Badge,
   Button,
@@ -447,6 +448,7 @@ function ReviewPanel() {
 function SettingsPanel() {
   const queryClient = useQueryClient()
   const settings = useQuery({ queryKey: ['settings'], queryFn: () => api.settings() })
+  const agentModels = useQuery({ queryKey: ['agent-models'], queryFn: () => api.agentModels() })
   const [draft, setDraft] = React.useState<SystemSettings | null>(null)
   const value = draft ?? settings.data ?? null
 
@@ -503,6 +505,19 @@ function SettingsPanel() {
             />
           </Field>
         </div>
+        <Field
+          label="Agent 模型"
+          hint="内置 Agent 所有对话统一使用；只列出已启用的 Anthropic 协议模型，成员需在个人设置里配好该模型的 API Key"
+        >
+          <Select
+            value={agentModelSelectValue(agentModels.data ?? [], value.agent_model)}
+            onValueChange={(next) =>
+              setDraft({ ...value, agent_model: next === AUTO_AGENT_MODEL ? '' : next })
+            }
+            options={agentModelOptions(agentModels.data ?? [], value.agent_model)}
+            className="sm:w-80"
+          />
+        </Field>
         <Field label="全局公告" hint="填写后会显示在所有页面顶部">
           <Textarea
             rows={2}

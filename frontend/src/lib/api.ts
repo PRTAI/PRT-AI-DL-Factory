@@ -571,12 +571,12 @@ export const api = {
   // -------------------------------------------------------------- agent ----
   agentConversations: () => request<AgentConversation[]>('/api/agent/conversations'),
   agentConversation: (id: string) => request<AgentConversation>(`/api/agent/conversations/${id}`),
-  createAgentConversation: (payload: { title?: string; model_api_id?: string } = {}) =>
+  createAgentConversation: (payload: { title?: string } = {}) =>
     request<AgentConversation>('/api/agent/conversations', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  updateAgentConversation: (id: string, payload: { title?: string; model_api_id?: string }) =>
+  updateAgentConversation: (id: string, payload: { title: string }) =>
     request<AgentConversation>(`/api/agent/conversations/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),

@@ -77,12 +77,12 @@ class AgentConversationPublic(Base):
 
 class AgentConversationCreate(Base):
     title: str = Field(default="新对话", max_length=100)
-    model_api_id: str = ""
+    model_api_id: str = ""  # 已废弃：模型由管理员在系统设置里统一配置，传了也忽略
 
 
 class AgentConversationUpdate(Base):
     title: str | None = Field(default=None, min_length=1, max_length=100)
-    model_api_id: str | None = None
+    model_api_id: str | None = None  # 已废弃：传非空值返回 400，模型由管理员统一配置
 
 
 class AgentTurnRequest(Base):
