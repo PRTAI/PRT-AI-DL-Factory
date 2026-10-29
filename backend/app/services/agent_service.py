@@ -245,7 +245,10 @@ def create_conversation(payload: AgentConversationCreate, *, actor: User) -> Age
         owner_email=actor.email,
         title=(payload.title.strip() or "新对话"),
         model_api_id=model_api_id,
-        session_id=str(uuid.uuid4()),
+        # 会话 ID 只认 Claude Code 自己上报的（见 _handle_line）。平台预先编一个 UUID 的话，
+        # 首轮在 Claude 起来之前就失败（找不到 CLI、缺 Skill……）时，之后每一轮都会
+        # --resume 一个不存在的会话，这个对话就再也发不出消息了。
+        session_id="",
     )
     item.workdir = str(_ensure_workdir(item))
     store.agent_conversations.put(item)
@@ -646,7 +649,7 @@ def _command(item: AgentConversation, prompt: str, resolved: model_api_service.R
         "--model", resolved.model,
         "--permission-mode", settings.agent_permission_mode,
     ]
-    if item.session_id and item.message_count > 1:
+    if item.session_id:
         command += ["--resume", item.session_id]
     if settings.agent_allowed_tools.strip():
         command += ["--allowedTools", settings.agent_allowed_tools]
@@ -738,8 +741,14 @@ def _write_session(workdir: Path, user: User) -> Path:
     return path
 
 
+def _workspace_root() -> Path:
+    # 默认值 ``~/prt-agent-workspaces/agent`` 不经过 settings 的 validator，必须自己展开 ``~``，
+    # 否则会在平台进程的 cwd（也就是平台仓库）里建出一个名叫 ``~`` 的目录。
+    return settings.agent_workspace_root.expanduser().resolve()
+
+
 def _ensure_workdir(item: AgentConversation) -> Path:
-    path = Path(item.workdir) if item.workdir else settings.agent_workspace_root / item.id
+    path = Path(item.workdir).expanduser() if item.workdir else _workspace_root() / item.id
     path = path.resolve()
     path.mkdir(parents=True, exist_ok=True)
     return path
@@ -748,8 +757,8 @@ def _ensure_workdir(item: AgentConversation) -> Path:
 def _safe_workdir(item: AgentConversation) -> Path | None:
     if not item.workdir:
         return None
-    root = settings.agent_workspace_root.resolve()
-    path = Path(item.workdir).resolve()
+    root = _workspace_root()
+    path = Path(item.workdir).expanduser().resolve()
     return path if path.is_relative_to(root) else None
 
 

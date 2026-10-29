@@ -222,3 +222,58 @@ def test_reconcile_marks_running_conversations_failed(client, member_headers, fa
     store.agent_conversations.put(item.model_copy(update={"status": AgentStatus.RUNNING}))
     assert agent_service.reconcile() >= 1
     assert store.agent_conversations.get(created["id"]).status == AgentStatus.FAILED
+
+
+def test_unknown_api_route_is_404_with_reason_not_405(client, member_headers):
+    """前端新、后端旧时，POST 不认识的接口不能只回一句 Method Not Allowed。"""
+    for method in ("get", "post", "patch", "delete"):
+        response = getattr(client, method)("/api/agent/no-such-endpoint", headers=member_headers)
+        assert response.status_code == 404, (method, response.status_code, response.text)
+        detail = response.json()["detail"]
+        assert "接口不存在" in detail and method.upper() in detail
+    # 真实接口不受兜底影响
+    assert client.get("/api/agent/conversations", headers=member_headers).status_code == 200
+    assert client.get("/api/health").status_code == 200
+
+
+def test_first_turn_failure_does_not_resume_fake_session(client, member_headers, fake_agent, monkeypatch):
+    """首轮在 Claude Code 起来之前失败，下一轮不能 --resume 一个平台编出来的会话。"""
+    model = _anthropic_model()
+    _grant(model)
+    created = _create(client, member_headers, model.id)
+    assert store.agent_conversations.get(created["id"]).session_id == ""
+
+    monkeypatch.setattr(settings, "agent_bin", str(fake_agent["agent"].parent / "missing-claude"))
+    first = client.post(
+        f"/api/agent/conversations/{created['id']}/messages", headers=member_headers,
+        json={"content": "第一轮"},
+    )
+    assert first.status_code == 200, first.text
+    assert _wait(created["id"]).status == AgentStatus.FAILED
+
+    monkeypatch.setattr(settings, "agent_bin", str(fake_agent["agent"]))
+    second = client.post(
+        f"/api/agent/conversations/{created['id']}/messages", headers=member_headers,
+        json={"content": "第二轮"},
+    )
+    assert second.status_code == 200, second.text
+    item = _wait(created["id"])
+    assert item.status == AgentStatus.IDLE, item.last_error
+    calls = [json.loads(line) for line in fake_agent["log"].read_text().splitlines() if line]
+    assert len(calls) == 1
+    assert "--resume" not in calls[0]
+
+
+def test_default_workspace_root_expands_home(client, member_headers, tmp_path, monkeypatch):
+    """默认的 ~/prt-agent-workspaces/agent 不能在平台 cwd 里建出一个名叫 ~ 的目录。"""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(settings, "agent_workspace_root", Path("~/prt-agent-workspaces/agent"))
+    created = _create(client, member_headers)
+    workdir = Path(store.agent_conversations.get(created["id"]).workdir)
+    assert "~" not in workdir.parts
+    assert workdir.is_relative_to(home / "prt-agent-workspaces" / "agent")
+    assert workdir.is_dir()
+    assert client.delete(f"/api/agent/conversations/{created['id']}", headers=member_headers).status_code == 204
+    assert not workdir.exists()
