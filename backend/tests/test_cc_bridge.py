@@ -308,3 +308,54 @@ def test_runtime_prompt_cache_key_is_stable_per_model_and_task():
     assert keys[0] == keys[1]
     assert len({keys[0], keys[2], keys[3]}) == 3
     assert all(len(key) <= 64 for key in keys)
+
+
+def _run_install(tmp_path, *, pip_ok_without_mirror, with_uv=False):
+    """在 bash 里真实执行 INSTALL：python3 / venv python / uv 都换成桩，模拟题目镜像的 pip 源缺 Bridge 锁定的版本。"""
+    import os
+    import subprocess
+    runtime = runtime_module()
+    root = tmp_path / 'bridge'
+    (root / 'source').mkdir(parents=True)
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    marker = tmp_path / 'installed'
+    log = tmp_path / 'calls.log'
+    venv_python = (
+        '#!/bin/bash\n'
+        f'echo "venv-python PIP_INDEX_URL=${{PIP_INDEX_URL:-}} $*" >> {log}\n'
+        f'if [ "$1" = "-c" ]; then [ -f {marker} ]; exit $?; fi\n'
+        'if [ "$1 $2" = "-m pip" ]; then\n'
+        + (f'  if [ "${{PIP_INDEX_URL:-}}" = "https://pypi.org/simple" ]; then touch {marker}; exit 0; fi\n' if pip_ok_without_mirror else '')
+        + '  echo "ERROR: No matching distribution found for fastapi==0.143.1" >&2; exit 1\nfi\nexit 1\n')
+    make_venv = f'mkdir -p "$VENV/bin" && cat > "$VENV/bin/python" <<\'STUB\'\n{venv_python}STUB\nchmod +x "$VENV/bin/python"\n'
+    (bin_dir / 'python3').write_text(
+        '#!/bin/bash\nif [ "$1" = "-c" ]; then exit 0; fi\n'
+        f'if [ "$1 $2" = "-m venv" ]; then VENV="$3"\n{make_venv}exit 0; fi\nexit 1\n')
+    if with_uv:
+        (bin_dir / 'uv').write_text(
+            f'#!/bin/bash\necho "uv $*" >> {log}\n'
+            f'if [ "$1" = "venv" ]; then VENV="${{@: -1}}"\n{make_venv}exit 0; fi\n'
+            f'if [ "$1 $2" = "pip install" ]; then touch {marker}; exit 0; fi\nexit 1\n')
+    (bin_dir / 'sleep').write_text('#!/bin/sh\nexit 0\n')  # 重试间隔不必真等
+    for stub in bin_dir.iterdir():
+        stub.chmod(0o755)
+    script = runtime.INSTALL.replace(runtime.ROOT, str(root))
+    env = {**os.environ, 'PATH': f'{bin_dir}:/usr/bin:/bin'}
+    env.pop('PIP_INDEX_URL', None)
+    result = subprocess.run(['bash', '-c', script], env=env, capture_output=True, text=True, timeout=120)
+    return result, log.read_text() if log.exists() else ''
+
+
+def test_install_falls_back_to_official_pypi_when_image_mirror_lacks_pin(tmp_path):
+    # job_34b20cb0c983：题目镜像的 pip 源下载不到 fastapi==0.143.1，Agent 还没启动就失败
+    result, calls = _run_install(tmp_path, pip_ok_without_mirror=True)
+    assert result.returncode == 0, result.stderr
+    assert 'PIP_INDEX_URL=https://pypi.org/simple -m pip install' in calls
+
+
+def test_install_falls_back_to_uv_when_pip_cannot_install(tmp_path):
+    result, calls = _run_install(tmp_path, pip_ok_without_mirror=False, with_uv=True)
+    assert result.returncode == 0, result.stderr
+    assert 'uv venv --clear --python 3.12' in calls
+    assert 'uv pip install' in calls
