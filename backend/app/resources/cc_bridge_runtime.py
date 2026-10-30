@@ -23,9 +23,19 @@ export LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONPATH=/opt/prt-cc-openai-bridge/so
 # 平台镜像已预装依赖：源码经 PYTHONPATH 加载，无需联网
 if [ -x /opt/prt-cc-openai-bridge/venv/bin/python ] && /opt/prt-cc-openai-bridge/venv/bin/python -c 'import cc_openai_bridge.app, uvicorn; from importlib.metadata import version; assert version("litellm") == "1.105.1"' >/dev/null 2>&1; then exit 0; fi
 export PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=8 UV_HTTP_TIMEOUT=300
-if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; assert (3,12) <= sys.version_info[:2] < (3,14)' >/dev/null 2>&1 && python3 -m venv /opt/prt-cc-openai-bridge/venv; then
-  /opt/prt-cc-openai-bridge/venv/bin/python -m pip install --no-cache-dir /opt/prt-cc-openai-bridge/source
-else
+# 题目基础镜像自带的 pip 源（/etc/pip.conf、PIP_INDEX_URL 等）可能没同步到 Bridge 锁定的版本，
+# 网络也可能一时抖动：每轮先用镜像默认源，再显式改走官方 PyPI；pip 不行再换 uv（uv 不读 pip.conf）。
+bridge_pip() {
+  py=/opt/prt-cc-openai-bridge/venv/bin/python
+  for attempt in 1 2 3; do
+    "$py" -m pip install --no-cache-dir /opt/prt-cc-openai-bridge/source && return 0
+    echo "PRT: pip 默认源安装 Bridge 失败（第 $attempt 次），改用官方 PyPI 重试" >&2
+    PIP_CONFIG_FILE=/dev/null PIP_INDEX_URL=https://pypi.org/simple PIP_EXTRA_INDEX_URL= "$py" -m pip install --no-cache-dir /opt/prt-cc-openai-bridge/source && return 0
+    sleep $((attempt * 5))
+  done
+  return 1
+}
+bridge_uv() {
   uv_bin=$(command -v uv || true)
   if [ -z "$uv_bin" ]; then
     curl -LsSf https://astral.sh/uv/install.sh -o /opt/prt-cc-openai-bridge/install-uv.sh
@@ -33,7 +43,18 @@ else
     uv_bin=/opt/prt-cc-openai-bridge/uv/uv
   fi
   "$uv_bin" venv --clear --python 3.12 /opt/prt-cc-openai-bridge/venv
-  "$uv_bin" pip install --python /opt/prt-cc-openai-bridge/venv/bin/python --no-cache /opt/prt-cc-openai-bridge/source
+  for attempt in 1 2 3; do
+    "$uv_bin" pip install --python /opt/prt-cc-openai-bridge/venv/bin/python --no-cache /opt/prt-cc-openai-bridge/source && return 0
+    UV_INDEX_URL= UV_EXTRA_INDEX_URL= "$uv_bin" pip install --python /opt/prt-cc-openai-bridge/venv/bin/python --no-cache --no-config --default-index https://pypi.org/simple /opt/prt-cc-openai-bridge/source && return 0
+    sleep $((attempt * 5))
+  done
+  return 1
+}
+if command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; assert (3,12) <= sys.version_info[:2] < (3,14)' >/dev/null 2>&1 && python3 -m venv /opt/prt-cc-openai-bridge/venv && bridge_pip; then
+  :
+else
+  echo "PRT: pip 安装 Bridge 未成功，改用 uv 建立独立的 Python 3.12 环境" >&2
+  bridge_uv
 fi
 /opt/prt-cc-openai-bridge/venv/bin/python -c 'import cc_openai_bridge; from importlib.metadata import version; assert version("litellm") == "1.105.1"'
 '''
